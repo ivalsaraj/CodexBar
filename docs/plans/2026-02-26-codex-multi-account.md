@@ -6,7 +6,7 @@
 
 **Architecture:** A new `codexOAuth` injection case is added to `TokenAccountInjection`. Codex is registered in `TokenAccountSupportCatalog+Data.swift`, unlocking the full existing account switcher UI. At switch time, the selected account's stored auth.json content is atomically written to `~/.codex/auth.json`. Parallel usage fetching for inactive accounts uses per-account temp `CODEX_HOME` directories to avoid file conflicts.
 
-**Tech Stack:** Swift 6, Swift Testing framework (`import Testing`), `FileManager.replaceItem(at:withItemAt:)` for atomic writes, existing `TokenAccountSupportCatalog` / `ProviderRegistry` / `UsageStore` infrastructure.
+**Tech Stack:** Swift 6, Swift Testing framework (`import Testing`), `Data.write(to:options:.atomic)` for create-or-overwrite atomic writes (handles first-write correctly), `FileManager.setAttributes([.posixPermissions:])` for 0600/0700 security hardening, existing `TokenAccountSupportCatalog` / `ProviderRegistry` / `UsageStore` infrastructure.
 
 ---
 
@@ -133,6 +133,40 @@ struct CodexOAuthAccountWriterTests {
         try CodexOAuthAccountWriter.write(jsonString: json, toCodexHome: tempDir)
         let authFile = tempDir.appendingPathComponent("auth.json")
         #expect(FileManager.default.fileExists(atPath: authFile.path))
+    }
+
+    @Test("write to nonexistent path succeeds — first import scenario")
+    func writeToNonExistentPath() throws {
+        // Destination dir does NOT exist — simulates first-time account import.
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nonexistent-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let json = """
+        {"tokens":{"access_token":"first_tok","refresh_token":"first_ref"}}
+        """
+        // Must not throw — Data.write(options:.atomic) handles create-or-overwrite.
+        try CodexOAuthAccountWriter.write(jsonString: json, toCodexHome: tempDir)
+
+        let authFile = tempDir.appendingPathComponent("auth.json")
+        #expect(FileManager.default.fileExists(atPath: authFile.path))
+    }
+
+    @Test("written auth.json has 0600 permissions")
+    func writeEnforces0600Permissions() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let json = """
+        {"tokens":{"access_token":"tok_abc","refresh_token":"ref_xyz"}}
+        """
+        try CodexOAuthAccountWriter.write(jsonString: json, toCodexHome: tempDir)
+
+        let authFile = tempDir.appendingPathComponent("auth.json")
+        let attrs = try FileManager.default.attributesOfItem(atPath: authFile.path)
+        let perms = attrs[.posixPermissions] as? Int ?? 0
+        #expect(perms == 0o600, "Expected 0600, got \(String(format: "%o", perms))")
     }
 
     @Test("write with invalid JSON throws before touching disk")
@@ -267,14 +301,24 @@ public enum CodexOAuthAccountWriter {
         let destination = codexHomeDir.appendingPathComponent("auth.json")
         let data = Data(jsonString.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
 
-        // Atomic write: write to a temp file alongside the target, then replace.
-        let tempFile = codexHomeDir.appendingPathComponent("auth.json.tmp-\(UUID().uuidString)")
+        // Atomic write: Data.write(options:.atomic) handles create-or-overwrite on first write,
+        // avoiding the replaceItemAt API which requires destination to already exist.
         do {
-            try data.write(to: tempFile, options: .atomic)
-            _ = try FileManager.default.replaceItemAt(destination, withItemAt: tempFile)
+            try data.write(to: destination, options: .atomic)
         } catch {
-            try? FileManager.default.removeItem(at: tempFile)
             throw CodexOAuthAccountWriterError.writeFailed(error.localizedDescription)
+        }
+
+        // Enforce 0600 permissions — auth tokens must not be world-readable.
+        // Propagate failure — do NOT use try? (silent failure contradicts the hardening goal).
+        // On macOS, setAttributes always succeeds for files we own and just created.
+        do {
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: destination.path)
+        } catch {
+            throw CodexOAuthAccountWriterError.writeFailed(
+                "Cannot set 0600 permissions on auth.json: \(error.localizedDescription)")
         }
     }
 }
@@ -410,7 +454,7 @@ case .cookieHeader:
     // ... claude oauth handling (unchanged) ...
     return nil
 case .codexOAuth:
-    // File write happens at switch time in SettingsStore.setActiveTokenAccountIndex.
+    // File write happens at switch time via CodexAccountSwitcher.switchToAccount().
     // For parallel fetching, ProviderRegistry.makeEnvironment handles temp CODEX_HOME.
     return nil
 }
@@ -418,17 +462,35 @@ case .codexOAuth:
 
 **Step 5: Register `.codex` in `TokenAccountSupportCatalog+Data.swift`**
 
-Add at the top of the `supportByProvider` dictionary (after the opening `[`):
+Add at the top of the `supportByProvider` dictionary (after the opening `[`). Include a `UserDefaults` kill switch so the feature can be disabled in the field without a rebuild:
 
 ```swift
-.codex: TokenAccountSupport(
-    title: "Codex accounts",
-    subtitle: "Paste the contents of ~/.codex/auth.json after each `codex login`.",
-    placeholder: "Paste auth.json contents… or use Import button",
-    injection: .codexOAuth,
-    requiresManualCookieSource: false,
-    cookieName: nil),
+// Kill switch: `defaults write <bundle-id> codexMultiAccountEnabled -bool NO` disables the feature.
+// Defaults to enabled. Allows rollback without a new release.
+.codex: UserDefaults.standard.object(forKey: "codexMultiAccountEnabled") as? Bool ?? true
+    ? TokenAccountSupport(
+        title: "Codex accounts",
+        subtitle: "Paste the contents of ~/.codex/auth.json after each `codex login`.",
+        placeholder: "Paste auth.json contents… or use Import button",
+        injection: .codexOAuth,
+        requiresManualCookieSource: false,
+        cookieName: nil)
+    : nil,
 ```
+
+> **Kill switch note:** The catalog is read at app startup. Changing `codexMultiAccountEnabled` via `defaults write` requires an **app restart** to take effect. Document this in internal ops runbooks if used for field rollback.
+>
+> **Note:** The `supportByProvider` value type must be `[UsageProvider: TokenAccountSupport?]` or simply omit the `.codex` key when disabled. If the dictionary type is `[UsageProvider: TokenAccountSupport]` (non-optional), use an `if` guard at the call site instead:
+>
+> ```swift
+> // In supportByProvider initializer — only register if kill switch is enabled:
+> if UserDefaults.standard.object(forKey: "codexMultiAccountEnabled") as? Bool ?? true {
+>     dict[.codex] = TokenAccountSupport(
+>         title: "Codex accounts", ...)
+> }
+> ```
+>
+> Use whichever matches the existing dictionary construction pattern in the file.
 
 **Step 6: Run tests — verify they pass**
 
@@ -565,6 +627,18 @@ public enum CodexOAuthTempHome {
     public static func make(jsonString: String, under base: URL) throws -> URL {
         let dir = base.appendingPathComponent(UUID().uuidString)
         try CodexOAuthAccountWriter.write(jsonString: jsonString, toCodexHome: dir)
+        // Restrict temp dir to owner-only access — auth tokens must not be world-readable.
+        // Propagate failure — do NOT use try? (silent failure contradicts the hardening goal).
+        do {
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: dir.path)
+        } catch {
+            // Clean up the dir we just created before propagating the error.
+            try? FileManager.default.removeItem(at: dir)
+            throw CodexOAuthAccountWriterError.writeFailed(
+                "Cannot set 0700 permissions on temp CODEX_HOME: \(error.localizedDescription)")
+        }
         return dir
     }
 
@@ -702,10 +776,13 @@ git commit -m "feat(codex): inject per-account temp CODEX_HOME for parallel usag
 ## Task 4: Write auth.json at switch time + launch cleanup
 
 **Files:**
-- Modify: `Sources/CodexBar/PreferencesProvidersPane.swift` (inside `tokenAccountDescriptor` `setActiveIndex` closure, lines 188–195)
+- Create: `Sources/CodexBar/Providers/Codex/CodexAccountSwitcher.swift` (**new** — domain layer for switch logic)
+- Modify: `Sources/CodexBar/PreferencesProvidersPane.swift` (delegate `setActiveIndex` to `CodexAccountSwitcher`)
 - Modify: `Sources/CodexBar/UsageStore+TokenAccounts.swift` (flush temp homes after `refreshTokenAccounts`)
 - Modify: `Sources/CodexBar/CodexbarApp.swift` (call `cleanupOnLaunch` at startup)
 - Create: `Tests/CodexBarTests/CodexAuthSwitchWriteTests.swift`
+
+> **Why a separate `CodexAccountSwitcher`:** Placing the write inside the UI closure (`PreferencesProvidersPane`) would mean any future switch trigger (CLI, keyboard shortcut, notifications) would bypass the write. Centralizing in a single domain method makes all switch paths identical and testable without UI.
 
 ---
 
@@ -716,7 +793,11 @@ Create `Tests/CodexBarTests/CodexAuthSwitchWriteTests.swift`:
 ```swift
 import Foundation
 import Testing
-@testable import CodexBarCore
+@testable import CodexBarCore  // for CodexOAuthAccountWriter, CodexOAuthTempHome
+@testable import CodexBar      // for CodexAccountSwitcher (app module — Sources/CodexBar/)
+
+// Note: If the test target does not yet list CodexBar as a dependency in Package.swift,
+// add it: .testTarget(name: "CodexBarTests", dependencies: ["CodexBarCore", "CodexBar"])
 
 @Suite("Codex auth.json switch-write integration")
 struct CodexAuthSwitchWriteTests {
@@ -764,20 +845,125 @@ struct CodexAuthSwitchWriteTests {
         let tokens = parsed?["tokens"] as? [String: Any]
         #expect(tokens?["access_token"] as? String == "original_tok")
     }
+
+    @Test("switchToAccount — write fails → advance closure NOT called")
+    func switchToAccount_writeFails_advanceNotCalled() throws {
+        // Tests CodexAccountSwitcher's internal testable overload (see implementation below).
+        // This directly proves: if write throws, the advance closure is never invoked.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codexbar-switch-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var advanceCalled = false
+
+        do {
+            try CodexAccountSwitcher.switchToAccount(
+                token: "not-valid-json",   // will fail validation → write throws
+                codexHome: dir,
+                advance: { advanceCalled = true })
+        } catch {
+            // Expected — write validation failed.
+        }
+
+        #expect(!advanceCalled, "advance must never be called when write throws")
+    }
+
+    @Test("temp-home cleanup is idempotent — double-cleanup does not throw")
+    func tempHomeCleanupIsIdempotent() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codexbar-idempotent-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let tempHome = try CodexOAuthTempHome.make(
+            jsonString: validJSON,
+            under: base)
+
+        // First cleanup
+        CodexOAuthTempHome.cleanup(tempHome)
+        #expect(!FileManager.default.fileExists(atPath: tempHome.path))
+
+        // Second cleanup on already-removed dir must not throw.
+        CodexOAuthTempHome.cleanup(tempHome)
+        // If we reach here without crashing, idempotence is confirmed.
+    }
 }
 ```
 
-**Step 2: Run tests — verify they pass** (these depend on Task 1, so should pass immediately)
+**Step 2: Run tests — verify they pass** (these depend on Task 1, so should pass immediately after Task 1 is done)
 
 ```bash
 swift test --filter CodexAuthSwitchWriteTests 2>&1 | tail -10
 ```
 
-**Step 3: Wire auth.json write into `setActiveIndex`**
+**Step 3: Create `CodexAccountSwitcher` — domain layer**
 
-In `Sources/CodexBar/PreferencesProvidersPane.swift`, the `setActiveIndex` closure (around line 188):
+Create `Sources/CodexBar/Providers/Codex/CodexAccountSwitcher.swift`:
 
 ```swift
+import CodexBarCore
+import Foundation
+
+/// Encapsulates all logic for switching the active Codex account.
+/// Centralised here so any future switch trigger (UI, CLI, notification) uses the same path.
+@MainActor
+enum CodexAccountSwitcher {
+
+    /// Switches to the Codex account at `index` in `settings`.
+    ///
+    /// **Ordering guarantee:** auth.json is written BEFORE `activeIndex` advances.
+    /// If the write fails, this method throws and the active index is NOT changed.
+    ///
+    /// - Parameters:
+    ///   - index:    The target account index (clamped to valid range).
+    ///   - settings: The shared settings store.
+    ///   - codexHome: The CODEX_HOME directory (defaults to `~/.codex`).
+    /// - Throws: `CodexOAuthAccountWriterError` if validation or write fails.
+    static func switchToAccount(
+        index: Int,
+        settings: SettingsStore,
+        codexHome: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+    ) throws {
+        let accounts = settings.tokenAccounts(for: .codex)
+        guard !accounts.isEmpty else { return }
+        let clamped = max(0, min(index, accounts.count - 1))
+        let token = accounts[clamped].token
+
+        // Delegates to the internal overload — write first, then advance.
+        try Self.switchToAccount(
+            token: token,
+            codexHome: codexHome,
+            advance: { settings.setActiveTokenAccountIndex(clamped, for: .codex) })
+    }
+
+    /// Internal testable overload — accepts an explicit `advance` closure.
+    /// Tests can pass a spy closure to verify advance is NOT called when write throws.
+    ///
+    /// - Parameters:
+    ///   - token:   The raw auth.json content to write.
+    ///   - codexHome: Target CODEX_HOME directory.
+    ///   - advance: Called only after a successful write (e.g. updates activeIndex).
+    /// - Throws: `CodexOAuthAccountWriterError` if write fails. `advance` is never called.
+    internal static func switchToAccount(
+        token: String,
+        codexHome: URL,
+        advance: () -> Void
+    ) throws {
+        // Write FIRST — if this throws, advance is NEVER called.
+        try CodexOAuthAccountWriter.write(jsonString: token, toCodexHome: codexHome)
+        // Write succeeded — now safe to advance.
+        advance()
+    }
+}
+```
+
+**Step 4: Wire `CodexAccountSwitcher` into `setActiveIndex` in `PreferencesProvidersPane.swift`**
+
+In `Sources/CodexBar/PreferencesProvidersPane.swift`, the `setActiveIndex` closure (around line 188). Add an `@State` error banner and delegate to `CodexAccountSwitcher`:
+
+```swift
+// Add to the view's @State properties:
+@State private var codexSwitchError: String? = nil
+
 // BEFORE:
 setActiveIndex: { index in
     self.settings.setActiveTokenAccountIndex(index, for: provider)
@@ -788,23 +974,24 @@ setActiveIndex: { index in
     }
 },
 
-// AFTER:
+// AFTER — for .codex with .codexOAuth injection, delegate to CodexAccountSwitcher:
 setActiveIndex: { index in
-    self.settings.setActiveTokenAccountIndex(index, for: provider)
-
-    // For Codex OAuth: write the selected account's auth.json immediately
-    // so the CLI, IDE extension, and Codex.app pick it up right away.
     if provider == .codex,
        case .codexOAuth = TokenAccountSupportCatalog.support(for: .codex)?.injection
     {
-        let accounts = self.settings.tokenAccounts(for: .codex)
-        let clamped = min(index, max(0, accounts.count - 1))
-        if clamped < accounts.count {
-            let token = accounts[clamped].token
-            let codexHome = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".codex")
-            try? CodexOAuthAccountWriter.write(jsonString: token, toCodexHome: codexHome)
+        do {
+            // Write-first: throws if auth.json cannot be written.
+            // On success, CodexAccountSwitcher also advances the activeIndex.
+            try CodexAccountSwitcher.switchToAccount(index: index, settings: self.settings)
+            self.codexSwitchError = nil
+        } catch {
+            // Write failed — activeIndex NOT advanced. Surface error to user.
+            self.codexSwitchError = error.localizedDescription
+            return  // Do not trigger refresh — account did not switch.
         }
+    } else {
+        // All other providers use the standard path.
+        self.settings.setActiveTokenAccountIndex(index, for: provider)
     }
 
     Task { @MainActor in
@@ -815,7 +1002,32 @@ setActiveIndex: { index in
 },
 ```
 
-**Step 4: Flush temp homes after each fetch cycle**
+Also add the error banner somewhere in the view body (near the Codex account switcher):
+
+```swift
+if let msg = codexSwitchError {
+    Text("Account switch failed: \(msg)")
+        .font(.footnote)
+        .foregroundStyle(.red)
+        .padding(.horizontal)
+}
+```
+
+**Step 5: Callsite audit — verify all `setActiveTokenAccountIndex` callsites are safe**
+
+```bash
+cd ~/Documents/projects/CodexBar
+rg -n "setActiveTokenAccountIndex" Sources/
+```
+
+Inspect EVERY line in the output. For each callsite:
+- If it is inside `CodexAccountSwitcher.switchToAccount()` → **expected, safe**.
+- If it is a direct call with `for: .codex` → **must migrate** to `CodexAccountSwitcher.switchToAccount()`.
+- If it is a generic call with `for: provider` where `provider` is a variable → **trace whether `provider` can be `.codex`** in that context. If yes → migrate.
+
+> **Why exhaustive:** A filter like `| grep -i codex` misses generic `for: provider` call patterns where `provider` is `.codex` at runtime. Only a full list + manual inspection closes this gap.
+
+**Step 6: Flush temp homes after each fetch cycle**
 
 In `Sources/CodexBar/UsageStore+TokenAccounts.swift`, at the end of `refreshTokenAccounts(provider:accounts:)`, before the final `if let selectedOutcome` block:
 
@@ -826,7 +1038,7 @@ await MainActor.run {
 }
 ```
 
-**Step 5: Cleanup stale temp dirs on launch**
+**Step 7: Cleanup stale temp dirs on launch**
 
 In `Sources/CodexBar/CodexbarApp.swift`, inside the app's `init()` or `onAppear`:
 
@@ -835,7 +1047,7 @@ In `Sources/CodexBar/CodexbarApp.swift`, inside the app's `init()` or `onAppear`
 CodexAccountEnvironment.cleanupOnLaunch()
 ```
 
-**Step 6: Run full test suite**
+**Step 8: Run full test suite**
 
 ```bash
 swift test 2>&1 | tail -20
@@ -843,10 +1055,11 @@ swift test 2>&1 | tail -20
 
 Expected: all passing.
 
-**Step 7: Commit**
+**Step 9: Commit**
 
 ```bash
-git add Sources/CodexBar/PreferencesProvidersPane.swift \
+git add Sources/CodexBar/Providers/Codex/CodexAccountSwitcher.swift \
+        Sources/CodexBar/PreferencesProvidersPane.swift \
         Sources/CodexBar/UsageStore+TokenAccounts.swift \
         Sources/CodexBar/CodexbarApp.swift \
         Tests/CodexBarTests/CodexAuthSwitchWriteTests.swift
@@ -1046,12 +1259,12 @@ git commit -m "feat(codex): add Import current login button in Preferences for C
 
 ---
 
-## Task 6: Input validation in the add-account UI
+## Task 6: Validation gates in the add-account UI *(collapsed from original Tasks 6+8)*
 
 **Files:**
-- Modify: `Sources/CodexBar/PreferencesProviderSettingsRows.swift` (inline validation on paste for `.codexOAuth`)
+- Modify: `Sources/CodexBar/PreferencesProviderSettingsRows.swift` (inline validation + 6-account limit for `.codexOAuth`)
 
-No new tests needed — `CodexOAuthAccountWriter.validate` is already covered. This is UI-only validation wiring.
+No new tests needed — `CodexOAuthAccountWriter.validate` and `limitedTokenAccounts` are already covered. This is UI-only wiring.
 
 ---
 
@@ -1076,11 +1289,29 @@ In `ProviderSettingsTokenAccountsRowView`, where the token text field lives, add
 }
 ```
 
-Show `tokenValidationError` as red `.footnote` text below the text field. Disable the Save/Add button when `tokenValidationError != nil && !newTokenText.isEmpty`.
+Show `tokenValidationError` as red `.footnote` text below the text field.
 
 (Add `@State private var tokenValidationError: String? = nil` to the view's state.)
 
-**Step 2: Build and smoke-test**
+**Step 2: Enforce 6-account limit for Codex**
+
+In the same view, disable the Add button at the limit (both validationError and atLimit must gate the button):
+
+```swift
+let atLimit = descriptor.accounts().count >= 6
+    && (TokenAccountSupportCatalog.support(for: descriptor.provider)?.injection == .some(.codexOAuth))
+
+Button("Add") { ... }
+    .disabled(newTokenText.isEmpty || tokenValidationError != nil || atLimit)
+
+if atLimit {
+    Text("Maximum 6 Codex accounts. Remove one to add another.")
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+}
+```
+
+**Step 3: Build and smoke-test**
 
 ```bash
 swift build 2>&1 | tail -20
@@ -1088,11 +1319,11 @@ swift build 2>&1 | tail -20
 
 Expected: clean build, no warnings about unhandled switch cases.
 
-**Step 3: Commit**
+**Step 4: Commit**
 
 ```bash
 git add Sources/CodexBar/PreferencesProviderSettingsRows.swift
-git commit -m "feat(codex): add inline validation for auth.json content in add-account UI"
+git commit -m "feat(codex): add inline validation and 6-account limit in add-account UI"
 ```
 
 ---
@@ -1100,7 +1331,9 @@ git commit -m "feat(codex): add inline validation for auth.json content in add-a
 ## Task 7: Edge case — keychain auth detection
 
 **Files:**
-- Modify: `Sources/CodexBar/Providers/Codex/CodexCurrentLoginImporter.swift` (already in Core — move if needed)
+- Modify: `Sources/CodexBarCore/Providers/Codex/CodexOAuth/CodexCurrentLoginImporter.swift`
+
+> **Note:** `CodexCurrentLoginImporter` lives in `Sources/CodexBarCore/Providers/Codex/CodexOAuth/` (not `Sources/CodexBar/`). The Core target contains all provider-specific logic; the app target contains UI wiring only.
 
 When `~/.codex/auth.json` is missing because `cli_auth_credentials_store = "keyring"`, the Import button must show a helpful message rather than a generic "not found" error.
 
@@ -1150,49 +1383,7 @@ git commit -m "fix(codex): improve auth.json-absent error to guide keychain user
 
 ---
 
-## Task 8: Edge case — account limit enforcement
-
-**Files:**
-- Modify: `Sources/CodexBar/PreferencesProviderSettingsRows.swift` (disable Add when 6 accounts exist for Codex)
-
-No new tests — existing `limitedTokenAccounts` (max 6) is already tested.
-
----
-
-**Step 1: Disable Add button at limit**
-
-In `ProviderSettingsTokenAccountsRowView`, the Add/Save button should be disabled when the account count is at the limit for Codex:
-
-```swift
-let atLimit = descriptor.accounts().count >= 6
-    && (TokenAccountSupportCatalog.support(for: descriptor.provider)?.injection == .some(.codexOAuth))
-
-Button("Add") { ... }
-    .disabled(newTokenText.isEmpty || tokenValidationError != nil || atLimit)
-
-if atLimit {
-    Text("Maximum 6 Codex accounts. Remove one to add another.")
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-}
-```
-
-**Step 2: Build**
-
-```bash
-swift build 2>&1 | tail -10
-```
-
-**Step 3: Commit**
-
-```bash
-git add Sources/CodexBar/PreferencesProviderSettingsRows.swift
-git commit -m "feat(codex): enforce 6-account limit with helpful message in add-account UI"
-```
-
----
-
-## Task 9: Final integration — build, run, smoke test
+## Task 8: Final integration — build, run, smoke test
 
 **Step 1: Run the full test suite**
 
@@ -1239,12 +1430,12 @@ git commit -m "feat(codex): complete multi-account support — import, switch, v
 | # | Scenario | Handled in Task |
 |---|---|---|
 | Expired tokens in stored account | UI shows fetch error; user must re-import | Task 1 (validation) |
-| auth.json write failure | `write()` throws → switch not applied, activeIndex unchanged | Task 1 |
+| auth.json write failure | `CodexAccountSwitcher.switchToAccount` throws → activeIndex NOT advanced; error banner shown in UI | Task 4 |
 | Invalid/malformed JSON in token store | Blocked at add-time with inline error | Task 6 |
 | External `codex login` overwrites auth.json | No conflict — stored accounts unaffected | Task 4 |
 | App crash → stale temp dirs | `cleanupOnLaunch()` removes `~/.codex-bar-tmp` | Task 3 |
 | Concurrent switch during fetch | Temp dirs isolate fetches; switch completes immediately | Task 3 |
 | Keychain-stored credentials (no auth.json) | Import shows config.toml guidance | Task 7 |
-| 6-account limit | Add button disabled with message | Task 8 |
+| 6-account limit | Add button disabled with message | Task 6 |
 | Single account | Switcher UI not shown (existing behavior) | n/a |
 | Active account reconciliation on launch | File write only on explicit switch, not on startup | Task 4 |
