@@ -144,6 +144,7 @@ final class UsageStore {
     var lastSourceLabels: [UsageProvider: String] = [:]
     var lastFetchAttempts: [UsageProvider: [ProviderFetchAttempt]] = [:]
     var accountSnapshots: [UsageProvider: [TokenAccountUsageSnapshot]] = [:]
+    var tokenAccountSnapshotCache: [UsageProvider: [UUID: UsageSnapshot]] = [:]
     var tokenSnapshots: [UsageProvider: CostUsageTokenSnapshot] = [:]
     var tokenErrors: [UsageProvider: String] = [:]
     var tokenRefreshInFlight: Set<UsageProvider> = []
@@ -185,6 +186,7 @@ final class UsageStore {
     @ObservationIgnored var failureGates: [UsageProvider: ConsecutiveFailureGate] = [:]
     @ObservationIgnored var tokenFailureGates: [UsageProvider: ConsecutiveFailureGate] = [:]
     @ObservationIgnored var providerSpecs: [UsageProvider: ProviderSpec] = [:]
+    @ObservationIgnored var providerRefreshGenerations: [UsageProvider: Int] = [:]
     @ObservationIgnored let providerMetadata: [UsageProvider: ProviderMetadata]
     @ObservationIgnored var providerRuntimes: [UsageProvider: any ProviderRuntime] = [:]
     @ObservationIgnored private var timerTask: Task<Void, Never>?

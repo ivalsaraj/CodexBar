@@ -18,18 +18,23 @@ struct CodexLoginRunner {
 
     static func run(timeout: TimeInterval = 120) async -> Result {
         await Task(priority: .userInitiated) {
-            var env = ProcessInfo.processInfo.environment
-            env["PATH"] = PathBuilder.effectivePATH(
-                purposes: [.rpc, .tty, .nodeTooling],
-                env: env,
-                loginPATH: LoginShellPathCache.shared.current)
+            let loginPATH = LoginShellPathCache.shared.current
+            var env = self.buildLoginEnvironment(
+                baseEnv: ProcessInfo.processInfo.environment,
+                loginPATH: loginPATH,
+                resolvedExecutable: nil)
 
             guard let executable = BinaryLocator.resolveCodexBinary(
                 env: env,
-                loginPATH: LoginShellPathCache.shared.current)
+                loginPATH: loginPATH)
             else {
                 return Result(outcome: .missingBinary, output: "")
             }
+
+            env = self.buildLoginEnvironment(
+                baseEnv: env,
+                loginPATH: loginPATH,
+                resolvedExecutable: executable)
 
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -65,6 +70,39 @@ struct CodexLoginRunner {
             }
             return Result(outcome: .failed(status: status), output: output)
         }.value
+    }
+
+    static func buildLoginEnvironment(
+        baseEnv: [String: String],
+        loginPATH: [String]?,
+        resolvedExecutable: String?) -> [String: String]
+    {
+        var env = baseEnv
+        let effective = PathBuilder.effectivePATH(
+            purposes: [.rpc, .tty, .nodeTooling],
+            env: baseEnv,
+            loginPATH: loginPATH)
+
+        if let resolvedExecutable {
+            let executableDirectory = URL(fileURLWithPath: resolvedExecutable)
+                .deletingLastPathComponent()
+                .path
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !executableDirectory.isEmpty {
+                env["PATH"] = self.prependingPathEntry(executableDirectory, to: effective)
+                return env
+            }
+        }
+
+        env["PATH"] = effective
+        return env
+    }
+
+    private static func prependingPathEntry(_ entry: String, to path: String) -> String {
+        let parts = path.split(separator: ":").map(String.init)
+        var deduped = [entry]
+        deduped.append(contentsOf: parts.filter { $0 != entry && !$0.isEmpty })
+        return deduped.joined(separator: ":")
     }
 
     private static func wait(for process: Process, timeout: TimeInterval) async -> Bool {

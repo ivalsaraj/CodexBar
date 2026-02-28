@@ -9,6 +9,7 @@ extension UsageStore {
 
     func refreshProvider(_ provider: UsageProvider, allowDisabled: Bool = false) async {
         guard let spec = self.providerSpecs[provider] else { return }
+        let refreshGeneration = self.beginProviderRefreshGeneration(for: provider)
 
         if !spec.isEnabled(), !allowDisabled {
             self.refreshingProviders.remove(provider)
@@ -26,6 +27,7 @@ extension UsageStore {
                 self.lastKnownSessionRemaining.removeValue(forKey: provider)
                 self.lastKnownSessionWindowSource.removeValue(forKey: provider)
                 self.lastTokenFetchAt.removeValue(forKey: provider)
+                self.tokenAccountSnapshotCache.removeValue(forKey: provider)
             }
             return
         }
@@ -35,7 +37,10 @@ extension UsageStore {
 
         let tokenAccounts = self.tokenAccounts(for: provider)
         if self.shouldFetchAllTokenAccounts(provider: provider, accounts: tokenAccounts) {
-            await self.refreshTokenAccounts(provider: provider, accounts: tokenAccounts)
+            await self.refreshTokenAccounts(
+                provider: provider,
+                accounts: tokenAccounts,
+                refreshGeneration: refreshGeneration)
             return
         } else {
             _ = await MainActor.run {
@@ -55,6 +60,8 @@ extension UsageStore {
             }
             return await group.next()!
         }
+        guard self.isLatestProviderRefreshGeneration(refreshGeneration, for: provider) else { return }
+
         if provider == .claude,
            ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged()
         {
@@ -71,6 +78,8 @@ extension UsageStore {
                 self.lastTokenFetchAt.removeValue(forKey: .claude)
             }
         }
+        guard self.isLatestProviderRefreshGeneration(refreshGeneration, for: provider) else { return }
+
         await MainActor.run {
             self.lastFetchAttempts[provider] = outcome.attempts
         }
@@ -78,12 +87,24 @@ extension UsageStore {
         switch outcome.result {
         case let .success(result):
             let scoped = result.usage.scoped(to: provider)
+            let selectedAccount = self.settings.selectedTokenAccount(for: provider)
+            let displaySnapshot: UsageSnapshot = if let selectedAccount {
+                self.applyAccountLabel(scoped, provider: provider, account: selectedAccount)
+            } else {
+                scoped
+            }
             await MainActor.run {
-                self.handleSessionQuotaTransition(provider: provider, snapshot: scoped)
-                self.snapshots[provider] = scoped
+                self.handleSessionQuotaTransition(provider: provider, snapshot: displaySnapshot)
+                self.snapshots[provider] = displaySnapshot
                 self.lastSourceLabels[provider] = result.sourceLabel
                 self.errors[provider] = nil
                 self.failureGates[provider]?.recordSuccess()
+                if let selectedAccount {
+                    self.cacheTokenAccountSnapshot(
+                        displaySnapshot,
+                        for: provider,
+                        accountID: selectedAccount.id)
+                }
             }
             if let runtime = self.providerRuntimes[provider] {
                 let context = ProviderRuntimeContext(
@@ -109,5 +130,15 @@ extension UsageStore {
                 runtime.providerDidFail(context: context, provider: provider, error: error)
             }
         }
+    }
+
+    func beginProviderRefreshGeneration(for provider: UsageProvider) -> Int {
+        let next = (self.providerRefreshGenerations[provider] ?? 0) + 1
+        self.providerRefreshGenerations[provider] = next
+        return next
+    }
+
+    func isLatestProviderRefreshGeneration(_ generation: Int, for provider: UsageProvider) -> Bool {
+        self.providerRefreshGenerations[provider] == generation
     }
 }

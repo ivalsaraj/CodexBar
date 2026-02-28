@@ -105,4 +105,86 @@ struct StatusItemControllerMenuTests {
             snapshot: snapshot))
         #expect(snapshot.primary?.usedPercent == 10)
     }
+
+    @Test
+    func tokenAccountSelectedIndexPrefersPreviewSelectionWhenPresent() {
+        let first = ProviderTokenAccount(
+            id: UUID(),
+            label: "first",
+            token: "a",
+            addedAt: 0,
+            lastUsed: nil)
+        let second = ProviderTokenAccount(
+            id: UUID(),
+            label: "second",
+            token: "b",
+            addedAt: 0,
+            lastUsed: nil)
+
+        let selected = StatusItemController.resolvedTokenAccountSelectedIndex(
+            accounts: [first, second],
+            activeIndex: 0,
+            previewSelectionID: second.id)
+
+        #expect(selected == 1)
+    }
+
+    @Test
+    func tokenAccountSelectedIndexFallsBackToActiveWhenPreviewMissing() {
+        let first = ProviderTokenAccount(
+            id: UUID(),
+            label: "first",
+            token: "a",
+            addedAt: 0,
+            lastUsed: nil)
+        let second = ProviderTokenAccount(
+            id: UUID(),
+            label: "second",
+            token: "b",
+            addedAt: 0,
+            lastUsed: nil)
+
+        let selected = StatusItemController.resolvedTokenAccountSelectedIndex(
+            accounts: [first, second],
+            activeIndex: 1,
+            previewSelectionID: UUID())
+
+        #expect(selected == 1)
+    }
+
+    @Test
+    func tokenAccountSessionBadgeShownWhenWeeklyRemainingIsPositive() {
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 58, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            secondary: RateWindow(usedPercent: 20, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            tertiary: nil,
+            updatedAt: Date())
+
+        let badge = StatusItemController.tokenAccountSessionBadgeText(for: .codex, snapshot: snapshot)
+        #expect(badge == "42%")
+    }
+
+    @Test
+    func tokenAccountSessionBadgeHiddenWhenWeeklyRemainingIsDepleted() {
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 10, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            secondary: RateWindow(usedPercent: 100, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            tertiary: nil,
+            updatedAt: Date())
+
+        let badge = StatusItemController.tokenAccountSessionBadgeText(for: .codex, snapshot: snapshot)
+        #expect(badge == nil)
+    }
+
+    @Test
+    func tokenAccountSessionBadgeHiddenWhenWeeklyWindowMissing() {
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 10, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            secondary: nil,
+            tertiary: nil,
+            updatedAt: Date())
+
+        let badge = StatusItemController.tokenAccountSessionBadgeText(for: .codex, snapshot: snapshot)
+        #expect(badge == nil)
+    }
 }

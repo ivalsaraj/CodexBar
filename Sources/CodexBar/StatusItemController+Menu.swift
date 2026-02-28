@@ -54,16 +54,7 @@ extension StatusItemController {
         let hasCostHistory: Bool
     }
 
-    private struct TokenAccountMenuDisplay {
-        let provider: UsageProvider
-        let accounts: [ProviderTokenAccount]
-        let snapshots: [TokenAccountUsageSnapshot]
-        let activeIndex: Int
-        let showAll: Bool
-        let showSwitcher: Bool
-    }
-
-    private func menuCardWidth(for providers: [UsageProvider], menu: NSMenu? = nil) -> CGFloat {
+    func menuCardWidth(for providers: [UsageProvider], menu: NSMenu? = nil) -> CGFloat {
         _ = menu
         return Self.menuCardBaseWidth
     }
@@ -123,6 +114,7 @@ extension StatusItemController {
 
     func menuDidClose(_ menu: NSMenu) {
         let key = ObjectIdentifier(menu)
+        let provider = self.menuProvider(for: menu)
 
         self.openMenus.removeValue(forKey: key)
         self.menuRefreshTasks.removeValue(forKey: key)?.cancel()
@@ -137,6 +129,15 @@ extension StatusItemController {
         for menuItem in menu.items {
             (menuItem.view as? MenuCardHighlighting)?.setHighlighted(false)
         }
+
+        if let provider {
+            self.tokenAccountPreviewTasks[provider]?.cancel()
+            self.tokenAccountPreviewTasks[provider] = nil
+            self.tokenAccountPreviewInFlight.remove(provider)
+            self.tokenAccountPreviewSelection.removeValue(forKey: provider)
+            self.tokenAccountSwitchSnapshotOverrides.removeValue(forKey: provider)
+            self.tokenAccountSwitchErrors.removeValue(forKey: provider)
+        }
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
@@ -146,7 +147,7 @@ extension StatusItemController {
         }
     }
 
-    private func populateMenu(_ menu: NSMenu, provider: UsageProvider?) {
+    func populateMenu(_ menu: NSMenu, provider: UsageProvider?) {
         let enabledProviders = self.store.enabledProviders()
         let includesOverview = self.includesOverviewTab(enabledProviders: enabledProviders)
         let switcherSelection = self.shouldMergeIcons && enabledProviders.count > 1
@@ -342,13 +343,6 @@ extension StatusItemController {
             includesOverview: includesOverview,
             selected: selection,
             menu: menu)
-        menu.addItem(switcherItem)
-        menu.addItem(.separator())
-    }
-
-    private func addTokenAccountSwitcherIfNeeded(to menu: NSMenu, display: TokenAccountMenuDisplay?) {
-        guard let display, display.showSwitcher else { return }
-        let switcherItem = self.makeTokenAccountSwitcherItem(display: display, menu: menu)
         menu.addItem(switcherItem)
         menu.addItem(.separator())
     }
@@ -591,32 +585,6 @@ extension StatusItemController {
         return item
     }
 
-    private func makeTokenAccountSwitcherItem(
-        display: TokenAccountMenuDisplay,
-        menu: NSMenu) -> NSMenuItem
-    {
-        let view = TokenAccountSwitcherView(
-            accounts: display.accounts,
-            selectedIndex: display.activeIndex,
-            width: self.menuCardWidth(for: self.store.enabledProviders(), menu: menu),
-            onSelect: { [weak self, weak menu] index in
-                guard let self, let menu else { return }
-                self.settings.setActiveTokenAccountIndex(index, for: display.provider)
-                Task { @MainActor in
-                    await ProviderInteractionContext.$current.withValue(.userInitiated) {
-                        await self.store.refresh()
-                    }
-                }
-                self.populateMenu(menu, provider: display.provider)
-                self.markMenuFresh(menu)
-                self.applyIcon(phase: nil)
-            })
-        let item = NSMenuItem()
-        item.view = view
-        item.isEnabled = false
-        return item
-    }
-
     private func resolvedMenuProvider(enabledProviders: [UsageProvider]? = nil) -> UsageProvider? {
         let enabled = enabledProviders ?? self.store.enabledProviders()
         if enabled.isEmpty { return .codex }
@@ -642,28 +610,12 @@ extension StatusItemController {
         return .provider(self.resolvedMenuProvider(enabledProviders: enabledProviders) ?? .codex)
     }
 
-    private func tokenAccountMenuDisplay(for provider: UsageProvider) -> TokenAccountMenuDisplay? {
-        guard TokenAccountSupportCatalog.support(for: provider) != nil else { return nil }
-        let accounts = self.settings.tokenAccounts(for: provider)
-        guard accounts.count > 1 else { return nil }
-        let activeIndex = self.settings.tokenAccountsData(for: provider)?.clampedActiveIndex() ?? 0
-        let showAll = self.settings.showAllTokenAccountsInMenu
-        let snapshots = showAll ? (self.store.accountSnapshots[provider] ?? []) : []
-        return TokenAccountMenuDisplay(
-            provider: provider,
-            accounts: accounts,
-            snapshots: snapshots,
-            activeIndex: activeIndex,
-            showAll: showAll,
-            showSwitcher: !showAll)
-    }
-
     private func menuNeedsRefresh(_ menu: NSMenu) -> Bool {
         let key = ObjectIdentifier(menu)
         return self.menuVersions[key] != self.menuContentVersion
     }
 
-    private func markMenuFresh(_ menu: NSMenu) {
+    func markMenuFresh(_ menu: NSMenu) {
         let key = ObjectIdentifier(menu)
         self.menuVersions[key] = self.menuContentVersion
     }
@@ -982,6 +934,29 @@ extension StatusItemController {
         let window = snapshot?.switcherWeeklyWindow(for: provider, showUsed: showUsed)
         guard let window else { return nil }
         return showUsed ? window.usedPercent : window.remainingPercent
+    }
+
+    nonisolated static func resolvedTokenAccountSelectedIndex(
+        accounts: [ProviderTokenAccount],
+        activeIndex: Int,
+        previewSelectionID: UUID?) -> Int
+    {
+        guard !accounts.isEmpty else { return 0 }
+        let clampedActive = min(max(activeIndex, 0), accounts.count - 1)
+        guard let previewSelectionID else { return clampedActive }
+        return accounts.firstIndex(where: { $0.id == previewSelectionID }) ?? clampedActive
+    }
+
+    nonisolated static func tokenAccountSessionBadgeText(
+        for provider: UsageProvider,
+        snapshot: UsageSnapshot?) -> String?
+    {
+        _ = provider
+        guard let snapshot else { return nil }
+        guard let weeklyRemaining = snapshot.secondary?.remainingPercent, weeklyRemaining > 0 else { return nil }
+        guard let sessionRemaining = snapshot.primary?.remainingPercent else { return nil }
+        let clamped = max(0, min(100, sessionRemaining))
+        return "\(Int(clamped.rounded()))%"
     }
 
     private func switcherWeeklyRemaining(for provider: UsageProvider) -> Double? {
@@ -1362,22 +1337,26 @@ extension StatusItemController {
     {
         let target = provider ?? self.store.enabledProviders().first ?? .codex
         let metadata = self.store.metadata(for: target)
+        let accountSwitchInFlight = self.tokenAccountSwitchInFlight.contains(target) ||
+            self.tokenAccountPreviewInFlight.contains(target)
 
-        let snapshot = snapshotOverride ?? self.store.snapshot(for: target)
+        let snapshot = snapshotOverride ??
+            self.tokenAccountSwitchSnapshotOverrides[target] ??
+            (accountSwitchInFlight ? nil : self.store.snapshot(for: target))
         let credits: CreditsSnapshot?
         let creditsError: String?
         let dashboard: OpenAIDashboardSnapshot?
         let dashboardError: String?
         let tokenSnapshot: CostUsageTokenSnapshot?
         let tokenError: String?
-        if target == .codex, snapshotOverride == nil {
+        if target == .codex, snapshotOverride == nil, !accountSwitchInFlight {
             credits = self.store.credits
             creditsError = self.store.lastCreditsError
             dashboard = self.store.openAIDashboardRequiresLogin ? nil : self.store.openAIDashboard
             dashboardError = self.store.lastOpenAIDashboardError
             tokenSnapshot = self.store.tokenSnapshot(for: target)
             tokenError = self.store.tokenError(for: target)
-        } else if target == .claude || target == .vertexai, snapshotOverride == nil {
+        } else if target == .claude || target == .vertexai, snapshotOverride == nil, !accountSwitchInFlight {
             credits = nil
             creditsError = nil
             dashboard = nil
@@ -1404,13 +1383,14 @@ extension StatusItemController {
             tokenSnapshot: tokenSnapshot,
             tokenError: tokenError,
             account: self.account,
-            isRefreshing: self.store.isRefreshing,
-            lastError: errorOverride ?? self.store.error(for: target),
+            isRefreshing: self.store.isRefreshing || accountSwitchInFlight,
+            lastError: self.tokenAccountSwitchErrors[target] ?? errorOverride ?? self.store.error(for: target),
             usageBarsShowUsed: self.settings.usageBarsShowUsed,
             resetTimeDisplayStyle: self.settings.resetTimeDisplayStyle,
             tokenCostUsageEnabled: self.settings.isCostUsageEffectivelyEnabled(for: target),
             showOptionalCreditsAndExtraUsage: self.settings.showOptionalCreditsAndExtraUsage,
             hidePersonalInfo: self.settings.hidePersonalInfo,
+            forceLoadingSubtitle: accountSwitchInFlight,
             now: Date())
         return UsageMenuCardView.Model.make(input)
     }

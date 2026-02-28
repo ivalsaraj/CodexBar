@@ -313,6 +313,50 @@ struct MenuCardModelTests {
     }
 
     @Test
+    func showsLoadingSubtitleWhileSwitchingAccountsEvenWhenSnapshotExists() throws {
+        let now = Date()
+        let metadata = try #require(ProviderDefaults.metadata[.codex])
+        let identity = ProviderIdentitySnapshot(
+            providerID: .codex,
+            accountEmail: "first@example.com",
+            accountOrganization: nil,
+            loginMethod: nil)
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(
+                usedPercent: 35,
+                windowMinutes: 300,
+                resetsAt: now.addingTimeInterval(600),
+                resetDescription: nil),
+            secondary: nil,
+            tertiary: nil,
+            updatedAt: now,
+            identity: identity)
+        let model = UsageMenuCardView.Model.make(.init(
+            provider: .codex,
+            metadata: metadata,
+            snapshot: snapshot,
+            credits: nil,
+            creditsError: nil,
+            dashboard: nil,
+            dashboardError: nil,
+            tokenSnapshot: nil,
+            tokenError: nil,
+            account: AccountInfo(email: nil, plan: nil),
+            isRefreshing: false,
+            lastError: nil,
+            usageBarsShowUsed: false,
+            resetTimeDisplayStyle: .countdown,
+            tokenCostUsageEnabled: false,
+            showOptionalCreditsAndExtraUsage: true,
+            hidePersonalInfo: false,
+            forceLoadingSubtitle: true,
+            now: now))
+
+        #expect(model.subtitleStyle == .loading)
+        #expect(model.subtitleText == "Loading account...")
+    }
+
+    @Test
     func hidesCodexCreditsWhenDisabled() throws {
         let now = Date()
         let identity = ProviderIdentitySnapshot(

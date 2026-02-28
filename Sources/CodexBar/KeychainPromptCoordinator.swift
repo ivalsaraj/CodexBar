@@ -131,6 +131,11 @@ enum KeychainPromptCoordinator {
 
     @MainActor
     private static func showAlert(title: String, message: String) {
+        // If a menu/picker is still tracking when we trigger keychain access (for example account switcher taps),
+        // keyboard events can stay captured by the menu and the system password prompt appears focused but won't type.
+        // Cancel tracking first so the upcoming keychain dialog receives input normally.
+        NSApp.sendAction(#selector(NSMenu.cancelTracking), to: nil, from: nil)
+
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message

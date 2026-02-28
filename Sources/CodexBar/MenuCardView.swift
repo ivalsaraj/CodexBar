@@ -633,7 +633,50 @@ extension UsageMenuCardView.Model {
         let tokenCostUsageEnabled: Bool
         let showOptionalCreditsAndExtraUsage: Bool
         let hidePersonalInfo: Bool
+        let forceLoadingSubtitle: Bool
         let now: Date
+
+        init(
+            provider: UsageProvider,
+            metadata: ProviderMetadata,
+            snapshot: UsageSnapshot?,
+            credits: CreditsSnapshot?,
+            creditsError: String?,
+            dashboard: OpenAIDashboardSnapshot?,
+            dashboardError: String?,
+            tokenSnapshot: CostUsageTokenSnapshot?,
+            tokenError: String?,
+            account: AccountInfo,
+            isRefreshing: Bool,
+            lastError: String?,
+            usageBarsShowUsed: Bool,
+            resetTimeDisplayStyle: ResetTimeDisplayStyle,
+            tokenCostUsageEnabled: Bool,
+            showOptionalCreditsAndExtraUsage: Bool,
+            hidePersonalInfo: Bool,
+            forceLoadingSubtitle: Bool = false,
+            now: Date)
+        {
+            self.provider = provider
+            self.metadata = metadata
+            self.snapshot = snapshot
+            self.credits = credits
+            self.creditsError = creditsError
+            self.dashboard = dashboard
+            self.dashboardError = dashboardError
+            self.tokenSnapshot = tokenSnapshot
+            self.tokenError = tokenError
+            self.account = account
+            self.isRefreshing = isRefreshing
+            self.lastError = lastError
+            self.usageBarsShowUsed = usageBarsShowUsed
+            self.resetTimeDisplayStyle = resetTimeDisplayStyle
+            self.tokenCostUsageEnabled = tokenCostUsageEnabled
+            self.showOptionalCreditsAndExtraUsage = showOptionalCreditsAndExtraUsage
+            self.hidePersonalInfo = hidePersonalInfo
+            self.forceLoadingSubtitle = forceLoadingSubtitle
+            self.now = now
+        }
     }
 
     static func make(_ input: Input) -> UsageMenuCardView.Model {
@@ -664,6 +707,7 @@ extension UsageMenuCardView.Model {
         let subtitle = Self.subtitle(
             snapshot: input.snapshot,
             isRefreshing: input.isRefreshing,
+            forceLoading: input.forceLoadingSubtitle,
             lastError: input.lastError)
         let redacted = Self.redactedText(input: input, subtitle: subtitle)
         let placeholder = input.snapshot == nil && !input.isRefreshing && input.lastError == nil ? "No usage yet" : nil
@@ -744,8 +788,13 @@ extension UsageMenuCardView.Model {
     private static func subtitle(
         snapshot: UsageSnapshot?,
         isRefreshing: Bool,
+        forceLoading: Bool,
         lastError: String?) -> (text: String, style: SubtitleStyle)
     {
+        if forceLoading {
+            return ("Loading account...", .loading)
+        }
+
         if let lastError, !lastError.isEmpty {
             return (lastError.trimmingCharacters(in: .whitespacesAndNewlines), .error)
         }

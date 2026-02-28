@@ -1,3 +1,4 @@
+import CodexBarCore
 import SwiftUI
 
 struct ProviderSettingsSection<Content: View>: View {
@@ -205,6 +206,8 @@ struct ProviderSettingsTokenAccountsRowView: View {
     let descriptor: ProviderSettingsTokenAccountsDescriptor
     @State private var newLabel: String = ""
     @State private var newToken: String = ""
+    @State private var importErrorMessage: String?
+    @State private var tokenValidationError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -219,6 +222,15 @@ struct ProviderSettingsTokenAccountsRowView: View {
             }
 
             let accounts = self.descriptor.accounts()
+            let supportsCodexOAuth: Bool = {
+                guard let injection = TokenAccountSupportCatalog.support(for: self.descriptor.provider)?.injection
+                else {
+                    return false
+                }
+                if case .codexOAuth = injection { return true }
+                return false
+            }()
+            let atLimit = supportsCodexOAuth && accounts.count >= 6
             if accounts.isEmpty {
                 Text("No token accounts yet.")
                     .font(.footnote)
@@ -252,6 +264,9 @@ struct ProviderSettingsTokenAccountsRowView: View {
                 SecureField(self.descriptor.placeholder, text: self.$newToken)
                     .textFieldStyle(.roundedBorder)
                     .font(.footnote)
+                    .onChange(of: self.newToken) { _, newValue in
+                        self.validateTokenInput(newValue, supportsCodexOAuth: supportsCodexOAuth)
+                    }
                 Button("Add") {
                     let label = self.newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
                     let token = self.newToken.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -259,11 +274,49 @@ struct ProviderSettingsTokenAccountsRowView: View {
                     self.descriptor.addAccount(label, token)
                     self.newLabel = ""
                     self.newToken = ""
+                    self.importErrorMessage = nil
+                    self.tokenValidationError = nil
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(self.newLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                    self.newToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    self.newToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    self.tokenValidationError != nil ||
+                    atLimit)
+            }
+
+            if let tokenValidationError {
+                Text(tokenValidationError)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+
+            if atLimit {
+                Text("Maximum 6 Codex accounts. Remove one to add another.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let importCurrentToken = self.descriptor.importCurrentToken {
+                HStack(spacing: 8) {
+                    Button("Import current login") {
+                        switch importCurrentToken() {
+                        case let .success(json):
+                            self.newToken = json
+                            self.importErrorMessage = nil
+                        case let .failure(error):
+                            self.importErrorMessage = error.localizedDescription
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Reads ~/.codex/auth.json from your active `codex login` session")
+                }
+                if let importErrorMessage {
+                    Text(importErrorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
             }
 
             HStack(spacing: 10) {
@@ -278,6 +331,26 @@ struct ProviderSettingsTokenAccountsRowView: View {
                 .buttonStyle(.link)
                 .controlSize(.small)
             }
+        }
+    }
+
+    private func validateTokenInput(_ value: String, supportsCodexOAuth: Bool) {
+        guard supportsCodexOAuth else {
+            self.tokenValidationError = nil
+            return
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            self.tokenValidationError = nil
+            return
+        }
+        do {
+            try CodexOAuthAccountWriter.validate(jsonString: value)
+            self.tokenValidationError = nil
+        } catch let error as CodexOAuthAccountWriterError {
+            self.tokenValidationError = error.errorDescription
+        } catch {
+            self.tokenValidationError = error.localizedDescription
         }
     }
 }

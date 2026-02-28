@@ -4,6 +4,22 @@ import Testing
 
 @Suite
 struct CodexOAuthTests {
+    private func makeContext(env: [String: String]) -> ProviderFetchContext {
+        let browserDetection = BrowserDetection(cacheTTL: 0)
+        return ProviderFetchContext(
+            runtime: .app,
+            sourceMode: .oauth,
+            includeCredits: false,
+            webTimeout: 60,
+            webDebugDumpHTML: false,
+            verbose: false,
+            env: env,
+            settings: nil,
+            fetcher: UsageFetcher(),
+            claudeFetcher: ClaudeUsageFetcher(browserDetection: browserDetection),
+            browserDetection: browserDetection)
+    }
+
     @Test
     func parsesOAuthCredentials() throws {
         let json = """
@@ -118,5 +134,54 @@ struct CodexOAuthTests {
         let config = "chatgpt_base_url = \"https://chat.openai.com\"\n"
         let url = CodexOAuthUsageFetcher._resolveUsageURLForTesting(configContents: config)
         #expect(url.absoluteString == "https://chat.openai.com/backend-api/wham/usage")
+    }
+
+    @Test
+    func credentialsStoreLoadRespectsProvidedCodexHomeEnv() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-oauth-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+
+        let json = """
+        {
+          "tokens": {
+            "access_token": "preview-access-token",
+            "refresh_token": "preview-refresh-token"
+          }
+        }
+        """
+        try Data(json.utf8).write(to: tempRoot.appendingPathComponent("auth.json"), options: .atomic)
+
+        let creds = try CodexOAuthCredentialsStore.load(env: ["CODEX_HOME": tempRoot.path])
+        #expect(creds.accessToken == "preview-access-token")
+        #expect(creds.refreshToken == "preview-refresh-token")
+    }
+
+    @Test
+    func codexOAuthStrategyAvailabilityUsesContextEnv() async throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-oauth-strategy-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+
+        let json = """
+        {
+          "tokens": {
+            "access_token": "strategy-access-token",
+            "refresh_token": "strategy-refresh-token"
+          }
+        }
+        """
+        try Data(json.utf8).write(to: tempRoot.appendingPathComponent("auth.json"), options: .atomic)
+
+        let strategy = CodexOAuthFetchStrategy()
+        let validEnvContext = self.makeContext(env: ["CODEX_HOME": tempRoot.path])
+        let missingEnvContext = self.makeContext(env: ["CODEX_HOME": tempRoot.appendingPathComponent("missing").path])
+
+        let validAvailable = await strategy.isAvailable(validEnvContext)
+        let missingAvailable = await strategy.isAvailable(missingEnvContext)
+        #expect(validAvailable)
+        #expect(!missingAvailable)
     }
 }

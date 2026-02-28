@@ -38,6 +38,7 @@ struct CodexBarApp: App {
 
         KeychainAccessGate.isDisabled = UserDefaults.standard.bool(forKey: "debugDisableKeychainAccess")
         KeychainPromptCoordinator.install()
+        CodexAccountEnvironment.cleanupOnLaunch()
 
         let preferencesSelection = PreferencesSelection()
         let settings = SettingsStore()

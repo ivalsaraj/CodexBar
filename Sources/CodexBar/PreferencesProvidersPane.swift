@@ -11,6 +11,7 @@ struct ProvidersPane: View {
     @State private var settingsLastAppActiveRunAtByID: [String: Date] = [:]
     @State private var activeConfirmation: ProviderSettingsConfirmationState?
     @State private var selectedProvider: UsageProvider?
+    @State private var codexSwitchError: String?
 
     private var providers: [UsageProvider] {
         self.settings.orderedProviders()
@@ -168,10 +169,15 @@ struct ProvidersPane: View {
     func tokenAccountDescriptor(for provider: UsageProvider) -> ProviderSettingsTokenAccountsDescriptor? {
         guard let support = TokenAccountSupportCatalog.support(for: provider) else { return nil }
         let context = self.makeSettingsContext(provider: provider)
+        let subtitle: String = if provider == .codex, let codexSwitchError, !codexSwitchError.isEmpty {
+            "\(support.subtitle)\nAccount switch failed: \(codexSwitchError)"
+        } else {
+            support.subtitle
+        }
         return ProviderSettingsTokenAccountsDescriptor(
             id: "token-accounts-\(provider.rawValue)",
             title: support.title,
-            subtitle: support.subtitle,
+            subtitle: subtitle,
             placeholder: support.placeholder,
             provider: provider,
             isVisible: {
@@ -186,7 +192,19 @@ struct ProvidersPane: View {
                 return data?.clampedActiveIndex() ?? 0
             },
             setActiveIndex: { index in
-                self.settings.setActiveTokenAccountIndex(index, for: provider)
+                if provider == .codex,
+                   case .codexOAuth = TokenAccountSupportCatalog.support(for: .codex)?.injection
+                {
+                    do {
+                        try CodexAccountSwitcher.switchToAccount(index: index, settings: self.settings)
+                        self.codexSwitchError = nil
+                    } catch {
+                        self.codexSwitchError = error.localizedDescription
+                        return
+                    }
+                } else {
+                    self.settings.setActiveTokenAccountIndex(index, for: provider)
+                }
                 Task { @MainActor in
                     await ProviderInteractionContext.$current.withValue(.userInitiated) {
                         await self.store.refreshProvider(provider, allowDisabled: true)
@@ -219,7 +237,10 @@ struct ProvidersPane: View {
                         await self.store.refreshProvider(provider, allowDisabled: true)
                     }
                 }
-            })
+            },
+            importCurrentToken: provider == .codex
+                ? { Result { try CodexCurrentLoginImporter.readDefault() } }
+                : nil)
     }
 
     private func makeSettingsContext(provider: UsageProvider) -> ProviderSettingsContext {

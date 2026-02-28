@@ -100,6 +100,39 @@ struct ProviderSettingsTokenAccountsDescriptor: Identifiable {
     let removeAccount: (_ accountID: UUID) -> Void
     let openConfigFile: () -> Void
     let reloadFromDisk: () -> Void
+    let importCurrentToken: (() -> Result<String, Error>)?
+
+    init(
+        id: String,
+        title: String,
+        subtitle: String,
+        placeholder: String,
+        provider: UsageProvider,
+        isVisible: (() -> Bool)?,
+        accounts: @escaping () -> [ProviderTokenAccount],
+        activeIndex: @escaping () -> Int,
+        setActiveIndex: @escaping (Int) -> Void,
+        addAccount: @escaping (_ label: String, _ token: String) -> Void,
+        removeAccount: @escaping (_ accountID: UUID) -> Void,
+        openConfigFile: @escaping () -> Void,
+        reloadFromDisk: @escaping () -> Void,
+        importCurrentToken: (() -> Result<String, Error>)? = nil)
+    {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.placeholder = placeholder
+        self.provider = provider
+        self.isVisible = isVisible
+        self.accounts = accounts
+        self.activeIndex = activeIndex
+        self.setActiveIndex = setActiveIndex
+        self.addAccount = addAccount
+        self.removeAccount = removeAccount
+        self.openConfigFile = openConfigFile
+        self.reloadFromDisk = reloadFromDisk
+        self.importCurrentToken = importCurrentToken
+    }
 }
 
 /// Shared picker descriptor rendered in the Providers settings pane.

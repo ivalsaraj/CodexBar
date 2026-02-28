@@ -98,13 +98,25 @@ struct ProviderRegistry {
             base: base,
             provider: provider,
             config: settings.providerConfig(for: provider))
-        // If token account is selected, use its token instead of config's apiKey
-        if let account, let override = TokenAccountSupportCatalog.envOverride(
-            for: provider,
-            token: account.token)
-        {
-            for (key, value) in override {
-                env[key] = value
+        guard let account else { return env }
+        let support = TokenAccountSupportCatalog.support(for: provider)
+
+        switch support?.injection {
+        case .codexOAuth:
+            // For active account, auth.json has already been written at switch time.
+            // For per-account fetch override, isolate auth.json via temp CODEX_HOME.
+            if tokenOverride != nil {
+                let tempBase = CodexAccountEnvironment.tempBase
+                if let tempHome = try? CodexOAuthTempHome.make(jsonString: account.token, under: tempBase) {
+                    env["CODEX_HOME"] = tempHome.path
+                    CodexAccountEnvironment.registerTempHome(tempHome)
+                }
+            }
+        default:
+            if let override = TokenAccountSupportCatalog.envOverride(for: provider, token: account.token) {
+                for (key, value) in override {
+                    env[key] = value
+                }
             }
         }
         return env

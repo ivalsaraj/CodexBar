@@ -794,6 +794,7 @@ final class ProviderSwitcherView: NSView {
 
 final class TokenAccountSwitcherView: NSView {
     private let accounts: [ProviderTokenAccount]
+    private let sessionBadgeTexts: [String?]
     private let onSelect: (Int) -> Void
     private var selectedIndex: Int
     private var buttons: [NSButton] = []
@@ -804,8 +805,15 @@ final class TokenAccountSwitcherView: NSView {
     private let selectedTextColor = NSColor.white
     private let unselectedTextColor = NSColor.secondaryLabelColor
 
-    init(accounts: [ProviderTokenAccount], selectedIndex: Int, width: CGFloat, onSelect: @escaping (Int) -> Void) {
+    init(
+        accounts: [ProviderTokenAccount],
+        sessionBadgeTexts: [String?] = [],
+        selectedIndex: Int,
+        width: CGFloat,
+        onSelect: @escaping (Int) -> Void)
+    {
         self.accounts = accounts
+        self.sessionBadgeTexts = sessionBadgeTexts
         self.onSelect = onSelect
         self.selectedIndex = min(max(selectedIndex, 0), max(0, accounts.count - 1))
         let useTwoRows = accounts.count > 3
@@ -884,7 +892,37 @@ final class TokenAccountSwitcherView: NSView {
             button.state = selected ? .on : .off
             button.layer?.backgroundColor = selected ? self.selectedBackground : self.unselectedBackground
             button.contentTintColor = selected ? self.selectedTextColor : self.unselectedTextColor
+            self.applyTitleStyle(button: button, index: index, selected: selected)
         }
+    }
+
+    private func applyTitleStyle(button: NSButton, index: Int, selected: Bool) {
+        guard index < self.accounts.count else { return }
+        let name = self.accounts[index].displayName
+        let badgeText = index < self.sessionBadgeTexts.count ? self.sessionBadgeTexts[index] : nil
+        let foreground = selected ? self.selectedTextColor : self.unselectedTextColor
+
+        guard let badgeText, !badgeText.isEmpty else {
+            button.attributedTitle = NSAttributedString(string: name, attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: foreground,
+            ])
+            return
+        }
+
+        let title = "\(name) \(badgeText)"
+        let attributed = NSMutableAttributedString(string: title, attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: foreground,
+        ])
+        let badgeRange = (title as NSString).range(of: badgeText, options: .backwards)
+        if badgeRange.location != NSNotFound {
+            attributed.addAttributes([
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold),
+                .foregroundColor: selected ? self.selectedTextColor : NSColor.controlAccentColor,
+            ], range: badgeRange)
+        }
+        button.attributedTitle = attributed
     }
 
     @objc private func handleSelect(_ sender: NSButton) {

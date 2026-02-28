@@ -45,6 +45,15 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
     var fallbackMenu: NSMenu?
     var openMenus: [ObjectIdentifier: NSMenu] = [:]
     var menuRefreshTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    var tokenAccountSwitchTasks: [UsageProvider: Task<Void, Never>] = [:]
+    var tokenAccountSwitchGenerations: [UsageProvider: Int] = [:]
+    var tokenAccountSwitchInFlight: Set<UsageProvider> = []
+    var tokenAccountPreviewTasks: [UsageProvider: Task<Void, Never>] = [:]
+    var tokenAccountPreviewGenerations: [UsageProvider: Int] = [:]
+    var tokenAccountPreviewInFlight: Set<UsageProvider> = []
+    var tokenAccountSwitchSnapshotOverrides: [UsageProvider: UsageSnapshot] = [:]
+    var tokenAccountPreviewSelection: [UsageProvider: UUID] = [:]
+    var tokenAccountSwitchErrors: [UsageProvider: String] = [:]
     var blinkTask: Task<Void, Never>?
     var loginTask: Task<Void, Never>? {
         didSet { self.refreshMenusForLoginStateChange() }

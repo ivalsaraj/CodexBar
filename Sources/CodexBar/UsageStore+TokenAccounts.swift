@@ -18,6 +18,23 @@ struct TokenAccountUsageSnapshot: Identifiable, Sendable {
 }
 
 extension UsageStore {
+    func cachedTokenAccountSnapshot(for provider: UsageProvider, accountID: UUID) -> UsageSnapshot? {
+        self.tokenAccountSnapshotCache[provider]?[accountID]
+    }
+
+    func fetchTokenAccountPreviewSnapshot(
+        provider: UsageProvider,
+        account: ProviderTokenAccount) async -> TokenAccountUsageSnapshot
+    {
+        let override = TokenAccountOverride(provider: provider, account: account)
+        let outcome = await self.fetchOutcome(provider: provider, override: override)
+        let resolved = self.resolveAccountOutcome(outcome, provider: provider, account: account)
+        if let usage = resolved.usage {
+            self.cacheTokenAccountSnapshot(usage, for: provider, accountID: account.id)
+        }
+        return resolved.snapshot
+    }
+
     func tokenAccounts(for provider: UsageProvider) -> [ProviderTokenAccount] {
         guard TokenAccountSupportCatalog.support(for: provider) != nil else { return [] }
         return self.settings.tokenAccounts(for: provider)
@@ -28,7 +45,11 @@ extension UsageStore {
         return self.settings.showAllTokenAccountsInMenu && accounts.count > 1
     }
 
-    func refreshTokenAccounts(provider: UsageProvider, accounts: [ProviderTokenAccount]) async {
+    func refreshTokenAccounts(
+        provider: UsageProvider,
+        accounts: [ProviderTokenAccount],
+        refreshGeneration: Int? = nil) async
+    {
         let selectedAccount = self.settings.selectedTokenAccount(for: provider)
         let limitedAccounts = self.limitedTokenAccounts(accounts, selected: selectedAccount)
         let effectiveSelected = selectedAccount ?? limitedAccounts.first
@@ -37,18 +58,28 @@ extension UsageStore {
         var selectedSnapshot: UsageSnapshot?
 
         for account in limitedAccounts {
+            guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
             let override = TokenAccountOverride(provider: provider, account: account)
             let outcome = await self.fetchOutcome(provider: provider, override: override)
+            guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
             let resolved = self.resolveAccountOutcome(outcome, provider: provider, account: account)
             snapshots.append(resolved.snapshot)
+            if let usage = resolved.usage {
+                self.cacheTokenAccountSnapshot(usage, for: provider, accountID: account.id)
+            }
             if account.id == effectiveSelected?.id {
                 selectedOutcome = outcome
                 selectedSnapshot = resolved.usage
             }
         }
 
+        guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
         await MainActor.run {
             self.accountSnapshots[provider] = snapshots
+        }
+
+        await MainActor.run {
+            CodexAccountEnvironment.flushTempHomes()
         }
 
         if let selectedOutcome {
@@ -56,7 +87,8 @@ extension UsageStore {
                 selectedOutcome,
                 provider: provider,
                 account: effectiveSelected,
-                fallbackSnapshot: selectedSnapshot)
+                fallbackSnapshot: selectedSnapshot,
+                refreshGeneration: refreshGeneration)
         }
     }
 
@@ -142,8 +174,10 @@ extension UsageStore {
         _ outcome: ProviderFetchOutcome,
         provider: UsageProvider,
         account: ProviderTokenAccount?,
-        fallbackSnapshot: UsageSnapshot?) async
+        fallbackSnapshot: UsageSnapshot?,
+        refreshGeneration: Int? = nil) async
     {
+        guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
         await MainActor.run {
             self.lastFetchAttempts[provider] = outcome.attempts
         }
@@ -155,14 +189,22 @@ extension UsageStore {
             } else {
                 scoped
             }
+            guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
             await MainActor.run {
                 self.handleSessionQuotaTransition(provider: provider, snapshot: labeled)
                 self.snapshots[provider] = labeled
                 self.lastSourceLabels[provider] = result.sourceLabel
                 self.errors[provider] = nil
                 self.failureGates[provider]?.recordSuccess()
+                if let account {
+                    self.cacheTokenAccountSnapshot(
+                        labeled,
+                        for: provider,
+                        accountID: account.id)
+                }
             }
         case let .failure(error):
+            guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
             await MainActor.run {
                 let hadPriorData = self.snapshots[provider] != nil || fallbackSnapshot != nil
                 let shouldSurface = self.failureGates[provider]?
@@ -175,6 +217,17 @@ extension UsageStore {
                 }
             }
         }
+    }
+
+    func shouldApplyRefreshGeneration(_ generation: Int?, for provider: UsageProvider) -> Bool {
+        guard let generation else { return true }
+        return self.isLatestProviderRefreshGeneration(generation, for: provider)
+    }
+
+    func cacheTokenAccountSnapshot(_ snapshot: UsageSnapshot, for provider: UsageProvider, accountID: UUID) {
+        var providerCache = self.tokenAccountSnapshotCache[provider] ?? [:]
+        providerCache[accountID] = snapshot
+        self.tokenAccountSnapshotCache[provider] = providerCache
     }
 
     func applyAccountLabel(
