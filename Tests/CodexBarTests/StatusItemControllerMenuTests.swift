@@ -173,7 +173,7 @@ struct StatusItemControllerMenuTests {
             updatedAt: Date())
 
         let badge = StatusItemController.tokenAccountSessionBadgeText(for: .codex, snapshot: snapshot)
-        #expect(badge == nil)
+        #expect(badge == "0%")
     }
 
     @Test

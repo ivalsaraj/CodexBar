@@ -796,18 +796,23 @@ final class TokenAccountSwitcherView: NSView {
     private let accounts: [ProviderTokenAccount]
     private let sessionBadgeTexts: [String?]
     private let onSelect: (Int) -> Void
+    private let activeIndex: Int
     private var selectedIndex: Int
     private var buttons: [NSButton] = []
+    private var hoverTrackingArea: NSTrackingArea?
+    private var hoveredButtonTag: Int?
     private let rowSpacing: CGFloat = 4
     private let rowHeight: CGFloat = 26
     private let selectedBackground = NSColor.controlAccentColor.cgColor
-    private let unselectedBackground = NSColor.clear.cgColor
+    private let unselectedBackground = NSColor.labelColor.withAlphaComponent(0.08).cgColor
     private let selectedTextColor = NSColor.white
-    private let unselectedTextColor = NSColor.secondaryLabelColor
+    private let unselectedTextColor = NSColor.labelColor.withAlphaComponent(0.92)
+    private let activeIndicatorColor = NSColor.systemGreen
 
     init(
         accounts: [ProviderTokenAccount],
         sessionBadgeTexts: [String?] = [],
+        activeIndex: Int,
         selectedIndex: Int,
         width: CGFloat,
         onSelect: @escaping (Int) -> Void)
@@ -815,6 +820,7 @@ final class TokenAccountSwitcherView: NSView {
         self.accounts = accounts
         self.sessionBadgeTexts = sessionBadgeTexts
         self.onSelect = onSelect
+        self.activeIndex = min(max(activeIndex, 0), max(0, accounts.count - 1))
         self.selectedIndex = min(max(selectedIndex, 0), max(0, accounts.count - 1))
         let useTwoRows = accounts.count > 3
         let rows = useTwoRows ? 2 : 1
@@ -828,6 +834,44 @@ final class TokenAccountSwitcherView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        self.window?.acceptsMouseMovedEvents = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            self.removeTrackingArea(hoverTrackingArea)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [
+                .activeAlways,
+                .inVisibleRect,
+                .mouseEnteredAndExited,
+                .mouseMoved,
+            ],
+            owner: self,
+            userInfo: nil)
+        self.addTrackingArea(trackingArea)
+        self.hoverTrackingArea = trackingArea
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let location = self.convert(event.locationInWindow, from: nil)
+        let hoveredTag = self.buttons.first(where: { $0.frame.contains(location) })?.tag
+        guard hoveredTag != self.hoveredButtonTag else { return }
+        self.hoveredButtonTag = hoveredTag
+        self.updateButtonStyles()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard self.hoveredButtonTag != nil else { return }
+        self.hoveredButtonTag = nil
+        self.updateButtonStyles()
     }
 
     private func buildButtons(useTwoRows: Bool) {
@@ -889,8 +933,17 @@ final class TokenAccountSwitcherView: NSView {
     private func updateButtonStyles() {
         for (index, button) in self.buttons.enumerated() {
             let selected = index == self.selectedIndex
+            let hovered = button.tag == self.hoveredButtonTag
             button.state = selected ? .on : .off
-            button.layer?.backgroundColor = selected ? self.selectedBackground : self.unselectedBackground
+            button.layer?.backgroundColor = if selected {
+                self.selectedBackground
+            } else if hovered {
+                NSColor.labelColor.withAlphaComponent(0.14).cgColor
+            } else {
+                self.unselectedBackground
+            }
+            button.layer?.borderWidth = selected ? 0 : 1
+            button.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
             button.contentTintColor = selected ? self.selectedTextColor : self.unselectedTextColor
             self.applyTitleStyle(button: button, index: index, selected: selected)
         }
@@ -899,24 +952,31 @@ final class TokenAccountSwitcherView: NSView {
     private func applyTitleStyle(button: NSButton, index: Int, selected: Bool) {
         guard index < self.accounts.count else { return }
         let name = self.accounts[index].displayName
+        let isActive = index == self.activeIndex
         let badgeText = index < self.sessionBadgeTexts.count ? self.sessionBadgeTexts[index] : nil
         let foreground = selected ? self.selectedTextColor : self.unselectedTextColor
+        let activePrefix = isActive ? "● " : ""
+        let badgeSuffix = if let badgeText, !badgeText.isEmpty { " \(badgeText)" } else { "" }
+        let title = "\(activePrefix)\(name)\(badgeSuffix)"
+        let activeTooltip = if isActive { "\(name) (active profile)" } else { name }
+        button.toolTip = activeTooltip
 
-        guard let badgeText, !badgeText.isEmpty else {
-            button.attributedTitle = NSAttributedString(string: name, attributes: [
-                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-                .foregroundColor: foreground,
-            ])
-            return
-        }
-
-        let title = "\(name) \(badgeText)"
         let attributed = NSMutableAttributedString(string: title, attributes: [
             .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
             .foregroundColor: foreground,
         ])
-        let badgeRange = (title as NSString).range(of: badgeText, options: .backwards)
-        if badgeRange.location != NSNotFound {
+        if isActive {
+            attributed.addAttributes([
+                .font: NSFont.systemFont(ofSize: 10, weight: .bold),
+                .foregroundColor: self.activeIndicatorColor,
+            ], range: NSRange(location: 0, length: 1))
+        }
+        if let badgeText, !badgeText.isEmpty {
+            let badgeRange = (title as NSString).range(of: badgeText, options: .backwards)
+            guard badgeRange.location != NSNotFound else {
+                button.attributedTitle = attributed
+                return
+            }
             attributed.addAttributes([
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold),
                 .foregroundColor: selected ? self.selectedTextColor : NSColor.controlAccentColor,

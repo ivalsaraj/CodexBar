@@ -953,7 +953,10 @@ extension StatusItemController {
     {
         _ = provider
         guard let snapshot else { return nil }
-        guard let weeklyRemaining = snapshot.secondary?.remainingPercent, weeklyRemaining > 0 else { return nil }
+        guard let weeklyRemaining = snapshot.secondary?.remainingPercent else { return nil }
+        if weeklyRemaining <= 0 {
+            return "0%"
+        }
         guard let sessionRemaining = snapshot.primary?.remainingPercent else { return nil }
         let clamped = max(0, min(100, sessionRemaining))
         return "\(Int(clamped.rounded()))%"

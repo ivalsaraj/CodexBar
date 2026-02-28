@@ -41,6 +41,7 @@ extension StatusItemController {
         let view = TokenAccountSwitcherView(
             accounts: display.accounts,
             sessionBadgeTexts: display.sessionBadgeTexts,
+            activeIndex: display.activeIndex,
             selectedIndex: display.selectedIndex,
             width: self.menuCardWidth(for: self.store.enabledProviders(), menu: menu),
             onSelect: { [weak self, weak menu] index in
