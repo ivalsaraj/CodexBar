@@ -1343,10 +1343,15 @@ extension StatusItemController {
         let metadata = self.store.metadata(for: target)
         let accountSwitchInFlight = self.tokenAccountSwitchInFlight.contains(target) ||
             self.tokenAccountPreviewInFlight.contains(target)
+        let activeAccountID = self.settings.selectedTokenAccount(for: target)?.id
+        let previewSelectionID = self.tokenAccountPreviewSelection[target]
+        let suppressActiveSnapshotFallback = Self.shouldSuppressActiveSnapshotFallback(
+            previewSelectionID: previewSelectionID,
+            activeAccountID: activeAccountID)
 
         let snapshot = snapshotOverride ??
             self.tokenAccountSwitchSnapshotOverrides[target] ??
-            (accountSwitchInFlight ? nil : self.store.snapshot(for: target))
+            ((accountSwitchInFlight || suppressActiveSnapshotFallback) ? nil : self.store.snapshot(for: target))
         let credits: CreditsSnapshot?
         let creditsError: String?
         let dashboard: OpenAIDashboardSnapshot?

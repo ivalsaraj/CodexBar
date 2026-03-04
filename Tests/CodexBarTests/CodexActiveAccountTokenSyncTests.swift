@@ -134,6 +134,87 @@ struct CodexActiveAccountTokenSyncTests {
         #expect(settings.tokenAccounts(for: .codex).isEmpty)
     }
 
+    @Test("sync specific codex account updates only targeted account token")
+    func syncSpecificCodexAccountUpdatesOnlyTargetedAccountToken() async throws {
+        let settings = Self.makeSettingsStore(suite: "CodexActiveAccountTokenSyncTests-specific")
+        let firstID = UUID()
+        let secondID = UUID()
+        let firstToken = #"{"tokens":{"access_token":"first","refresh_token":"first-ref"}}"#
+        let secondToken = #"{"tokens":{"access_token":"second","refresh_token":"second-ref"}}"#
+        let updatedSecondToken = #"{"tokens":{"access_token":"second-new","refresh_token":"second-new-ref"}}"#
+
+        settings.tokenAccountsByProvider = [
+            .codex: ProviderTokenAccountData(
+                version: 1,
+                accounts: [
+                    ProviderTokenAccount(
+                        id: firstID,
+                        label: "First",
+                        token: firstToken,
+                        addedAt: 0,
+                        lastUsed: nil),
+                    ProviderTokenAccount(
+                        id: secondID,
+                        label: "Second",
+                        token: secondToken,
+                        addedAt: 0,
+                        lastUsed: nil),
+                ],
+                activeIndex: 0),
+        ]
+
+        let codexHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-active-sync-specific-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: codexHome) }
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        try Data(updatedSecondToken.utf8).write(to: codexHome.appendingPathComponent("auth.json"), options: .atomic)
+
+        let store = Self.makeUsageStore(settings: settings)
+        await store.syncCodexAccountTokenFromDiskIfNeeded(accountID: secondID, env: ["CODEX_HOME": codexHome.path])
+
+        let codexAccounts = settings.tokenAccounts(for: .codex)
+        #expect(codexAccounts.count == 2)
+        #expect(codexAccounts[0].id == firstID)
+        #expect(codexAccounts[0].token == firstToken)
+        #expect(codexAccounts[1].id == secondID)
+        #expect(codexAccounts[1].token == updatedSecondToken)
+    }
+
+    @Test("sync specific codex account no-ops when account does not exist")
+    func syncSpecificCodexAccountNoOpWhenAccountMissing() async throws {
+        let settings = Self.makeSettingsStore(suite: "CodexActiveAccountTokenSyncTests-specific-missing")
+        let onlyID = UUID()
+        let unchangedToken = #"{"tokens":{"access_token":"only","refresh_token":"only-ref"}}"#
+        settings.tokenAccountsByProvider = [
+            .codex: ProviderTokenAccountData(
+                version: 1,
+                accounts: [
+                    ProviderTokenAccount(
+                        id: onlyID,
+                        label: "Only",
+                        token: unchangedToken,
+                        addedAt: 0,
+                        lastUsed: nil),
+                ],
+                activeIndex: 0),
+        ]
+
+        let codexHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-active-sync-specific-missing-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: codexHome) }
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        try Data(#"{"tokens":{"access_token":"new","refresh_token":"new-ref"}}"#.utf8)
+            .write(to: codexHome.appendingPathComponent("auth.json"), options: .atomic)
+
+        let store = Self.makeUsageStore(settings: settings)
+        let revisionBefore = settings.configRevision
+        await store.syncCodexAccountTokenFromDiskIfNeeded(accountID: UUID(), env: ["CODEX_HOME": codexHome.path])
+
+        #expect(settings.configRevision == revisionBefore)
+        #expect(settings.tokenAccounts(for: .codex).first?.id == onlyID)
+        #expect(settings.tokenAccounts(for: .codex).first?.token == unchangedToken)
+    }
+
     private static func makeSettingsStore(suite: String) -> SettingsStore {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)

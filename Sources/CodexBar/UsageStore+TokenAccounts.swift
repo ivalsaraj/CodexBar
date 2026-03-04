@@ -18,6 +18,11 @@ struct TokenAccountUsageSnapshot: Identifiable, Sendable {
 }
 
 extension UsageStore {
+    private struct TokenAccountFetchOutcome {
+        let outcome: ProviderFetchOutcome
+        let env: [String: String]
+    }
+
     func cachedTokenAccountSnapshot(for provider: UsageProvider, accountID: UUID) -> UsageSnapshot? {
         self.tokenAccountSnapshotCache[provider]?[accountID]
     }
@@ -27,7 +32,11 @@ extension UsageStore {
         account: ProviderTokenAccount) async -> TokenAccountUsageSnapshot
     {
         let override = TokenAccountOverride(provider: provider, account: account)
-        let outcome = await self.fetchOutcome(provider: provider, override: override)
+        let fetched = await self.fetchOutcome(provider: provider, override: override)
+        let outcome = fetched.outcome
+        if self.shouldSyncCodexOverrideToken(provider: provider, outcome: outcome) {
+            await self.syncCodexAccountTokenFromDiskIfNeeded(accountID: account.id, env: fetched.env)
+        }
         let resolved = self.resolveAccountOutcome(outcome, provider: provider, account: account)
         if let usage = resolved.usage {
             self.cacheTokenAccountSnapshot(usage, for: provider, accountID: account.id)
@@ -47,6 +56,12 @@ extension UsageStore {
 
     func syncActiveCodexAccountTokenFromDiskIfNeeded(env: [String: String]? = nil) async {
         guard let active = self.settings.selectedTokenAccount(for: .codex) else { return }
+        await self.syncCodexAccountTokenFromDiskIfNeeded(accountID: active.id, env: env)
+    }
+
+    func syncCodexAccountTokenFromDiskIfNeeded(accountID: UUID, env: [String: String]? = nil) async {
+        guard let account = self.settings.tokenAccounts(for: .codex).first(where: { $0.id == accountID })
+        else { return }
         let processEnv = env ?? ProcessInfo.processInfo.environment
         let codexHome = Self.resolveCodexHomeDirectory(env: processEnv)
         let diskToken = await Task.detached(priority: .utility) {
@@ -56,10 +71,10 @@ extension UsageStore {
             return
         }
 
-        if Self.authPayloadsAreEquivalent(active.token, diskToken) { return }
+        if Self.authPayloadsAreEquivalent(account.token, diskToken) { return }
         self.settings.replaceTokenAccountToken(
             provider: .codex,
-            accountID: active.id,
+            accountID: account.id,
             token: diskToken)
     }
 
@@ -78,7 +93,11 @@ extension UsageStore {
         for account in limitedAccounts {
             guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
             let override = TokenAccountOverride(provider: provider, account: account)
-            let outcome = await self.fetchOutcome(provider: provider, override: override)
+            let fetched = await self.fetchOutcome(provider: provider, override: override)
+            let outcome = fetched.outcome
+            if self.shouldSyncCodexOverrideToken(provider: provider, outcome: outcome) {
+                await self.syncCodexAccountTokenFromDiskIfNeeded(accountID: account.id, env: fetched.env)
+            }
             guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
             let resolved = self.resolveAccountOutcome(outcome, provider: provider, account: account)
             snapshots.append(resolved.snapshot)
@@ -124,12 +143,12 @@ extension UsageStore {
         return limited
     }
 
-    func fetchOutcome(
+    private func fetchOutcome(
         provider: UsageProvider,
-        override: TokenAccountOverride?) async -> ProviderFetchOutcome
+        override: TokenAccountOverride?) async -> TokenAccountFetchOutcome
     {
         let descriptor = ProviderDescriptorRegistry.descriptor(for: provider)
-        let sourceMode = self.sourceMode(for: provider)
+        let sourceMode = self.sourceMode(for: provider, override: override)
         let snapshot = ProviderRegistry.makeSettingsSnapshot(settings: self.settings, tokenOverride: override)
         let env = ProviderRegistry.makeEnvironment(
             base: ProcessInfo.processInfo.environment,
@@ -149,13 +168,28 @@ extension UsageStore {
             fetcher: self.codexFetcher,
             claudeFetcher: self.claudeFetcher,
             browserDetection: self.browserDetection)
-        return await descriptor.fetchOutcome(context: context)
+        let outcome = await descriptor.fetchOutcome(context: context)
+        return TokenAccountFetchOutcome(outcome: outcome, env: env)
     }
 
     func sourceMode(for provider: UsageProvider) -> ProviderSourceMode {
         ProviderCatalog.implementation(for: provider)?
             .sourceMode(context: ProviderSourceModeContext(provider: provider, settings: self.settings))
             ?? .auto
+    }
+
+    func sourceMode(for provider: UsageProvider, override: TokenAccountOverride?) -> ProviderSourceMode {
+        if override != nil, provider == .codex {
+            // Account previews must stay account-scoped. Falling back to CLI in auto mode can show active-account data.
+            return .oauth
+        }
+        return self.sourceMode(for: provider)
+    }
+
+    private func shouldSyncCodexOverrideToken(provider: UsageProvider, outcome: ProviderFetchOutcome) -> Bool {
+        guard provider == .codex else { return false }
+        guard case let .success(result) = outcome.result else { return false }
+        return result.sourceLabel == "oauth"
     }
 
     private struct ResolvedAccountOutcome {

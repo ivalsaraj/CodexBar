@@ -66,6 +66,8 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
     var codexDependentProcessesSnapshot: CodexDependentProcessSnapshot?
     var codexDependentProcessesLoading = false
     var codexDependentProcessesTask: Task<Void, Never>?
+    var codexDependentProcessStopTasks: [Int: Task<Void, Never>] = [:]
+    var codexDependentProcessStoppingPIDs: Set<Int> = []
     var codexLastAccountSwitchAt: Date?
     var blinkTask: Task<Void, Never>?
     var loginTask: Task<Void, Never>? {
@@ -505,6 +507,9 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
         self.blinkTask?.cancel()
         self.loginTask?.cancel()
         self.codexDependentProcessesTask?.cancel()
+        for task in self.codexDependentProcessStopTasks.values {
+            task.cancel()
+        }
         NotificationCenter.default.removeObserver(self)
     }
 }

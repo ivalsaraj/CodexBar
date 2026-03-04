@@ -313,4 +313,111 @@ struct StatusItemControllerMenuTests {
                 for: process,
                 lastSwitchAt: switchBeforeStart) == "Current token likely in use")
     }
+
+    @Test
+    func codexSwitchWarningShownOnlyForInactiveSelectionWithStaleProcess() {
+        let staleProcess = CodexDependentProcessSnapshot.Process(
+            process: "codex",
+            pid: 44,
+            source: .terminalOther,
+            startedAt: Date(timeIntervalSince1970: 1_709_541_000),
+            command: "codex app-server")
+        let freshProcess = CodexDependentProcessSnapshot.Process(
+            process: "codex",
+            pid: 45,
+            source: .terminalOther,
+            startedAt: Date(timeIntervalSince1970: 1_709_541_700),
+            command: "codex app-server")
+        let staleSnapshot = CodexDependentProcessSnapshot(
+            capturedAt: Date(timeIntervalSince1970: 1_709_542_000),
+            processes: [staleProcess])
+        let freshSnapshot = CodexDependentProcessSnapshot(
+            capturedAt: Date(timeIntervalSince1970: 1_709_542_000),
+            processes: [freshProcess])
+        let lastSwitchAt = Date(timeIntervalSince1970: 1_709_541_600)
+
+        #expect(
+            StatusItemController.shouldShowCodexSwitchWarning(
+                selectedIndex: 1,
+                activeIndex: 0,
+                snapshot: staleSnapshot,
+                lastSwitchAt: lastSwitchAt))
+        #expect(
+            !StatusItemController.shouldShowCodexSwitchWarning(
+                selectedIndex: 0,
+                activeIndex: 0,
+                snapshot: staleSnapshot,
+                lastSwitchAt: lastSwitchAt))
+        #expect(
+            !StatusItemController.shouldShowCodexSwitchWarning(
+                selectedIndex: 1,
+                activeIndex: 0,
+                snapshot: freshSnapshot,
+                lastSwitchAt: lastSwitchAt))
+        #expect(
+            !StatusItemController.shouldShowCodexSwitchWarning(
+                selectedIndex: 1,
+                activeIndex: 0,
+                snapshot: nil,
+                lastSwitchAt: lastSwitchAt))
+    }
+
+    @Test
+    func codexDependentProcessStopGuardsRejectCodexBarProcess() {
+        let codexBarProcess = CodexDependentProcessSnapshot.Process(
+            process: "CodexBar",
+            pid: 123,
+            source: .terminalOther,
+            startedAt: Date(),
+            command: "/Applications/CodexBar.app/Contents/MacOS/CodexBar")
+        let codexAppProcess = CodexDependentProcessSnapshot.Process(
+            process: "codex",
+            pid: 456,
+            source: .codexApp,
+            startedAt: Date(),
+            command: "/Applications/Codex.app/Contents/Resources/codex app-server")
+
+        #expect(!StatusItemController.canStopCodexDependentProcess(codexBarProcess))
+        #expect(StatusItemController.canStopCodexDependentProcess(codexAppProcess))
+    }
+
+    @Test
+    func previewingInactiveAccountSuppressesActiveSnapshotFallback() {
+        let active = UUID()
+        let preview = UUID()
+
+        #expect(
+            StatusItemController.shouldSuppressActiveSnapshotFallback(
+                previewSelectionID: preview,
+                activeAccountID: active))
+        #expect(
+            !StatusItemController.shouldSuppressActiveSnapshotFallback(
+                previewSelectionID: active,
+                activeAccountID: active))
+        #expect(
+            !StatusItemController.shouldSuppressActiveSnapshotFallback(
+                previewSelectionID: nil,
+                activeAccountID: active))
+    }
+
+    @MainActor
+    @Test
+    func codexPreviewOverrideForcesOAuthSourceMode() {
+        let controller = self.makeController()
+        controller.settings.updateProviderConfig(provider: .codex) { config in
+            config.source = .cli
+        }
+
+        let override = TokenAccountOverride(
+            provider: .codex,
+            account: ProviderTokenAccount(
+                id: UUID(),
+                label: "preview",
+                token: #"{"tokens":{"access_token":"a","refresh_token":"r"}}"#,
+                addedAt: 1,
+                lastUsed: nil))
+
+        #expect(controller.store.sourceMode(for: .codex, override: override) == .oauth)
+        #expect(controller.store.sourceMode(for: .codex, override: nil) == .cli)
+    }
 }

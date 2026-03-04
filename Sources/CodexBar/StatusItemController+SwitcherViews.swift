@@ -997,18 +997,25 @@ final class TokenAccountSwitcherView: NSView {
 final class CodexDependentProcessesPanelView: NSView {
     private let onToggle: () -> Void
     private let onRefresh: () -> Void
+    private let onStop: (CodexDependentProcessSnapshot.Process) -> Void
+    private let stoppingPIDs: Set<Int>
+    private var processByPID: [Int: CodexDependentProcessSnapshot.Process] = [:]
 
     init(
         snapshot: CodexDependentProcessSnapshot?,
         expanded: Bool,
         loading: Bool,
         lastSwitchAt: Date?,
+        stoppingPIDs: Set<Int>,
         width: CGFloat,
         onToggle: @escaping () -> Void,
-        onRefresh: @escaping () -> Void)
+        onRefresh: @escaping () -> Void,
+        onStop: @escaping (CodexDependentProcessSnapshot.Process) -> Void)
     {
         self.onToggle = onToggle
         self.onRefresh = onRefresh
+        self.onStop = onStop
+        self.stoppingPIDs = stoppingPIDs
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 1))
         self.translatesAutoresizingMaskIntoConstraints = false
         self.wantsLayer = true
@@ -1155,17 +1162,21 @@ final class CodexDependentProcessesPanelView: NSView {
         let source = self.makeColumnLabel("Source")
         let started = self.makeColumnLabel("Started")
         let risk = self.makeColumnLabel("Auth Risk")
+        let action = self.makeColumnLabel("Action")
+        action.alignment = .center
 
         columns.addArrangedSubview(process)
         columns.addArrangedSubview(pid)
         columns.addArrangedSubview(source)
         columns.addArrangedSubview(started)
         columns.addArrangedSubview(risk)
+        columns.addArrangedSubview(action)
 
         pid.widthAnchor.constraint(equalToConstant: 34).isActive = true
         source.widthAnchor.constraint(equalToConstant: 64).isActive = true
         started.widthAnchor.constraint(equalToConstant: 52).isActive = true
         risk.widthAnchor.constraint(equalToConstant: 88).isActive = true
+        action.widthAnchor.constraint(equalToConstant: 62).isActive = true
 
         return columns
     }
@@ -1180,6 +1191,13 @@ final class CodexDependentProcessesPanelView: NSView {
         wrapper.alignment = .leading
         wrapper.spacing = 2
         wrapper.translatesAutoresizingMaskIntoConstraints = false
+
+        let topRow = NSStackView()
+        topRow.orientation = .horizontal
+        topRow.alignment = .centerY
+        topRow.distribution = .fill
+        topRow.spacing = 4
+        topRow.translatesAutoresizingMaskIntoConstraints = false
 
         let row = NSStackView()
         row.orientation = .horizontal
@@ -1211,6 +1229,50 @@ final class CodexDependentProcessesPanelView: NSView {
         startedLabel.widthAnchor.constraint(equalToConstant: 52).isActive = true
         riskLabel.widthAnchor.constraint(equalToConstant: 88).isActive = true
 
+        let rowDocument = FlippedDocumentView()
+        rowDocument.addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: rowDocument.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: rowDocument.trailingAnchor),
+            row.topAnchor.constraint(equalTo: rowDocument.topAnchor),
+            row.bottomAnchor.constraint(equalTo: rowDocument.bottomAnchor),
+        ])
+        rowDocument.layoutSubtreeIfNeeded()
+        let rowSize = row.fittingSize
+        let rowDocWidth = max(max(220, width - 100), rowSize.width)
+        let rowDocHeight = max(18, rowSize.height)
+        rowDocument.frame = NSRect(x: 0, y: 0, width: rowDocWidth, height: rowDocHeight)
+
+        let rowScroll = NSScrollView()
+        rowScroll.drawsBackground = false
+        rowScroll.borderType = .noBorder
+        rowScroll.hasVerticalScroller = false
+        rowScroll.hasHorizontalScroller = true
+        rowScroll.autohidesScrollers = true
+        rowScroll.documentView = rowDocument
+        rowScroll.translatesAutoresizingMaskIntoConstraints = false
+
+        let isStopping = self.stoppingPIDs.contains(process.pid)
+        self.processByPID[process.pid] = process
+        let stopButton = NSButton(
+            title: isStopping ? "Stopping…" : "Stop",
+            target: self,
+            action: #selector(self.handleStop(_:)))
+        stopButton.bezelStyle = .inline
+        stopButton.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        stopButton.tag = process.pid
+        stopButton.isEnabled = !isStopping && StatusItemController.canStopCodexDependentProcess(process)
+        stopButton.toolTip = stopButton.isEnabled ? "Stop this process" : "Process cannot be stopped from CodexBar"
+
+        topRow.addArrangedSubview(rowScroll)
+        topRow.addArrangedSubview(stopButton)
+        NSLayoutConstraint.activate([
+            stopButton.widthAnchor.constraint(equalToConstant: 62),
+            rowScroll.widthAnchor.constraint(equalTo: topRow.widthAnchor, constant: -66),
+            rowScroll.heightAnchor.constraint(equalToConstant: rowDocHeight + 4),
+        ])
+
         let hint = StatusItemController.codexDependentProcessRestartHint(for: process.source)
         let hintLabel = NSTextField(labelWithString: hint)
         hintLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
@@ -1218,7 +1280,7 @@ final class CodexDependentProcessesPanelView: NSView {
         hintLabel.lineBreakMode = .byTruncatingTail
         hintLabel.maximumNumberOfLines = 1
 
-        wrapper.addArrangedSubview(row)
+        wrapper.addArrangedSubview(topRow)
         wrapper.addArrangedSubview(hintLabel)
         wrapper.widthAnchor.constraint(equalToConstant: max(180, width - 24)).isActive = true
         return wrapper
@@ -1257,6 +1319,11 @@ final class CodexDependentProcessesPanelView: NSView {
 
     @objc private func handleRefresh() {
         self.onRefresh()
+    }
+
+    @objc private func handleStop(_ sender: NSButton) {
+        guard let process = self.processByPID[sender.tag] else { return }
+        self.onStop(process)
     }
 
     private static let startedAtFormatter: DateFormatter = {

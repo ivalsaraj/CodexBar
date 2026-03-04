@@ -1,5 +1,10 @@
 import AppKit
 import CodexBarCore
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 import Foundation
 
 extension StatusItemController {
@@ -36,6 +41,9 @@ extension StatusItemController {
         guard let display, display.showSwitcher else { return }
         let switcherItem = self.makeTokenAccountSwitcherItem(display: display, menu: menu)
         menu.addItem(switcherItem)
+        if let warningItem = self.makeTokenAccountSwitchWarningItem(display: display, menu: menu) {
+            menu.addItem(warningItem)
+        }
         if let switchItem = self.makeTokenAccountSwitchActionItem(display: display) {
             menu.addItem(switchItem)
         }
@@ -53,6 +61,7 @@ extension StatusItemController {
             expanded: self.codexDependentProcessesExpanded,
             loading: self.codexDependentProcessesLoading,
             lastSwitchAt: self.codexLastAccountSwitchAt,
+            stoppingPIDs: self.codexDependentProcessStoppingPIDs,
             width: width,
             onToggle: { [weak self] in
                 guard let self else { return }
@@ -61,11 +70,59 @@ extension StatusItemController {
             onRefresh: { [weak self] in
                 guard let self else { return }
                 self.refreshCodexDependentProcesses(reason: .manual)
+            },
+            onStop: { [weak self] process in
+                guard let self else { return }
+                self.stopCodexDependentProcess(process)
             })
         let item = NSMenuItem()
         item.view = panel
         item.isEnabled = false
         item.representedObject = "codexDependentProcessesPanel"
+        return item
+    }
+
+    private func makeTokenAccountSwitchWarningItem(
+        display: TokenAccountMenuDisplay,
+        menu: NSMenu) -> NSMenuItem?
+    {
+        guard display.provider == .codex else { return nil }
+        guard Self.shouldShowCodexSwitchWarning(
+            selectedIndex: display.selectedIndex,
+            activeIndex: display.activeIndex,
+            snapshot: self.codexDependentProcessesSnapshot,
+            lastSwitchAt: self.codexLastAccountSwitchAt)
+        else {
+            return nil
+        }
+
+        let label = NSTextField(wrappingLabelWithString: Self.codexSwitchWarningText)
+        label.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        label.textColor = NSColor.systemOrange
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
+
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4),
+        ])
+
+        let width = max(180, self.menuCardWidth(for: self.store.enabledProviders(), menu: menu) - 16)
+        container.frame = NSRect(x: 0, y: 0, width: width, height: 1)
+        container.layoutSubtreeIfNeeded()
+        let measuredHeight = max(24, label.fittingSize.height + 8)
+        container.frame = NSRect(x: 0, y: 0, width: width, height: measuredHeight)
+
+        let item = NSMenuItem()
+        item.view = container
+        item.isEnabled = false
         return item
     }
 
@@ -309,6 +366,41 @@ extension StatusItemController {
         return nil
     }
 
+    private func stopCodexDependentProcess(_ process: CodexDependentProcessSnapshot.Process) {
+        guard Self.canStopCodexDependentProcess(process) else { return }
+        let pid = process.pid
+        guard !self.codexDependentProcessStoppingPIDs.contains(pid) else { return }
+
+        self.codexDependentProcessStopTasks[pid]?.cancel()
+        self.codexDependentProcessStoppingPIDs.insert(pid)
+        self.menuContentVersion &+= 1
+        self.refreshOpenMenusIfNeeded()
+
+        self.codexDependentProcessStopTasks[pid] = Task { [weak self] in
+            let didStop = await Task.detached(priority: .utility) {
+                Self.terminateCodexDependentProcess(pid: pid_t(pid))
+            }.value
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self else { return }
+                self.codexDependentProcessStoppingPIDs.remove(pid)
+                self.codexDependentProcessStopTasks[pid] = nil
+                if didStop {
+                    self.refreshCodexDependentProcesses(reason: .manual)
+                } else {
+                    self.loginLogger.error(
+                        "Failed to stop dependent process",
+                        metadata: [
+                            "provider": UsageProvider.codex.rawValue,
+                            "pid": "\(pid)",
+                        ])
+                    self.menuContentVersion &+= 1
+                    self.refreshOpenMenusIfNeeded()
+                }
+            }
+        }
+    }
+
     func refreshCodexDependentProcesses(reason: CodexDependentProcessesRefreshReason) {
         self.codexDependentProcessesTask?.cancel()
         self.codexDependentProcessesTask = nil
@@ -322,6 +414,13 @@ extension StatusItemController {
                 let snapshot = try await Self.codexDependentProcessSnapshotProvider(Date())
                 guard !Task.isCancelled else { return }
                 self.codexDependentProcessesSnapshot = snapshot
+                let activePIDs = Set(snapshot.processes.map(\.pid))
+                self.codexDependentProcessStoppingPIDs.formIntersection(activePIDs)
+                let staleTaskPIDs = self.codexDependentProcessStopTasks.keys.filter { !activePIDs.contains($0) }
+                for pid in staleTaskPIDs {
+                    self.codexDependentProcessStopTasks[pid]?.cancel()
+                    self.codexDependentProcessStopTasks.removeValue(forKey: pid)
+                }
             } catch {
                 guard !Task.isCancelled else { return }
                 self.loginLogger.error(
@@ -398,5 +497,65 @@ extension StatusItemController {
         case .terminalOther:
             "Restart this terminal Codex session"
         }
+    }
+
+    nonisolated static func shouldShowCodexSwitchWarning(
+        selectedIndex: Int,
+        activeIndex: Int,
+        snapshot: CodexDependentProcessSnapshot?,
+        lastSwitchAt: Date?) -> Bool
+    {
+        guard selectedIndex != activeIndex else { return false }
+        guard let snapshot else { return false }
+        return snapshot.processes.contains { $0.isStaleRisk(relativeTo: lastSwitchAt) }
+    }
+
+    nonisolated static func canStopCodexDependentProcess(_ process: CodexDependentProcessSnapshot.Process) -> Bool {
+        guard process.pid > 1 else { return false }
+        let lowerProcess = process.process.lowercased()
+        let lowerCommand = process.command.lowercased()
+        if lowerProcess.contains("codexbar") || lowerCommand.contains("codexbar") {
+            return false
+        }
+        return true
+    }
+
+    nonisolated static var codexSwitchWarningText: String {
+        "Heads up: Some Codex processes may still use old login. Stop them for a clean switch."
+    }
+
+    private nonisolated static func terminateCodexDependentProcess(pid: pid_t) -> Bool {
+        guard pid > 1 else { return false }
+        if !self.sendSignal(SIGTERM, to: pid) { return false }
+        if self.waitForProcessExit(pid: pid, timeout: 2.0) { return true }
+        if !self.sendSignal(SIGKILL, to: pid) { return false }
+        return self.waitForProcessExit(pid: pid, timeout: 1.0)
+    }
+
+    private nonisolated static func sendSignal(_ signal: Int32, to pid: pid_t) -> Bool {
+        if kill(pid, signal) == 0 { return true }
+        return errno == ESRCH
+    }
+
+    private nonisolated static func waitForProcessExit(pid: pid_t, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !self.processExists(pid: pid) { return true }
+            usleep(100_000)
+        }
+        return !self.processExists(pid: pid)
+    }
+
+    private nonisolated static func processExists(pid: pid_t) -> Bool {
+        if kill(pid, 0) == 0 { return true }
+        return errno != ESRCH
+    }
+
+    nonisolated static func shouldSuppressActiveSnapshotFallback(
+        previewSelectionID: UUID?,
+        activeAccountID: UUID?) -> Bool
+    {
+        guard let previewSelectionID, let activeAccountID else { return false }
+        return previewSelectionID != activeAccountID
     }
 }
