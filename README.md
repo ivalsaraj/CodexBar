@@ -2,6 +2,18 @@
 
 Tiny macOS 14+ menu bar app that keeps your Codex, Claude, Cursor, Gemini, Antigravity, Droid (Factory), Copilot, z.ai, Kiro, Vertex AI, Augment, Amp, JetBrains AI, and OpenRouter limits visible (session + weekly where available) and shows when each window resets. One status item per provider (or Merge Icons mode with a provider switcher and optional Overview tab); enable what you use from Settings. No Dock icon, minimal UI, dynamic bar icons in the menu bar.
 
+## What Is Different In This Fork
+Compared to upstream [steipete/CodexBar](https://github.com/steipete/CodexBar), this repo currently adds:
+
+- Provider token-account profile tabs with explicit in-menu switching actions.
+- Active-profile affordances in the switcher UI (active marker + usage badges for quick context).
+- Codex account-switch hardening: switch writes normalize `auth.json` payloads and refresh `last_refresh`.
+- Codex active-account token sync-back: successful OAuth fetches reconcile rotated disk auth back into the active stored account token.
+- Codex dependent-process diagnostics panel in the menu:
+  - event-driven refresh (`menu open`, `post-switch`, `manual refresh`)
+  - process/source classification and targeted restart hints
+  - auth-risk labeling (`May hold old token` vs `Current token likely in use`)
+
 <img src="codexbar.png" alt="CodexBar menu screenshot" width="520" />
 
 ## Install

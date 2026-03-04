@@ -1103,24 +1103,28 @@ final class CodexDependentProcessesPanelView: NSView {
                 }
             }
 
-            let document = NSView()
+            let document = FlippedDocumentView()
             document.addSubview(content)
             content.translatesAutoresizingMaskIntoConstraints = false
+            let contentWidth = max(180, width - 26)
             NSLayoutConstraint.activate([
                 content.leadingAnchor.constraint(equalTo: document.leadingAnchor),
                 content.trailingAnchor.constraint(equalTo: document.trailingAnchor),
                 content.topAnchor.constraint(equalTo: document.topAnchor),
                 content.bottomAnchor.constraint(equalTo: document.bottomAnchor),
-                content.widthAnchor.constraint(equalToConstant: max(180, width - 26)),
+                content.widthAnchor.constraint(equalToConstant: contentWidth),
             ])
             document.layoutSubtreeIfNeeded()
             let contentHeight = max(20, content.fittingSize.height)
-            document.frame = NSRect(x: 0, y: 0, width: max(180, width - 26), height: contentHeight)
+            document.frame = NSRect(x: 0, y: 0, width: contentWidth, height: contentHeight)
+            let maxScrollHeight: CGFloat = 156
+            let scrollHeight = min(maxScrollHeight, contentHeight + 4)
+            scrollView.hasVerticalScroller = contentHeight > scrollHeight
             scrollView.documentView = document
 
             rootStack.addArrangedSubview(scrollView)
             NSLayoutConstraint.activate([
-                scrollView.heightAnchor.constraint(equalToConstant: 156),
+                scrollView.heightAnchor.constraint(equalToConstant: scrollHeight),
                 scrollView.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
             ])
         }
@@ -1261,4 +1265,10 @@ final class CodexDependentProcessesPanelView: NSView {
         formatter.dateFormat = "HH:mm"
         return formatter
     }()
+
+    private final class FlippedDocumentView: NSView {
+        override var isFlipped: Bool {
+            true
+        }
+    }
 }
