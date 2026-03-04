@@ -4,9 +4,9 @@ import Foundation
 
 extension StatusItemController {
     enum CodexDependentProcessesRefreshReason: String {
-        case menuOpen = "menuOpen"
-        case postSwitch = "postSwitch"
-        case manual = "manual"
+        case menuOpen
+        case postSwitch
+        case manual
     }
 
     private static let codexDependentProcessSnapshotMaxAge: TimeInterval = 20
@@ -390,13 +390,13 @@ extension StatusItemController {
     {
         switch source {
         case .browserForce:
-            return "Restart BrowserForce MCP session"
+            "Restart BrowserForce MCP session"
         case .codexApp:
-            return "Restart Codex.app session"
+            "Restart Codex.app session"
         case .cursor:
-            return "Restart Cursor Codex session"
+            "Restart Cursor Codex session"
         case .terminalOther:
-            return "Restart this terminal Codex session"
+            "Restart this terminal Codex session"
         }
     }
 }

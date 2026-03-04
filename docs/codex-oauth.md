@@ -21,6 +21,19 @@ This is slow and unreliable. The goal is to directly read Codex's OAuth tokens a
 
 ---
 
+## Current runtime behavior in CodexBar
+
+### Active account token sync-back after OAuth success
+- Trigger: `UsageStore.refreshProvider` only when provider is Codex and the successful source label is `oauth`.
+- Action: read the latest disk auth payload from `CODEX_HOME/auth.json` (or `~/.codex/auth.json`) and compare
+  canonical JSON against the active stored Codex token account payload.
+- Update scope: if payloads differ, replace only the active Codex account token in settings; preserve account
+  ordering and `activeIndex`.
+- No-op cases: no active Codex account, auth payload missing/invalid on disk, or equivalent payload.
+- Purpose: keep the active stored account aligned with token rotation/refresh that already happened on disk.
+
+---
+
 ## Codex OAuth Architecture (from source analysis)
 
 ### Token Storage

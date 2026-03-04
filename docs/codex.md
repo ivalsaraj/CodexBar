@@ -84,6 +84,19 @@ Usage source picker:
 - Do not retry on timeout; timed-out probes fail fast and wait for the next refresh cycle.
 - Detects update prompts and surfaces a "CLI update needed" error.
 
+## Dependent process diagnostics (menu panel)
+- Scope: shown in the Codex token-account switcher menu panel.
+- Fetch policy (event-driven):
+  - `menuOpen`: refresh on menu open when no snapshot exists, when snapshot age is at least 20s, or when
+    the snapshot was captured before the last successful Codex account switch.
+  - `postSwitch`: refresh immediately after a successful Codex account switch.
+  - `manual`: the panel's Refresh button always triggers a new probe.
+- Probe source: `/bin/ps -axo pid=,lstart=,comm=,command=`; rows are filtered to Codex-related processes.
+- `Auth Risk` meaning:
+  - `May hold old token`: process `startedAt` is earlier than the last successful switch timestamp, so the
+    process may still hold pre-switch auth state.
+  - `Current token likely in use`: process started after the latest switch (or no switch timestamp is known).
+
 ## Account identity resolution (for web matching)
 1) Latest Codex usage snapshot (from RPC, if available).
 2) `~/.codex/auth.json` (JWT claims: email + plan).

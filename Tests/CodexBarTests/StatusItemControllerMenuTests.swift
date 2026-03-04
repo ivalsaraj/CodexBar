@@ -15,7 +15,8 @@ struct StatusItemControllerMenuTests {
     }
 
     @MainActor
-    private func makeController(suite: String = "StatusItemControllerMenuTests-\(UUID().uuidString)") -> StatusItemController {
+    private func makeController(suite: String = "StatusItemControllerMenuTests-\(UUID().uuidString)")
+    -> StatusItemController {
         let settings = SettingsStore(
             configStore: testConfigStore(suiteName: suite),
             zaiTokenStore: NoopZaiTokenStore(),

@@ -16,10 +16,14 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
     // Disable SwiftUI menu cards + menu refresh work in tests to avoid swiftpm-testing-helper crashes.
     static var menuCardRenderingEnabled = !SettingsStore.isRunningTests
     static var menuRefreshEnabled = !SettingsStore.isRunningTests
-    static var codexDependentProcessSnapshotProvider: @Sendable (Date) async throws -> CodexDependentProcessSnapshot = {
-        now in
+
+    static func defaultCodexDependentProcessSnapshot(now: Date) async throws -> CodexDependentProcessSnapshot {
         try await CodexDependentProcessProbe.snapshot(now: now)
     }
+
+    static var codexDependentProcessSnapshotProvider: @Sendable (Date) async throws -> CodexDependentProcessSnapshot =
+        StatusItemController.defaultCodexDependentProcessSnapshot
+
     typealias Factory = (UsageStore, SettingsStore, AccountInfo, UpdaterProviding, PreferencesSelection)
         -> StatusItemControlling
     static let defaultFactory: Factory = { store, settings, account, updater, selection in
