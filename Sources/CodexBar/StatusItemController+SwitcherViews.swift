@@ -1101,12 +1101,15 @@ final class CodexDependentProcessesPanelView: NSView {
             } else if processes.isEmpty {
                 content.addArrangedSubview(self.makePlaceholder("No dependent Codex processes detected."))
             } else {
-                for process in processes {
+                for (index, process) in processes.enumerated() {
                     let row = self.makeProcessRow(
                         process: process,
                         lastSwitchAt: lastSwitchAt,
                         width: width)
                     content.addArrangedSubview(row)
+                    if index < processes.count - 1 {
+                        content.addArrangedSubview(self.makeProcessSeparator(width: width))
+                    }
                 }
             }
 
@@ -1273,17 +1276,17 @@ final class CodexDependentProcessesPanelView: NSView {
             rowScroll.heightAnchor.constraint(equalToConstant: rowDocHeight + 4),
         ])
 
-        let hint = StatusItemController.codexDependentProcessRestartHint(for: process.source)
-        let hintLabel = NSTextField(labelWithString: hint)
-        hintLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
-        hintLabel.textColor = NSColor.secondaryLabelColor
-        hintLabel.lineBreakMode = .byTruncatingTail
-        hintLabel.maximumNumberOfLines = 1
-
         wrapper.addArrangedSubview(topRow)
-        wrapper.addArrangedSubview(hintLabel)
         wrapper.widthAnchor.constraint(equalToConstant: max(180, width - 24)).isActive = true
         return wrapper
+    }
+
+    private func makeProcessSeparator(width: CGFloat) -> NSView {
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.widthAnchor.constraint(equalToConstant: max(180, width - 24)).isActive = true
+        return separator
     }
 
     private func makeColumnLabel(_ text: String) -> NSTextField {
