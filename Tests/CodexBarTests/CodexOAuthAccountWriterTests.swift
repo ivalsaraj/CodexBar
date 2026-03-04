@@ -71,6 +71,34 @@ struct CodexOAuthAccountWriterTests {
         }
     }
 
+    // MARK: - prepareForSwitch(jsonString:now:)
+
+    @Test("prepareForSwitch rewrites last_refresh but preserves tokens")
+    func prepareForSwitchRewritesLastRefresh() throws {
+        let json = """
+        {"auth_mode":"chatgpt","tokens":{"access_token":"tok_abc","refresh_token":"ref_xyz","id_token":"id_123",\
+        "account_id":"acc_456"},"last_refresh":"2025-01-01T01:02:03Z"}
+        """
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        let prepared = try CodexOAuthAccountWriter.prepareForSwitch(jsonString: json, now: now)
+        let parsed = try #require(JSONSerialization.jsonObject(with: Data(prepared.utf8)) as? [String: Any])
+        let tokens = try #require(parsed["tokens"] as? [String: Any])
+
+        #expect(tokens["access_token"] as? String == "tok_abc")
+        #expect(tokens["refresh_token"] as? String == "ref_xyz")
+        #expect(tokens["id_token"] as? String == "id_123")
+        #expect(tokens["account_id"] as? String == "acc_456")
+        #expect(parsed["last_refresh"] as? String == "2023-11-14T22:13:20Z")
+    }
+
+    @Test("prepareForSwitch invalid JSON fails validation")
+    func prepareForSwitchInvalidJSON() {
+        #expect(throws: CodexOAuthAccountWriterError.self) {
+            _ = try CodexOAuthAccountWriter.prepareForSwitch(jsonString: "not json")
+        }
+    }
+
     // MARK: - write(to:)
 
     @Test("write creates auth.json atomically")

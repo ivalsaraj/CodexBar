@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import CodexBar
 @testable import CodexBarCore
 
 @Suite("Codex account switch - CODEX_HOME env injection")
@@ -60,5 +61,37 @@ struct CodexAccountSwitchTests {
 
         CodexOAuthTempHome.cleanupAll(under: tempBase)
         #expect(!FileManager.default.fileExists(atPath: tempBase.path))
+    }
+
+    @Test("switchToAccount normalizes payload before writing auth.json")
+    @MainActor
+    func switchToAccountUsesNormalizedPayload() throws {
+        let codexHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codexbar-switch-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: codexHome) }
+
+        let rawToken = """
+        {"tokens":{"access_token":"tok_abc","refresh_token":"ref_xyz"},"last_refresh":"2020-01-01T00:00:00Z"}
+        """
+        var advanced = false
+
+        try CodexAccountSwitcher.switchToAccount(
+            token: rawToken,
+            codexHome: codexHome,
+            advance: { advanced = true })
+
+        let authData = try Data(contentsOf: codexHome.appendingPathComponent("auth.json"))
+        let parsed = try #require(JSONSerialization.jsonObject(with: authData) as? [String: Any])
+        let tokens = try #require(parsed["tokens"] as? [String: Any])
+        let lastRefresh = try #require(parsed["last_refresh"] as? String)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+
+        #expect(advanced)
+        #expect(tokens["access_token"] as? String == "tok_abc")
+        #expect(tokens["refresh_token"] as? String == "ref_xyz")
+        #expect(lastRefresh != "2020-01-01T00:00:00Z")
+        #expect(lastRefresh.hasSuffix("Z"))
+        #expect(formatter.date(from: lastRefresh) != nil)
     }
 }

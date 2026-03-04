@@ -106,6 +106,9 @@ extension UsageStore {
                         accountID: selectedAccount.id)
                 }
             }
+            if provider == .codex, result.sourceLabel == "oauth" {
+                await self.syncActiveCodexAccountTokenFromDiskIfNeeded()
+            }
             if let runtime = self.providerRuntimes[provider] {
                 let context = ProviderRuntimeContext(
                     provider: provider, settings: self.settings, store: self)

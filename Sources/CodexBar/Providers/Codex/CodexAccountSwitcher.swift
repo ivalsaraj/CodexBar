@@ -31,7 +31,8 @@ enum CodexAccountSwitcher {
         codexHome: URL,
         advance: () -> Void) throws
     {
-        try CodexOAuthAccountWriter.write(jsonString: token, toCodexHome: codexHome)
+        let prepared = try CodexOAuthAccountWriter.prepareForSwitch(jsonString: token)
+        try CodexOAuthAccountWriter.write(jsonString: prepared, toCodexHome: codexHome)
         advance()
     }
 }

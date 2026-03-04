@@ -45,6 +45,24 @@ extension UsageStore {
         return self.settings.showAllTokenAccountsInMenu && accounts.count > 1
     }
 
+    func syncActiveCodexAccountTokenFromDiskIfNeeded(env: [String: String]? = nil) async {
+        guard let active = self.settings.selectedTokenAccount(for: .codex) else { return }
+        let processEnv = env ?? ProcessInfo.processInfo.environment
+        let codexHome = Self.resolveCodexHomeDirectory(env: processEnv)
+        let diskToken = await Task.detached(priority: .utility) {
+            try? CodexCurrentLoginImporter.read(fromCodexHome: codexHome)
+        }.value
+        guard let diskToken else {
+            return
+        }
+
+        if Self.authPayloadsAreEquivalent(active.token, diskToken) { return }
+        self.settings.replaceTokenAccountToken(
+            provider: .codex,
+            accountID: active.id,
+            token: diskToken)
+    }
+
     func refreshTokenAccounts(
         provider: UsageProvider,
         accounts: [ProviderTokenAccount],
@@ -246,5 +264,35 @@ extension UsageStore {
             accountOrganization: existing?.accountOrganization,
             loginMethod: existing?.loginMethod)
         return snapshot.withIdentity(identity)
+    }
+
+    private static func resolveCodexHomeDirectory(env: [String: String]) -> URL {
+        if let raw = env["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !raw.isEmpty
+        {
+            return URL(fileURLWithPath: raw)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+    }
+
+    private static func authPayloadsAreEquivalent(_ lhs: String, _ rhs: String) -> Bool {
+        if lhs == rhs { return true }
+        guard let leftCanonical = self.canonicalAuthPayload(lhs),
+              let rightCanonical = self.canonicalAuthPayload(rhs)
+        else {
+            return false
+        }
+        return leftCanonical == rightCanonical
+    }
+
+    private static func canonicalAuthPayload(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let data = Data(trimmed.utf8)
+        guard let object = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        guard let canonicalData = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
+            return nil
+        }
+        return String(data: canonicalData, encoding: .utf8)
     }
 }

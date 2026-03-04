@@ -36,6 +36,42 @@ extension SettingsStore {
             ])
     }
 
+    func replaceTokenAccountToken(
+        provider: UsageProvider,
+        accountID: UUID,
+        token: String)
+    {
+        guard TokenAccountSupportCatalog.support(for: provider) != nil else { return }
+        guard let data = self.tokenAccountsData(for: provider), !data.accounts.isEmpty else { return }
+
+        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedToken.isEmpty else { return }
+        guard let index = data.accounts.firstIndex(where: { $0.id == accountID }) else { return }
+        guard data.accounts[index].token != trimmedToken else { return }
+
+        var updatedAccounts = data.accounts
+        let existing = updatedAccounts[index]
+        updatedAccounts[index] = ProviderTokenAccount(
+            id: existing.id,
+            label: existing.label,
+            token: trimmedToken,
+            addedAt: existing.addedAt,
+            lastUsed: existing.lastUsed)
+        let updated = ProviderTokenAccountData(
+            version: data.version,
+            accounts: updatedAccounts,
+            activeIndex: data.activeIndex)
+        self.updateProviderConfig(provider: provider) { entry in
+            entry.tokenAccounts = updated
+        }
+        CodexBarLog.logger(LogCategories.tokenAccounts).info(
+            "Token account token replaced",
+            metadata: [
+                "provider": provider.rawValue,
+                "accountID": accountID.uuidString,
+            ])
+    }
+
     func addTokenAccount(provider: UsageProvider, label: String, token: String) {
         guard TokenAccountSupportCatalog.support(for: provider) != nil else { return }
         let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)

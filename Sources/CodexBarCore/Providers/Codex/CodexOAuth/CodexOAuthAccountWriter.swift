@@ -60,6 +60,46 @@ public enum CodexOAuthAccountWriter {
         }
     }
 
+    /// Validates and normalizes auth payload before account switch writes.
+    /// - Ensures JSON is valid OAuth/API-key auth payload.
+    /// - Rewrites `last_refresh` with UTC ISO8601 timestamp.
+    /// - Emits canonical JSON with sorted keys.
+    public static func prepareForSwitch(jsonString: String, now: Date = Date()) throws -> String {
+        let trimmed = jsonString.trimmingCharacters(in: .whitespacesAndNewlines)
+        try self.validate(jsonString: trimmed)
+
+        let data = Data(trimmed.utf8)
+        let object: [String: Any]
+        do {
+            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw CodexOAuthAccountWriterError.invalidJSON("Root is not an object")
+            }
+            object = parsed
+        } catch let error as CodexOAuthAccountWriterError {
+            throw error
+        } catch {
+            throw CodexOAuthAccountWriterError.invalidJSON(error.localizedDescription)
+        }
+
+        var normalized = object
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.formatOptions = [.withInternetDateTime]
+        normalized["last_refresh"] = formatter.string(from: now)
+
+        do {
+            let normalizedData = try JSONSerialization.data(withJSONObject: normalized, options: [.sortedKeys])
+            guard let normalizedString = String(data: normalizedData, encoding: .utf8) else {
+                throw CodexOAuthAccountWriterError.invalidJSON("Failed to encode UTF-8 JSON")
+            }
+            return normalizedString
+        } catch let error as CodexOAuthAccountWriterError {
+            throw error
+        } catch {
+            throw CodexOAuthAccountWriterError.invalidJSON(error.localizedDescription)
+        }
+    }
+
     /// Validates then atomically writes `jsonString` as `auth.json` inside `codexHomeDir`.
     /// Creates `codexHomeDir` if it does not exist.
     /// Throws `CodexOAuthAccountWriterError` on validation failure or write error.
