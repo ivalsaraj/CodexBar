@@ -1,10 +1,53 @@
+import AppKit
 import CodexBarCore
 import Foundation
 import Testing
 @testable import CodexBar
 
-@Suite
+@Suite(.serialized)
 struct StatusItemControllerMenuTests {
+    private func makeStatusBarForTesting() -> NSStatusBar {
+        let env = ProcessInfo.processInfo.environment
+        if env["GITHUB_ACTIONS"] == "true" || env["CI"] == "true" {
+            return .system
+        }
+        return NSStatusBar()
+    }
+
+    @MainActor
+    private func makeController(suite: String = "StatusItemControllerMenuTests-\(UUID().uuidString)") -> StatusItemController {
+        let settings = SettingsStore(
+            configStore: testConfigStore(suiteName: suite),
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore())
+        settings.statusChecksEnabled = false
+        settings.refreshFrequency = .manual
+
+        let fetcher = UsageFetcher()
+        let store = UsageStore(
+            fetcher: fetcher,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+
+        return StatusItemController(
+            store: store,
+            settings: settings,
+            account: fetcher.loadAccountInfo(),
+            updater: DisabledUpdaterController(),
+            preferencesSelection: PreferencesSelection(),
+            statusBar: self.makeStatusBarForTesting())
+    }
+
+    @MainActor
+    private func waitForCodexRefreshCompletion(controller: StatusItemController) async {
+        for _ in 0..<100 {
+            if controller.codexDependentProcessesTask == nil {
+                return
+            }
+            await Task.yield()
+        }
+    }
+
     private func makeSnapshot(primary: RateWindow?, secondary: RateWindow?) -> UsageSnapshot {
         UsageSnapshot(primary: primary, secondary: secondary, updatedAt: Date())
     }
@@ -186,5 +229,87 @@ struct StatusItemControllerMenuTests {
 
         let badge = StatusItemController.tokenAccountSessionBadgeText(for: .codex, snapshot: snapshot)
         #expect(badge == nil)
+    }
+
+    @MainActor
+    @Test
+    func codexDependentProcessesPanelToggleFlipsExpandedState() {
+        let controller = self.makeController()
+        #expect(controller.codexDependentProcessesExpanded == false)
+
+        controller.toggleCodexDependentProcessesExpanded()
+        #expect(controller.codexDependentProcessesExpanded == true)
+
+        controller.toggleCodexDependentProcessesExpanded()
+        #expect(controller.codexDependentProcessesExpanded == false)
+    }
+
+    @MainActor
+    @Test
+    func codexSwitchSuccessTriggersDependentProcessRefresh() async {
+        let controller = self.makeController()
+        let expectedSnapshot = CodexDependentProcessSnapshot(
+            capturedAt: Date(timeIntervalSince1970: 1_709_541_000),
+            processes: [])
+
+        let originalProvider = StatusItemController.codexDependentProcessSnapshotProvider
+        StatusItemController.codexDependentProcessSnapshotProvider = { _ in
+            expectedSnapshot
+        }
+        defer {
+            StatusItemController.codexDependentProcessSnapshotProvider = originalProvider
+        }
+
+        controller.handleTokenAccountSwitchDidSucceed(provider: .codex, menu: nil)
+        await self.waitForCodexRefreshCompletion(controller: controller)
+
+        #expect(controller.codexDependentProcessesLoading == false)
+        #expect(controller.codexDependentProcessesSnapshot == expectedSnapshot)
+    }
+
+    @MainActor
+    @Test
+    func codexMenuOpenRefreshUsesLastMenuProviderWhenProviderIsNil() async {
+        let controller = self.makeController()
+        let expectedSnapshot = CodexDependentProcessSnapshot(
+            capturedAt: Date(timeIntervalSince1970: 1_709_542_000),
+            processes: [])
+
+        let originalProvider = StatusItemController.codexDependentProcessSnapshotProvider
+        StatusItemController.codexDependentProcessSnapshotProvider = { _ in
+            expectedSnapshot
+        }
+        defer {
+            StatusItemController.codexDependentProcessSnapshotProvider = originalProvider
+        }
+
+        controller.codexDependentProcessesSnapshot = nil
+        controller.lastMenuProvider = .codex
+        controller.refreshCodexDependentProcessesOnMenuOpenIfNeeded(provider: nil)
+        await self.waitForCodexRefreshCompletion(controller: controller)
+
+        #expect(controller.codexDependentProcessesSnapshot == expectedSnapshot)
+        #expect(controller.codexDependentProcessesLoading == false)
+    }
+
+    @Test
+    func codexDependentProcessAuthRiskLabelUsesLastSwitchTime() {
+        let process = CodexDependentProcessSnapshot.Process(
+            process: "Codex",
+            pid: 42,
+            source: .codexApp,
+            startedAt: Date(timeIntervalSince1970: 1_709_541_000),
+            command: "/Applications/Codex.app/Codex")
+        let switchAfterStart = Date(timeIntervalSince1970: 1_709_541_600)
+        let switchBeforeStart = Date(timeIntervalSince1970: 1_709_540_900)
+
+        #expect(
+            StatusItemController.codexDependentProcessAuthRiskLabel(
+                for: process,
+                lastSwitchAt: switchAfterStart) == "May hold old token")
+        #expect(
+            StatusItemController.codexDependentProcessAuthRiskLabel(
+                for: process,
+                lastSwitchAt: switchBeforeStart) == "Current token likely in use")
     }
 }

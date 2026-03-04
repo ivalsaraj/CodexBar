@@ -3,6 +3,14 @@ import CodexBarCore
 import Foundation
 
 extension StatusItemController {
+    enum CodexDependentProcessesRefreshReason: String {
+        case menuOpen = "menuOpen"
+        case postSwitch = "postSwitch"
+        case manual = "manual"
+    }
+
+    private static let codexDependentProcessSnapshotMaxAge: TimeInterval = 20
+
     struct TokenAccountMenuDisplay {
         let provider: UsageProvider
         let accounts: [ProviderTokenAccount]
@@ -31,7 +39,34 @@ extension StatusItemController {
         if let switchItem = self.makeTokenAccountSwitchActionItem(display: display) {
             menu.addItem(switchItem)
         }
+        if display.provider == .codex {
+            let panelItem = self.makeCodexDependentProcessesPanelItem(menu: menu)
+            menu.addItem(panelItem)
+        }
         menu.addItem(.separator())
+    }
+
+    private func makeCodexDependentProcessesPanelItem(menu: NSMenu) -> NSMenuItem {
+        let width = self.menuCardWidth(for: self.store.enabledProviders(), menu: menu)
+        let panel = CodexDependentProcessesPanelView(
+            snapshot: self.codexDependentProcessesSnapshot,
+            expanded: self.codexDependentProcessesExpanded,
+            loading: self.codexDependentProcessesLoading,
+            lastSwitchAt: self.codexLastAccountSwitchAt,
+            width: width,
+            onToggle: { [weak self] in
+                guard let self else { return }
+                self.toggleCodexDependentProcessesExpanded()
+            },
+            onRefresh: { [weak self] in
+                guard let self else { return }
+                self.refreshCodexDependentProcesses(reason: .manual)
+            })
+        let item = NSMenuItem()
+        item.view = panel
+        item.isEnabled = false
+        item.representedObject = "codexDependentProcessesPanel"
+        return item
     }
 
     private func makeTokenAccountSwitcherItem(
@@ -145,6 +180,10 @@ extension StatusItemController {
         guard !accounts.isEmpty else { return }
         let clamped = max(0, min(index, max(0, accounts.count - 1)))
         let selectedAccount = accounts[clamped]
+        let previousCodexLastSwitchAt = self.codexLastAccountSwitchAt
+        if provider == .codex {
+            self.codexLastAccountSwitchAt = Date()
+        }
         self.tokenAccountPreviewSelection[provider] = selectedAccount.id
         self.tokenAccountSwitchErrors.removeValue(forKey: provider)
         self.tokenAccountPreviewTasks[provider]?.cancel()
@@ -157,6 +196,9 @@ extension StatusItemController {
             do {
                 try CodexAccountSwitcher.switchToAccount(index: clamped, settings: self.settings)
             } catch {
+                if provider == .codex {
+                    self.codexLastAccountSwitchAt = previousCodexLastSwitchAt
+                }
                 self.tokenAccountSwitchErrors[provider] = error.localizedDescription
                 self.tokenAccountSwitchInFlight.remove(provider)
                 self.tokenAccountSwitchSnapshotOverrides.removeValue(forKey: provider)
@@ -206,11 +248,7 @@ extension StatusItemController {
             self.tokenAccountSwitchErrors.removeValue(forKey: provider)
             self.tokenAccountSwitchTasks[provider] = nil
 
-            if let menu {
-                self.populateMenu(menu, provider: provider)
-                self.markMenuFresh(menu)
-            }
-            self.applyIcon(phase: nil)
+            self.handleTokenAccountSwitchDidSucceed(provider: provider, menu: menu)
         }
     }
 
@@ -269,5 +307,96 @@ extension StatusItemController {
             return self.store.snapshot(for: provider)
         }
         return nil
+    }
+
+    func refreshCodexDependentProcesses(reason: CodexDependentProcessesRefreshReason) {
+        self.codexDependentProcessesTask?.cancel()
+        self.codexDependentProcessesTask = nil
+        self.codexDependentProcessesLoading = true
+        self.menuContentVersion &+= 1
+        self.refreshOpenMenusIfNeeded()
+
+        self.codexDependentProcessesTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let snapshot = try await Self.codexDependentProcessSnapshotProvider(Date())
+                guard !Task.isCancelled else { return }
+                self.codexDependentProcessesSnapshot = snapshot
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.loginLogger.error(
+                    "Dependent process refresh failed",
+                    metadata: [
+                        "provider": UsageProvider.codex.rawValue,
+                        "reason": reason.rawValue,
+                        "error": error.localizedDescription,
+                    ])
+            }
+            guard !Task.isCancelled else { return }
+            self.codexDependentProcessesLoading = false
+            self.codexDependentProcessesTask = nil
+            self.menuContentVersion &+= 1
+            self.refreshOpenMenusIfNeeded()
+        }
+    }
+
+    func toggleCodexDependentProcessesExpanded() {
+        self.codexDependentProcessesExpanded.toggle()
+        self.menuContentVersion &+= 1
+        self.refreshOpenMenusIfNeeded()
+    }
+
+    func refreshCodexDependentProcessesOnMenuOpenIfNeeded(provider: UsageProvider?) {
+        let resolvedProvider = provider ?? self.lastMenuProvider
+        guard resolvedProvider == .codex else { return }
+        guard !self.codexDependentProcessesLoading else { return }
+        guard let snapshot = self.codexDependentProcessesSnapshot else {
+            self.refreshCodexDependentProcesses(reason: .menuOpen)
+            return
+        }
+        if let lastSwitchAt = self.codexLastAccountSwitchAt, snapshot.capturedAt < lastSwitchAt {
+            self.refreshCodexDependentProcesses(reason: .menuOpen)
+            return
+        }
+        if Date().timeIntervalSince(snapshot.capturedAt) >= Self.codexDependentProcessSnapshotMaxAge {
+            self.refreshCodexDependentProcesses(reason: .menuOpen)
+        }
+    }
+
+    func handleTokenAccountSwitchDidSucceed(provider: UsageProvider, menu: NSMenu?) {
+        if provider == .codex {
+            self.codexLastAccountSwitchAt = Date()
+            self.refreshCodexDependentProcesses(reason: .postSwitch)
+        }
+        if let menu {
+            self.populateMenu(menu, provider: provider)
+            self.markMenuFresh(menu)
+        }
+        self.applyIcon(phase: nil)
+    }
+
+    nonisolated static func codexDependentProcessAuthRiskLabel(
+        for process: CodexDependentProcessSnapshot.Process,
+        lastSwitchAt: Date?) -> String
+    {
+        if process.isStaleRisk(relativeTo: lastSwitchAt) {
+            return "May hold old token"
+        }
+        return "Current token likely in use"
+    }
+
+    nonisolated static func codexDependentProcessRestartHint(
+        for source: CodexDependentProcessSnapshot.Process.Source) -> String
+    {
+        switch source {
+        case .browserForce:
+            return "Restart BrowserForce MCP session"
+        case .codexApp:
+            return "Restart Codex.app session"
+        case .cursor:
+            return "Restart Cursor Codex session"
+        case .terminalOther:
+            return "Restart this terminal Codex session"
+        }
     }
 }

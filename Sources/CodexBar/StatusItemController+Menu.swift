@@ -106,6 +106,7 @@ extension StatusItemController {
             // Heights are already set during populateMenu, no need to remeasure
         }
         self.openMenus[ObjectIdentifier(menu)] = menu
+        self.refreshCodexDependentProcessesOnMenuOpenIfNeeded(provider: provider)
         // Only schedule refresh after menu is registered as open - refreshNow is called async
         if Self.menuRefreshEnabled {
             self.scheduleOpenMenuRefresh(for: menu)

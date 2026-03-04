@@ -16,6 +16,10 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
     // Disable SwiftUI menu cards + menu refresh work in tests to avoid swiftpm-testing-helper crashes.
     static var menuCardRenderingEnabled = !SettingsStore.isRunningTests
     static var menuRefreshEnabled = !SettingsStore.isRunningTests
+    static var codexDependentProcessSnapshotProvider: @Sendable (Date) async throws -> CodexDependentProcessSnapshot = {
+        now in
+        try await CodexDependentProcessProbe.snapshot(now: now)
+    }
     typealias Factory = (UsageStore, SettingsStore, AccountInfo, UpdaterProviding, PreferencesSelection)
         -> StatusItemControlling
     static let defaultFactory: Factory = { store, settings, account, updater, selection in
@@ -54,6 +58,11 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
     var tokenAccountSwitchSnapshotOverrides: [UsageProvider: UsageSnapshot] = [:]
     var tokenAccountPreviewSelection: [UsageProvider: UUID] = [:]
     var tokenAccountSwitchErrors: [UsageProvider: String] = [:]
+    var codexDependentProcessesExpanded = false
+    var codexDependentProcessesSnapshot: CodexDependentProcessSnapshot?
+    var codexDependentProcessesLoading = false
+    var codexDependentProcessesTask: Task<Void, Never>?
+    var codexLastAccountSwitchAt: Date?
     var blinkTask: Task<Void, Never>?
     var loginTask: Task<Void, Never>? {
         didSet { self.refreshMenusForLoginStateChange() }
@@ -491,6 +500,7 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
     deinit {
         self.blinkTask?.cancel()
         self.loginTask?.cancel()
+        self.codexDependentProcessesTask?.cancel()
         NotificationCenter.default.removeObserver(self)
     }
 }

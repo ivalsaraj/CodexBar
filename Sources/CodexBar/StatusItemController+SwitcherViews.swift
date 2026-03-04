@@ -993,3 +993,272 @@ final class TokenAccountSwitcherView: NSView {
         self.onSelect(index)
     }
 }
+
+final class CodexDependentProcessesPanelView: NSView {
+    private let onToggle: () -> Void
+    private let onRefresh: () -> Void
+
+    init(
+        snapshot: CodexDependentProcessSnapshot?,
+        expanded: Bool,
+        loading: Bool,
+        lastSwitchAt: Date?,
+        width: CGFloat,
+        onToggle: @escaping () -> Void,
+        onRefresh: @escaping () -> Void)
+    {
+        self.onToggle = onToggle
+        self.onRefresh = onRefresh
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 1))
+        self.translatesAutoresizingMaskIntoConstraints = false
+        self.wantsLayer = true
+        self.layer?.cornerRadius = 6
+        self.layer?.backgroundColor = NSColor.clear.cgColor
+        self.buildView(
+            snapshot: snapshot,
+            expanded: expanded,
+            loading: loading,
+            lastSwitchAt: lastSwitchAt,
+            width: width)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    private func buildView(
+        snapshot: CodexDependentProcessSnapshot?,
+        expanded: Bool,
+        loading: Bool,
+        lastSwitchAt: Date?,
+        width: CGFloat)
+    {
+        let processes = snapshot?.processes ?? []
+        let rootStack = NSStackView()
+        rootStack.orientation = .vertical
+        rootStack.alignment = .leading
+        rootStack.spacing = 6
+        rootStack.translatesAutoresizingMaskIntoConstraints = false
+        self.addSubview(rootStack)
+
+        let headerStack = NSStackView()
+        headerStack.orientation = .horizontal
+        headerStack.alignment = .centerY
+        headerStack.spacing = 6
+
+        let disclosure = expanded ? "▾" : "▸"
+        let headerTitle = "\(disclosure) Dependent Codex Processes (\(processes.count))"
+        let headerButton = NSButton(title: headerTitle, target: self, action: #selector(self.handleToggle))
+        headerButton.isBordered = false
+        headerButton.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        headerButton.alignment = .left
+        headerButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let refreshTitle = loading ? "Refreshing…" : "Refresh"
+        let refreshButton = NSButton(title: refreshTitle, target: self, action: #selector(self.handleRefresh))
+        refreshButton.bezelStyle = .inline
+        refreshButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        refreshButton.isEnabled = !loading
+        refreshButton.setContentHuggingPriority(.required, for: .horizontal)
+
+        headerStack.addArrangedSubview(headerButton)
+        headerStack.addArrangedSubview(spacer)
+        headerStack.addArrangedSubview(refreshButton)
+        rootStack.addArrangedSubview(headerStack)
+
+        if expanded {
+            rootStack.addArrangedSubview(self.makeColumnsHeader())
+
+            let scrollView = NSScrollView()
+            scrollView.drawsBackground = false
+            scrollView.borderType = .noBorder
+            scrollView.hasVerticalScroller = true
+            scrollView.hasHorizontalScroller = false
+            scrollView.autohidesScrollers = true
+            scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+            let content = NSStackView()
+            content.orientation = .vertical
+            content.alignment = .leading
+            content.spacing = 6
+            content.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
+
+            if loading, processes.isEmpty {
+                content.addArrangedSubview(self.makePlaceholder("Loading dependent processes…"))
+            } else if processes.isEmpty {
+                content.addArrangedSubview(self.makePlaceholder("No dependent Codex processes detected."))
+            } else {
+                for process in processes {
+                    let row = self.makeProcessRow(
+                        process: process,
+                        lastSwitchAt: lastSwitchAt,
+                        width: width)
+                    content.addArrangedSubview(row)
+                }
+            }
+
+            let document = NSView()
+            document.addSubview(content)
+            content.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+                content.topAnchor.constraint(equalTo: document.topAnchor),
+                content.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+                content.widthAnchor.constraint(equalToConstant: max(180, width - 26)),
+            ])
+            document.layoutSubtreeIfNeeded()
+            let contentHeight = max(20, content.fittingSize.height)
+            document.frame = NSRect(x: 0, y: 0, width: max(180, width - 26), height: contentHeight)
+            scrollView.documentView = document
+
+            rootStack.addArrangedSubview(scrollView)
+            NSLayoutConstraint.activate([
+                scrollView.heightAnchor.constraint(equalToConstant: 156),
+                scrollView.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
+            ])
+        }
+
+        NSLayoutConstraint.activate([
+            rootStack.leadingAnchor.constraint(equalTo: self.leadingAnchor, constant: 8),
+            rootStack.trailingAnchor.constraint(equalTo: self.trailingAnchor, constant: -8),
+            rootStack.topAnchor.constraint(equalTo: self.topAnchor, constant: 6),
+            rootStack.bottomAnchor.constraint(equalTo: self.bottomAnchor, constant: -6),
+            rootStack.widthAnchor.constraint(equalToConstant: max(180, width - 16)),
+        ])
+
+        self.layoutSubtreeIfNeeded()
+        let measuredHeight = max(30, rootStack.fittingSize.height + 12)
+        self.frame = NSRect(x: 0, y: 0, width: width, height: measuredHeight)
+    }
+
+    private func makeColumnsHeader() -> NSView {
+        let columns = NSStackView()
+        columns.orientation = .horizontal
+        columns.alignment = .centerY
+        columns.distribution = .fill
+        columns.spacing = 4
+        columns.translatesAutoresizingMaskIntoConstraints = false
+
+        let process = self.makeColumnLabel("Process")
+        let pid = self.makeColumnLabel("PID")
+        let source = self.makeColumnLabel("Source")
+        let started = self.makeColumnLabel("Started")
+        let risk = self.makeColumnLabel("Auth Risk")
+
+        columns.addArrangedSubview(process)
+        columns.addArrangedSubview(pid)
+        columns.addArrangedSubview(source)
+        columns.addArrangedSubview(started)
+        columns.addArrangedSubview(risk)
+
+        pid.widthAnchor.constraint(equalToConstant: 34).isActive = true
+        source.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        started.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        risk.widthAnchor.constraint(equalToConstant: 88).isActive = true
+
+        return columns
+    }
+
+    private func makeProcessRow(
+        process: CodexDependentProcessSnapshot.Process,
+        lastSwitchAt: Date?,
+        width: CGFloat) -> NSView
+    {
+        let wrapper = NSStackView()
+        wrapper.orientation = .vertical
+        wrapper.alignment = .leading
+        wrapper.spacing = 2
+        wrapper.translatesAutoresizingMaskIntoConstraints = false
+
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.distribution = .fill
+        row.spacing = 4
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        let processLabel = self.makeValueLabel(process.process)
+        processLabel.toolTip = process.command
+        let pidLabel = self.makeValueLabel(String(process.pid))
+        pidLabel.alignment = .center
+        let sourceLabel = self.makeValueLabel(process.source.rawValue)
+        let startedLabel = self.makeValueLabel(Self.startedAtFormatter.string(from: process.startedAt))
+        let riskText = StatusItemController.codexDependentProcessAuthRiskLabel(
+            for: process,
+            lastSwitchAt: lastSwitchAt)
+        let riskLabel = self.makeValueLabel(riskText)
+        riskLabel.toolTip = riskText
+
+        row.addArrangedSubview(processLabel)
+        row.addArrangedSubview(pidLabel)
+        row.addArrangedSubview(sourceLabel)
+        row.addArrangedSubview(startedLabel)
+        row.addArrangedSubview(riskLabel)
+
+        pidLabel.widthAnchor.constraint(equalToConstant: 34).isActive = true
+        sourceLabel.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        startedLabel.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        riskLabel.widthAnchor.constraint(equalToConstant: 88).isActive = true
+
+        let hint = StatusItemController.codexDependentProcessRestartHint(for: process.source)
+        let hintLabel = NSTextField(labelWithString: hint)
+        hintLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+        hintLabel.textColor = NSColor.secondaryLabelColor
+        hintLabel.lineBreakMode = .byTruncatingTail
+        hintLabel.maximumNumberOfLines = 1
+
+        wrapper.addArrangedSubview(row)
+        wrapper.addArrangedSubview(hintLabel)
+        wrapper.widthAnchor.constraint(equalToConstant: max(180, width - 24)).isActive = true
+        return wrapper
+    }
+
+    private func makeColumnLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
+        label.textColor = NSColor.secondaryLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        return label
+    }
+
+    private func makeValueLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        label.textColor = NSColor.labelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        return label
+    }
+
+    private func makePlaceholder(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        label.textColor = NSColor.secondaryLabelColor
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 2
+        return label
+    }
+
+    @objc private func handleToggle() {
+        self.onToggle()
+    }
+
+    @objc private func handleRefresh() {
+        self.onRefresh()
+    }
+
+    private static let startedAtFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+}
