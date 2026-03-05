@@ -60,6 +60,7 @@ extension StatusItemController {
             snapshot: self.codexDependentProcessesSnapshot,
             expanded: self.codexDependentProcessesExpanded,
             loading: self.codexDependentProcessesLoading,
+            dataLoading: self.codexDependentDataRefreshInFlight,
             lastSwitchAt: self.codexLastAccountSwitchAt,
             stoppingPIDs: self.codexDependentProcessStoppingPIDs,
             width: width,
@@ -67,9 +68,9 @@ extension StatusItemController {
                 guard let self else { return }
                 self.toggleCodexDependentProcessesExpanded()
             },
-            onRefresh: { [weak self] in
+            onRefresh: { [weak self, weak menu] in
                 guard let self else { return }
-                self.refreshCodexDependentProcesses(reason: .manual)
+                self.refreshCodexDependentProcessesAndUsage(menu: menu)
             },
             onStop: { [weak self] process in
                 guard let self else { return }
@@ -164,7 +165,8 @@ extension StatusItemController {
     private func selectTokenAccountPreview(
         display: TokenAccountMenuDisplay,
         index: Int,
-        menu: NSMenu)
+        menu: NSMenu,
+        preferCachedSnapshot: Bool = true)
     {
         let clamped = max(0, min(index, max(0, display.accounts.count - 1)))
         let selectedAccount = display.accounts[clamped]
@@ -182,15 +184,17 @@ extension StatusItemController {
             return
         }
 
-        if let cached = self.store.cachedTokenAccountSnapshot(
-            for: display.provider,
-            accountID: selectedAccount.id)
-        {
-            self.tokenAccountSwitchSnapshotOverrides[display.provider] = cached
-            self.populateMenu(menu, provider: display.provider)
-            self.markMenuFresh(menu)
-            self.applyIcon(phase: nil)
-            return
+        if preferCachedSnapshot {
+            if let cached = self.store.cachedTokenAccountSnapshot(
+                for: display.provider,
+                accountID: selectedAccount.id)
+            {
+                self.tokenAccountSwitchSnapshotOverrides[display.provider] = cached
+                self.populateMenu(menu, provider: display.provider)
+                self.markMenuFresh(menu)
+                self.applyIcon(phase: nil)
+                return
+            }
         }
 
         self.tokenAccountSwitchSnapshotOverrides.removeValue(forKey: display.provider)
@@ -439,6 +443,50 @@ extension StatusItemController {
         }
     }
 
+    func refreshCodexDependentProcessesAndUsage(menu: NSMenu?) {
+        self.refreshCodexDependentProcesses(reason: .manual)
+
+        self.codexDependentDataRefreshTask?.cancel()
+        self.codexDependentDataRefreshTask = nil
+        let generation = self.codexDependentDataRefreshGeneration + 1
+        self.codexDependentDataRefreshGeneration = generation
+        self.codexDependentDataRefreshInFlight = true
+        self.menuContentVersion &+= 1
+        self.refreshOpenMenusIfNeeded()
+
+        self.codexDependentDataRefreshTask = Task { @MainActor [weak self, weak menu] in
+            guard let self else { return }
+            defer {
+                if self.codexDependentDataRefreshGeneration == generation {
+                    self.codexDependentDataRefreshInFlight = false
+                    self.codexDependentDataRefreshTask = nil
+                    self.menuContentVersion &+= 1
+                    self.refreshOpenMenusIfNeeded()
+                }
+            }
+
+            await ProviderInteractionContext.$current.withValue(.userInitiated) {
+                await self.store.refresh(forceTokenUsage: true)
+            }
+            guard !Task.isCancelled else { return }
+            guard self.codexDependentDataRefreshGeneration == generation else { return }
+            guard let menu else { return }
+            guard self.openMenus[ObjectIdentifier(menu)] != nil else { return }
+
+            if let display = self.tokenAccountMenuDisplay(for: .codex) {
+                self.selectTokenAccountPreview(
+                    display: display,
+                    index: display.selectedIndex,
+                    menu: menu,
+                    preferCachedSnapshot: false)
+            } else {
+                self.populateMenu(menu, provider: .codex)
+                self.markMenuFresh(menu)
+            }
+            self.applyIcon(phase: nil)
+        }
+    }
+
     func toggleCodexDependentProcessesExpanded() {
         self.codexDependentProcessesExpanded.toggle()
         self.menuContentVersion &+= 1
@@ -482,6 +530,22 @@ extension StatusItemController {
             return "May hold old token"
         }
         return "Current token likely in use"
+    }
+
+    nonisolated static func codexDependentRefreshStatusText(
+        processesLoading: Bool,
+        dataLoading: Bool) -> String?
+    {
+        if processesLoading, dataLoading {
+            return "Refreshing processes and usage data…"
+        }
+        if processesLoading {
+            return "Refreshing dependent processes…"
+        }
+        if dataLoading {
+            return "Refreshing usage data…"
+        }
+        return nil
     }
 
     nonisolated static func codexDependentProcessRestartHint(

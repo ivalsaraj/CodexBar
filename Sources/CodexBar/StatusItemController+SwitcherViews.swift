@@ -995,6 +995,15 @@ final class TokenAccountSwitcherView: NSView {
 }
 
 final class CodexDependentProcessesPanelView: NSView {
+    private struct RefreshState {
+        let processesLoading: Bool
+        let dataLoading: Bool
+
+        var isRefreshing: Bool {
+            self.processesLoading || self.dataLoading
+        }
+    }
+
     private let onToggle: () -> Void
     private let onRefresh: () -> Void
     private let onStop: (CodexDependentProcessSnapshot.Process) -> Void
@@ -1005,6 +1014,7 @@ final class CodexDependentProcessesPanelView: NSView {
         snapshot: CodexDependentProcessSnapshot?,
         expanded: Bool,
         loading: Bool,
+        dataLoading: Bool,
         lastSwitchAt: Date?,
         stoppingPIDs: Set<Int>,
         width: CGFloat,
@@ -1021,10 +1031,11 @@ final class CodexDependentProcessesPanelView: NSView {
         self.wantsLayer = true
         self.layer?.cornerRadius = 6
         self.layer?.backgroundColor = NSColor.clear.cgColor
+        let refreshState = RefreshState(processesLoading: loading, dataLoading: dataLoading)
         self.buildView(
             snapshot: snapshot,
             expanded: expanded,
-            loading: loading,
+            refreshState: refreshState,
             lastSwitchAt: lastSwitchAt,
             width: width)
     }
@@ -1037,7 +1048,7 @@ final class CodexDependentProcessesPanelView: NSView {
     private func buildView(
         snapshot: CodexDependentProcessSnapshot?,
         expanded: Bool,
-        loading: Bool,
+        refreshState: RefreshState,
         lastSwitchAt: Date?,
         width: CGFloat)
     {
@@ -1067,17 +1078,29 @@ final class CodexDependentProcessesPanelView: NSView {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let refreshTitle = loading ? "Refreshing…" : "Refresh"
+        let refreshTitle = refreshState.isRefreshing ? "Refreshing…" : "Refresh"
         let refreshButton = NSButton(title: refreshTitle, target: self, action: #selector(self.handleRefresh))
         refreshButton.bezelStyle = .inline
         refreshButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
-        refreshButton.isEnabled = !loading
+        refreshButton.isEnabled = !refreshState.isRefreshing
         refreshButton.setContentHuggingPriority(.required, for: .horizontal)
 
         headerStack.addArrangedSubview(headerButton)
         headerStack.addArrangedSubview(spacer)
         headerStack.addArrangedSubview(refreshButton)
         rootStack.addArrangedSubview(headerStack)
+
+        if let statusText = StatusItemController.codexDependentRefreshStatusText(
+            processesLoading: refreshState.processesLoading,
+            dataLoading: refreshState.dataLoading)
+        {
+            let statusLabel = NSTextField(labelWithString: statusText)
+            statusLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+            statusLabel.textColor = NSColor.secondaryLabelColor
+            statusLabel.lineBreakMode = .byTruncatingTail
+            statusLabel.maximumNumberOfLines = 1
+            rootStack.addArrangedSubview(statusLabel)
+        }
 
         if expanded {
             rootStack.addArrangedSubview(self.makeColumnsHeader())
@@ -1096,7 +1119,7 @@ final class CodexDependentProcessesPanelView: NSView {
             content.spacing = 6
             content.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
 
-            if loading, processes.isEmpty {
+            if refreshState.processesLoading, processes.isEmpty {
                 content.addArrangedSubview(self.makePlaceholder("Loading dependent processes…"))
             } else if processes.isEmpty {
                 content.addArrangedSubview(self.makePlaceholder("No dependent Codex processes detected."))

@@ -49,6 +49,16 @@ struct StatusItemControllerMenuTests {
         }
     }
 
+    @MainActor
+    private func waitForCodexDataRefreshCompletion(controller: StatusItemController) async {
+        for _ in 0..<200 {
+            if controller.codexDependentDataRefreshTask == nil {
+                return
+            }
+            await Task.yield()
+        }
+    }
+
     private func makeSnapshot(primary: RateWindow?, secondary: RateWindow?) -> UsageSnapshot {
         UsageSnapshot(primary: primary, secondary: secondary, updatedAt: Date())
     }
@@ -232,6 +242,26 @@ struct StatusItemControllerMenuTests {
         #expect(badge == nil)
     }
 
+    @Test
+    func codexDependentRefreshStatusTextMatchesCombinedLoadingState() {
+        #expect(
+            StatusItemController.codexDependentRefreshStatusText(
+                processesLoading: false,
+                dataLoading: false) == nil)
+        #expect(
+            StatusItemController.codexDependentRefreshStatusText(
+                processesLoading: true,
+                dataLoading: false) == "Refreshing dependent processes…")
+        #expect(
+            StatusItemController.codexDependentRefreshStatusText(
+                processesLoading: false,
+                dataLoading: true) == "Refreshing usage data…")
+        #expect(
+            StatusItemController.codexDependentRefreshStatusText(
+                processesLoading: true,
+                dataLoading: true) == "Refreshing processes and usage data…")
+    }
+
     @MainActor
     @Test
     func codexDependentProcessesPanelToggleFlipsExpandedState() {
@@ -266,6 +296,33 @@ struct StatusItemControllerMenuTests {
 
         #expect(controller.codexDependentProcessesLoading == false)
         #expect(controller.codexDependentProcessesSnapshot == expectedSnapshot)
+    }
+
+    @MainActor
+    @Test
+    func codexManualPanelRefreshStartsDependentProcessAndDataRefresh() async {
+        let controller = self.makeController()
+        let expectedSnapshot = CodexDependentProcessSnapshot(
+            capturedAt: Date(timeIntervalSince1970: 1_709_541_111),
+            processes: [])
+
+        let originalProvider = StatusItemController.codexDependentProcessSnapshotProvider
+        StatusItemController.codexDependentProcessSnapshotProvider = { _ in
+            expectedSnapshot
+        }
+        defer {
+            StatusItemController.codexDependentProcessSnapshotProvider = originalProvider
+        }
+
+        controller.refreshCodexDependentProcessesAndUsage(menu: nil)
+
+        #expect(controller.codexDependentProcessesLoading)
+        #expect(controller.codexDependentDataRefreshInFlight)
+        #expect(controller.codexDependentDataRefreshTask != nil)
+
+        await self.waitForCodexRefreshCompletion(controller: controller)
+        await self.waitForCodexDataRefreshCompletion(controller: controller)
+        #expect(controller.codexDependentDataRefreshInFlight == false)
     }
 
     @MainActor

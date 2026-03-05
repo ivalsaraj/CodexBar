@@ -66,6 +66,9 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
     var codexDependentProcessesSnapshot: CodexDependentProcessSnapshot?
     var codexDependentProcessesLoading = false
     var codexDependentProcessesTask: Task<Void, Never>?
+    var codexDependentDataRefreshInFlight = false
+    var codexDependentDataRefreshTask: Task<Void, Never>?
+    var codexDependentDataRefreshGeneration = 0
     var codexDependentProcessStopTasks: [Int: Task<Void, Never>] = [:]
     var codexDependentProcessStoppingPIDs: Set<Int> = []
     var codexLastAccountSwitchAt: Date?
@@ -507,6 +510,7 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
         self.blinkTask?.cancel()
         self.loginTask?.cancel()
         self.codexDependentProcessesTask?.cancel()
+        self.codexDependentDataRefreshTask?.cancel()
         for task in self.codexDependentProcessStopTasks.values {
             task.cancel()
         }
