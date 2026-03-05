@@ -632,6 +632,8 @@ extension UsageMenuCardView.Model {
         let resetTimeDisplayStyle: ResetTimeDisplayStyle
         let tokenCostUsageEnabled: Bool
         let showOptionalCreditsAndExtraUsage: Bool
+        let sourceLabel: String?
+        let kiloAutoMode: Bool
         let hidePersonalInfo: Bool
         let forceLoadingSubtitle: Bool
         let now: Date
@@ -653,6 +655,8 @@ extension UsageMenuCardView.Model {
             resetTimeDisplayStyle: ResetTimeDisplayStyle,
             tokenCostUsageEnabled: Bool,
             showOptionalCreditsAndExtraUsage: Bool,
+            sourceLabel: String? = nil,
+            kiloAutoMode: Bool = false,
             hidePersonalInfo: Bool,
             forceLoadingSubtitle: Bool = false,
             now: Date)
@@ -673,6 +677,8 @@ extension UsageMenuCardView.Model {
             self.resetTimeDisplayStyle = resetTimeDisplayStyle
             self.tokenCostUsageEnabled = tokenCostUsageEnabled
             self.showOptionalCreditsAndExtraUsage = showOptionalCreditsAndExtraUsage
+            self.sourceLabel = sourceLabel
+            self.kiloAutoMode = kiloAutoMode
             self.hidePersonalInfo = hidePersonalInfo
             self.forceLoadingSubtitle = forceLoadingSubtitle
             self.now = now
@@ -686,7 +692,7 @@ extension UsageMenuCardView.Model {
             account: input.account,
             metadata: input.metadata)
         let metrics = Self.metrics(input: input)
-        let usageNotes = Self.usageNotes(provider: input.provider, snapshot: input.snapshot)
+        let usageNotes = Self.usageNotes(input: input)
         let creditsText: String? = if input.provider == .openrouter {
             nil
         } else if input.provider == .codex, !input.showOptionalCreditsAndExtraUsage {
@@ -731,20 +737,31 @@ extension UsageMenuCardView.Model {
             progressColor: Self.progressColor(for: input.provider))
     }
 
-    private static func usageNotes(provider: UsageProvider, snapshot: UsageSnapshot?) -> [String] {
-        guard provider == .openrouter,
-              let openRouter = snapshot?.openRouterUsage
+    private static func usageNotes(input: Input) -> [String] {
+        if input.provider == .kilo {
+            var notes = Self.kiloLoginDetails(snapshot: input.snapshot)
+            let resolvedSource = input.sourceLabel?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if input.kiloAutoMode,
+               resolvedSource == "cli",
+               !notes.contains(where: { $0.caseInsensitiveCompare("Using CLI fallback") == .orderedSame })
+            {
+                notes.append("Using CLI fallback")
+            }
+            return notes
+        }
+
+        guard input.provider == .openrouter,
+              let openRouter = input.snapshot?.openRouterUsage
         else {
             return []
         }
 
-        switch openRouter.keyQuotaStatus {
-        case .available:
-            return []
-        case .noLimitConfigured:
-            return ["No limit set for the API key"]
-        case .unavailable:
-            return ["API key limit unavailable right now"]
+        return switch openRouter.keyQuotaStatus {
+        case .available: []
+        case .noLimitConfigured: ["No limit set for the API key"]
+        case .unavailable: ["API key limit unavailable right now"]
         }
     }
 
@@ -769,6 +786,12 @@ extension UsageMenuCardView.Model {
         account: AccountInfo,
         metadata: ProviderMetadata) -> String?
     {
+        if provider == .kilo {
+            guard let pass = self.kiloLoginPass(snapshot: snapshot) else {
+                return nil
+            }
+            return self.planDisplay(pass)
+        }
         if let plan = snapshot?.loginMethod(for: provider), !plan.isEmpty {
             return self.planDisplay(plan)
         }
@@ -783,6 +806,37 @@ extension UsageMenuCardView.Model {
     private static func planDisplay(_ text: String) -> String {
         let cleaned = UsageFormatter.cleanPlanName(text)
         return cleaned.isEmpty ? text : cleaned
+    }
+
+    private static func kiloLoginPass(snapshot: UsageSnapshot?) -> String? {
+        self.kiloLoginParts(snapshot: snapshot).pass
+    }
+
+    private static func kiloLoginDetails(snapshot: UsageSnapshot?) -> [String] {
+        self.kiloLoginParts(snapshot: snapshot).details
+    }
+
+    private static func kiloLoginParts(snapshot: UsageSnapshot?) -> (pass: String?, details: [String]) {
+        guard let loginMethod = snapshot?.loginMethod(for: .kilo) else {
+            return (nil, [])
+        }
+        let parts = loginMethod
+            .components(separatedBy: "·")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !parts.isEmpty else {
+            return (nil, [])
+        }
+        let first = parts[0]
+        if self.isKiloActivitySegment(first) {
+            return (nil, parts)
+        }
+        return (first, Array(parts.dropFirst()))
+    }
+
+    private static func isKiloActivitySegment(_ text: String) -> Bool {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.hasPrefix("auto top-up:")
     }
 
     private static func subtitle(
@@ -864,13 +918,13 @@ extension UsageMenuCardView.Model {
             {
                 primaryResetText = openRouterQuotaDetail
             }
-            if input.provider == .warp,
+            if input.provider == .warp || input.provider == .kilo,
                let detail = primary.resetDescription,
                !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             {
                 primaryDetailText = detail
             }
-            if input.provider == .warp, primary.resetsAt == nil {
+            if input.provider == .warp || input.provider == .kilo, primary.resetsAt == nil {
                 primaryResetText = nil
             }
             metrics.append(Metric(
@@ -901,6 +955,15 @@ extension UsageMenuCardView.Model {
                 weeklyResetText = nil
                 weeklyDetailText = detail
             }
+            if input.provider == .kilo,
+               let detail = weekly.resetDescription,
+               !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                weeklyDetailText = detail
+                if weekly.resetsAt == nil {
+                    weeklyResetText = nil
+                }
+            }
             metrics.append(Metric(
                 id: "secondary",
                 title: input.metadata.weeklyLabel,
@@ -912,6 +975,18 @@ extension UsageMenuCardView.Model {
                 detailRightText: paceDetail?.rightLabel,
                 pacePercent: paceDetail?.pacePercent,
                 paceOnTop: paceDetail?.paceOnTop ?? true))
+        }
+        if input.provider == .kilo,
+           metrics.contains(where: { $0.id == "primary" }),
+           metrics.contains(where: { $0.id == "secondary" })
+        {
+            metrics.sort { lhs, rhs in
+                let kiloOrder: [String: Int] = [
+                    "secondary": 0,
+                    "primary": 1,
+                ]
+                return (kiloOrder[lhs.id] ?? Int.max) < (kiloOrder[rhs.id] ?? Int.max)
+            }
         }
         if input.metadata.supportsOpus, let opus = snapshot.tertiary {
             metrics.append(Metric(
