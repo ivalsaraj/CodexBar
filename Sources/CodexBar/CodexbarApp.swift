@@ -281,6 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        self.store?.utilizationHistoryStore.flushToDisk()
         TTYCommandRunner.terminateActiveProcessesForAppShutdown()
     }
 

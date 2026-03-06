@@ -99,6 +99,7 @@ extension UsageStore {
                 self.lastSourceLabels[provider] = result.sourceLabel
                 self.errors[provider] = nil
                 self.failureGates[provider]?.recordSuccess()
+                self.recordUtilizationHistoryIfNeeded(provider: provider, snapshot: displaySnapshot)
                 if let selectedAccount {
                     self.cacheTokenAccountSnapshot(
                         displaySnapshot,

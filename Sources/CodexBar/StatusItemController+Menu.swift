@@ -1266,26 +1266,35 @@ extension StatusItemController {
         let width = Self.menuCardBaseWidth
         guard let tokenSnapshot = self.store.tokenSnapshot(for: provider) else { return nil }
         guard !tokenSnapshot.daily.isEmpty else { return nil }
+        let usesCompositeChart = ProviderUtilizationHistoryStore.supports(provider: provider)
 
         if !Self.menuCardRenderingEnabled {
             let submenu = NSMenu()
             submenu.delegate = self
             let chartItem = NSMenuItem()
             chartItem.isEnabled = false
-            chartItem.representedObject = "costHistoryChart"
+            chartItem.representedObject = usesCompositeChart ? "providerUtilizationCompositeChart" : "costHistoryChart"
             submenu.addItem(chartItem)
             return submenu
         }
 
         let submenu = NSMenu()
         submenu.delegate = self
-        let chartView = CostHistoryChartMenuView(
-            provider: provider,
-            daily: tokenSnapshot.daily,
-            totalCostUSD: tokenSnapshot.last30DaysCostUSD,
-            width: width)
+        let chartView = if usesCompositeChart {
+            AnyView(ProviderUtilizationCompositeHistoryMenuView(
+                provider: provider,
+                historyStore: self.store.utilizationHistoryStore,
+                daily: tokenSnapshot.daily,
+                totalCostUSD: tokenSnapshot.last30DaysCostUSD,
+                width: width))
+        } else {
+            AnyView(CostHistoryChartMenuView(
+                provider: provider,
+                daily: tokenSnapshot.daily,
+                totalCostUSD: tokenSnapshot.last30DaysCostUSD,
+                width: width))
+        }
         let hosting = MenuHostingView(rootView: chartView)
-        // Use NSHostingController for efficient size calculation without multiple layout passes
         let controller = NSHostingController(rootView: chartView)
         let size = controller.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
         hosting.frame = NSRect(origin: .zero, size: NSSize(width: width, height: size.height))
@@ -1293,7 +1302,7 @@ extension StatusItemController {
         let chartItem = NSMenuItem()
         chartItem.view = hosting
         chartItem.isEnabled = false
-        chartItem.representedObject = "costHistoryChart"
+        chartItem.representedObject = usesCompositeChart ? "providerUtilizationCompositeChart" : "costHistoryChart"
         submenu.addItem(chartItem)
         return submenu
     }
@@ -1303,6 +1312,7 @@ extension StatusItemController {
             "usageBreakdownChart",
             "creditsHistoryChart",
             "costHistoryChart",
+            "providerUtilizationCompositeChart",
         ]
         return menu.items.contains { item in
             guard let id = item.representedObject as? String else { return false }

@@ -805,6 +805,209 @@ extension StatusMenuTests {
     }
 
     @Test
+    func codexUsageHistorySubmenuUsesCompositeChartPlaceholder() {
+        self.disableMenuCardsForTesting()
+        let settings = self.makeSettings()
+        settings.statusChecksEnabled = false
+        settings.refreshFrequency = .manual
+        settings.mergeIcons = true
+        settings.selectedMenuProvider = .codex
+        settings.costUsageEnabled = true
+
+        let registry = ProviderRegistry.shared
+        if let codexMeta = registry.metadata[.codex] {
+            settings.setProviderEnabled(provider: .codex, metadata: codexMeta, enabled: true)
+        }
+        if let claudeMeta = registry.metadata[.claude] {
+            settings.setProviderEnabled(provider: .claude, metadata: claudeMeta, enabled: false)
+        }
+        if let vertexMeta = registry.metadata[.vertexai] {
+            settings.setProviderEnabled(provider: .vertexai, metadata: vertexMeta, enabled: false)
+        }
+
+        let historyStore = ProviderUtilizationHistoryStore(
+            fileManager: .default,
+            cacheDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("StatusMenuTests-utilization-\(UUID().uuidString)", isDirectory: true))
+        historyStore.recordPoint(
+            provider: .codex,
+            timestamp: Date(),
+            primaryUsedPercent: 24,
+            secondaryUsedPercent: 42)
+
+        let fetcher = UsageFetcher()
+        let store = UsageStore(
+            fetcher: fetcher,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            utilizationHistoryStore: historyStore,
+            settings: settings)
+        store._setTokenSnapshotForTesting(CostUsageTokenSnapshot(
+            sessionTokens: 123,
+            sessionCostUSD: 0.12,
+            last30DaysTokens: 123,
+            last30DaysCostUSD: 1.23,
+            daily: [
+                CostUsageDailyReport.Entry(
+                    date: "2025-12-23",
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    totalTokens: 123,
+                    costUSD: 1.23,
+                    modelsUsed: nil,
+                    modelBreakdowns: nil),
+            ],
+            updatedAt: Date()), provider: .codex)
+
+        let controller = StatusItemController(
+            store: store,
+            settings: settings,
+            account: fetcher.loadAccountInfo(),
+            updater: DisabledUpdaterController(),
+            preferencesSelection: PreferencesSelection(),
+            statusBar: self.makeStatusBarForTesting())
+
+        let menu = controller.makeMenu()
+        controller.menuWillOpen(menu)
+
+        let costItem = menu.items.first { ($0.representedObject as? String) == "menuCardCost" }
+        let submenuIDs = costItem?.submenu?.items.compactMap { $0.representedObject as? String } ?? []
+        #expect(submenuIDs == ["providerUtilizationCompositeChart"])
+    }
+
+    @Test
+    func claudeUsageHistorySubmenuUsesCompositeChartPlaceholder() {
+        self.disableMenuCardsForTesting()
+        let settings = self.makeSettings()
+        settings.statusChecksEnabled = false
+        settings.refreshFrequency = .manual
+        settings.mergeIcons = true
+        settings.selectedMenuProvider = .claude
+        settings.costUsageEnabled = true
+
+        let registry = ProviderRegistry.shared
+        if let codexMeta = registry.metadata[.codex] {
+            settings.setProviderEnabled(provider: .codex, metadata: codexMeta, enabled: false)
+        }
+        if let claudeMeta = registry.metadata[.claude] {
+            settings.setProviderEnabled(provider: .claude, metadata: claudeMeta, enabled: true)
+        }
+        if let vertexMeta = registry.metadata[.vertexai] {
+            settings.setProviderEnabled(provider: .vertexai, metadata: vertexMeta, enabled: false)
+        }
+
+        let historyStore = ProviderUtilizationHistoryStore(
+            fileManager: .default,
+            cacheDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("StatusMenuTests-utilization-\(UUID().uuidString)", isDirectory: true))
+        historyStore.recordPoint(
+            provider: .claude,
+            timestamp: Date(),
+            primaryUsedPercent: 18,
+            secondaryUsedPercent: 67)
+
+        let fetcher = UsageFetcher()
+        let store = UsageStore(
+            fetcher: fetcher,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            utilizationHistoryStore: historyStore,
+            settings: settings)
+        store._setSnapshotForTesting(UsageSnapshot(
+            primary: RateWindow(usedPercent: 18, windowMinutes: nil, resetsAt: nil, resetDescription: "Soon"),
+            secondary: RateWindow(usedPercent: 67, windowMinutes: nil, resetsAt: nil, resetDescription: "Later"),
+            tertiary: nil,
+            providerCost: nil,
+            updatedAt: Date(),
+            identity: nil), provider: .claude)
+        store._setTokenSnapshotForTesting(CostUsageTokenSnapshot(
+            sessionTokens: 123,
+            sessionCostUSD: 0.12,
+            last30DaysTokens: 123,
+            last30DaysCostUSD: 1.23,
+            daily: [
+                CostUsageDailyReport.Entry(
+                    date: "2025-12-23",
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    totalTokens: 123,
+                    costUSD: 1.23,
+                    modelsUsed: nil,
+                    modelBreakdowns: nil),
+            ],
+            updatedAt: Date()), provider: .claude)
+
+        let controller = StatusItemController(
+            store: store,
+            settings: settings,
+            account: fetcher.loadAccountInfo(),
+            updater: DisabledUpdaterController(),
+            preferencesSelection: PreferencesSelection(),
+            statusBar: self.makeStatusBarForTesting())
+
+        let menu = controller.makeMenu()
+        controller.menuWillOpen(menu)
+
+        let costItem = menu.items.first { ($0.representedObject as? String) == "menuCardCost" }
+        let submenuIDs = costItem?.submenu?.items.compactMap { $0.representedObject as? String } ?? []
+        #expect(submenuIDs == ["providerUtilizationCompositeChart"])
+    }
+
+    @Test
+    func vertexUsageHistorySubmenuRemainsCostOnly() {
+        self.disableMenuCardsForTesting()
+        let settings = self.makeSettings()
+        settings.statusChecksEnabled = false
+        settings.refreshFrequency = .manual
+        settings.mergeIcons = true
+        settings.selectedMenuProvider = .vertexai
+        settings.costUsageEnabled = true
+
+        let registry = ProviderRegistry.shared
+        if let codexMeta = registry.metadata[.codex] {
+            settings.setProviderEnabled(provider: .codex, metadata: codexMeta, enabled: false)
+        }
+        if let claudeMeta = registry.metadata[.claude] {
+            settings.setProviderEnabled(provider: .claude, metadata: claudeMeta, enabled: false)
+        }
+        if let vertexMeta = registry.metadata[.vertexai] {
+            settings.setProviderEnabled(provider: .vertexai, metadata: vertexMeta, enabled: true)
+        }
+
+        let fetcher = UsageFetcher()
+        let store = UsageStore(fetcher: fetcher, browserDetection: BrowserDetection(cacheTTL: 0), settings: settings)
+        store._setTokenSnapshotForTesting(CostUsageTokenSnapshot(
+            sessionTokens: 123,
+            sessionCostUSD: 0.12,
+            last30DaysTokens: 123,
+            last30DaysCostUSD: 1.23,
+            daily: [
+                CostUsageDailyReport.Entry(
+                    date: "2025-12-23",
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    totalTokens: 123,
+                    costUSD: 1.23,
+                    modelsUsed: nil,
+                    modelBreakdowns: nil),
+            ],
+            updatedAt: Date()), provider: .vertexai)
+
+        let controller = StatusItemController(
+            store: store,
+            settings: settings,
+            account: fetcher.loadAccountInfo(),
+            updater: DisabledUpdaterController(),
+            preferencesSelection: PreferencesSelection(),
+            statusBar: self.makeStatusBarForTesting())
+
+        let menu = controller.makeMenu()
+        controller.menuWillOpen(menu)
+
+        let costItem = menu.items.first { ($0.representedObject as? String) == "menuCardCost" }
+        let submenuIDs = costItem?.submenu?.items.compactMap { $0.representedObject as? String } ?? []
+        #expect(submenuIDs == ["costHistoryChart"])
+    }
+
+    @Test
     func overviewTabHonorsStoredSubsetWhenThreeOrFewer() {
         self.disableMenuCardsForTesting()
         let settings = self.makeSettings()

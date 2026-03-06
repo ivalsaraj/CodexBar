@@ -173,6 +173,7 @@ final class UsageStore {
     @ObservationIgnored let codexFetcher: UsageFetcher
     @ObservationIgnored let claudeFetcher: any ClaudeUsageFetching
     @ObservationIgnored private let costUsageFetcher: CostUsageFetcher
+    @ObservationIgnored let utilizationHistoryStore: ProviderUtilizationHistoryStore
     @ObservationIgnored let browserDetection: BrowserDetection
     @ObservationIgnored private let registry: ProviderRegistry
     @ObservationIgnored let settings: SettingsStore
@@ -205,6 +206,7 @@ final class UsageStore {
         browserDetection: BrowserDetection,
         claudeFetcher: (any ClaudeUsageFetching)? = nil,
         costUsageFetcher: CostUsageFetcher = CostUsageFetcher(),
+        utilizationHistoryStore: ProviderUtilizationHistoryStore = ProviderUtilizationHistoryStore(),
         settings: SettingsStore,
         registry: ProviderRegistry = .shared,
         sessionQuotaNotifier: any SessionQuotaNotifying = SessionQuotaNotifier())
@@ -213,6 +215,7 @@ final class UsageStore {
         self.browserDetection = browserDetection
         self.claudeFetcher = claudeFetcher ?? ClaudeUsageFetcher(browserDetection: browserDetection)
         self.costUsageFetcher = costUsageFetcher
+        self.utilizationHistoryStore = utilizationHistoryStore
         self.settings = settings
         self.registry = registry
         self.sessionQuotaNotifier = sessionQuotaNotifier
@@ -235,7 +238,9 @@ final class UsageStore {
         })
         self.logStartupState()
         self.bindSettings()
-        self.detectVersions()
+        if !SettingsStore.isRunningTests {
+            self.detectVersions()
+        }
         self.updateProviderRuntimes()
         self.pathDebugInfo = PathDebugSnapshot(
             codexBinary: nil,
@@ -1491,32 +1496,6 @@ extension UsageStore {
             let result = await group.next()?.flatMap(\.self)
             group.cancelAll()
             return result ?? "Probe timed out after \(Int(seconds))s"
-        }
-    }
-
-    private func detectVersions() {
-        let implementations = ProviderCatalog.all
-        let browserDetection = self.browserDetection
-        Task { @MainActor [weak self] in
-            let resolved = await Task.detached { () -> [UsageProvider: String] in
-                var resolved: [UsageProvider: String] = [:]
-                await withTaskGroup(of: (UsageProvider, String?).self) { group in
-                    for implementation in implementations {
-                        let context = ProviderVersionContext(
-                            provider: implementation.id,
-                            browserDetection: browserDetection)
-                        group.addTask {
-                            await (implementation.id, implementation.detectVersion(context: context))
-                        }
-                    }
-                    for await (provider, version) in group {
-                        guard let version, !version.isEmpty else { continue }
-                        resolved[provider] = version
-                    }
-                }
-                return resolved
-            }.value
-            self?.versions = resolved
         }
     }
 
