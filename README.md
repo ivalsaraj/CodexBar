@@ -71,7 +71,7 @@ The menu bar icon is a tiny two-bar meter:
 - Multi-provider menu bar with per-provider toggles (Settings → Providers).
 - Session + weekly meters with reset countdowns.
 - Optional Codex web dashboard enrichments (code review remaining, usage breakdown, credits history).
-- Local cost-usage scan for Codex + Claude (last 30 days).
+- Local cost-usage scan for Codex + Claude (last 30 days), including official GPT-5.4 Codex pricing.
 - Provider status polling with incident badges in the menu and icon overlay.
 - Merge Icons mode to combine providers into one status item + switcher, with an optional Overview tab for up to three providers.
 - Refresh cadence presets (manual, 1m, 2m, 5m, 15m).
