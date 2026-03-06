@@ -9,6 +9,9 @@ struct CostUsagePricingTests {
         #expect(CostUsagePricing.normalizeCodexModel("gpt-5.2-codex") == "gpt-5.2")
         #expect(CostUsagePricing.normalizeCodexModel("gpt-5.1-codex-max") == "gpt-5.1")
         #expect(CostUsagePricing.normalizeCodexModel("gpt-5.3-codex-max") == "gpt-5.3")
+        #expect(CostUsagePricing.normalizeCodexModel("gpt-5.4-codex") == "gpt-5.4")
+        #expect(CostUsagePricing.normalizeCodexModel("gpt-5.4-codex-max") == "gpt-5.4")
+        #expect(CostUsagePricing.normalizeCodexModel("gpt-5.4-pro") == "gpt-5.4-pro")
     }
 
     @Test
@@ -29,6 +32,32 @@ struct CostUsagePricingTests {
             cachedInputTokens: 10,
             outputTokens: 5)
         #expect(cost != nil)
+    }
+
+    @Test
+    func codexCostSupportsGpt54CodexVariants() {
+        let direct = CostUsagePricing.codexCostUSD(
+            model: "gpt-5.4",
+            inputTokens: 100,
+            cachedInputTokens: 10,
+            outputTokens: 5)
+        let codex = CostUsagePricing.codexCostUSD(
+            model: "gpt-5.4-codex-max",
+            inputTokens: 100,
+            cachedInputTokens: 10,
+            outputTokens: 5)
+        #expect(direct != nil)
+        #expect(codex == direct)
+    }
+
+    @Test
+    func codexCostDoesNotTreatGpt54ProAsBaseGpt54() {
+        let cost = CostUsagePricing.codexCostUSD(
+            model: "gpt-5.4-pro",
+            inputTokens: 100,
+            cachedInputTokens: 10,
+            outputTokens: 5)
+        #expect(cost == nil)
     }
 
     @Test
