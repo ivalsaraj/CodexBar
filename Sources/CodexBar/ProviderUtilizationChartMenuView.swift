@@ -26,6 +26,7 @@ struct ProviderUtilizationChartMenuView: View {
         let points = self.historyStore.downsampledPoints(for: self.provider, range: self.selectedRange)
         let selection = self.selectedValues(in: points)
         let metadata = ProviderDescriptorRegistry.descriptor(for: self.provider).metadata
+        let medianVal = Self.medianValue(of: points.map(\.primaryUsedPercent))
 
         VStack(alignment: .leading, spacing: 10) {
             Picker("", selection: self.$selectedRange) {
@@ -48,7 +49,7 @@ struct ProviderUtilizationChartMenuView: View {
                             x: .value("Time", point.timestamp),
                             y: .value(metadata.sessionLabel, point.primaryUsedPercent))
                             .interpolationMethod(.monotone)
-                            .foregroundStyle(Self.primaryColor(for: self.provider))
+                            .foregroundStyle(by: .value("Series", metadata.sessionLabel))
                     }
 
                     ForEach(points) { point in
@@ -57,9 +58,13 @@ struct ProviderUtilizationChartMenuView: View {
                                 x: .value("Time", point.timestamp),
                                 y: .value(metadata.weeklyLabel, secondary))
                                 .interpolationMethod(.monotone)
-                                .foregroundStyle(Self.secondaryColor)
+                                .foregroundStyle(by: .value("Series", metadata.weeklyLabel))
                         }
                     }
+
+                    RuleMark(y: .value("Median", medianVal))
+                        .foregroundStyle(Self.medianColor)
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
 
                     if self.hoverDate != nil, let selection {
                         RuleMark(x: .value("Selected", selection.date))
@@ -106,6 +111,10 @@ struct ProviderUtilizationChartMenuView: View {
                     }
                 }
                 .chartLegend(.hidden)
+                .chartForegroundStyleScale([
+                    metadata.sessionLabel: Self.primaryColor(for: self.provider),
+                    metadata.weeklyLabel: Self.secondaryColor,
+                ])
                 .chartPlotStyle { plot in
                     plot.clipped()
                 }
@@ -289,5 +298,19 @@ struct ProviderUtilizationChartMenuView: View {
     private static func interpolateOptional(lhs: Double?, rhs: Double?, progress: Double) -> Double? {
         guard let lhs, let rhs else { return lhs ?? rhs }
         return lhs + (rhs - lhs) * progress
+    }
+
+    private static var medianColor: Color {
+        Color(nsColor: .secondaryLabelColor)
+    }
+
+    private static func medianValue(of values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let mid = sorted.count / 2
+        if sorted.count.isMultiple(of: 2) {
+            return (sorted[mid - 1] + sorted[mid]) / 2
+        }
+        return sorted[mid]
     }
 }
