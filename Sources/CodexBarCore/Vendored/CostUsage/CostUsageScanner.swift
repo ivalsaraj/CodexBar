@@ -1,13 +1,13 @@
 import Foundation
 
 enum CostUsageScanner {
-    enum ClaudeLogProviderFilter: Sendable {
+    enum ClaudeLogProviderFilter {
         case all
         case vertexAIOnly
         case excludeVertexAI
     }
 
-    struct Options: Sendable {
+    struct Options {
         var codexSessionsRoot: URL?
         var claudeProjectsRoots: [URL]?
         var cacheRoot: URL?
@@ -31,7 +31,7 @@ enum CostUsageScanner {
         }
     }
 
-    struct CodexParseResult: Sendable {
+    struct CodexParseResult {
         let days: [String: [String: [Int]]]
         let parsedBytes: Int64
         let lastModel: String?
@@ -44,9 +44,30 @@ enum CostUsageScanner {
         var seenFileIds: Set<String> = []
     }
 
-    struct ClaudeParseResult: Sendable {
+    struct ClaudeParseResult {
         let days: [String: [String: [Int]]]
+        let rows: [ClaudeUsageRow]
         let parsedBytes: Int64
+    }
+
+    enum ClaudePathRole: String, Codable, Sendable {
+        case parent
+        case subagent
+    }
+
+    struct ClaudeUsageRow: Codable, Sendable {
+        let dayKey: String
+        let model: String
+        let sessionId: String?
+        let messageId: String?
+        let requestId: String?
+        let isSidechain: Bool
+        let pathRole: ClaudePathRole
+        let input: Int
+        let cacheRead: Int
+        let cacheCreate: Int
+        let output: Int
+        let costNanos: Int
     }
 
     static func loadDailyReport(
@@ -70,15 +91,16 @@ enum CostUsageScanner {
                 filtered.claudeLogProviderFilter = .vertexAIOnly
             }
             return self.loadClaudeDaily(provider: .vertexai, range: range, now: now, options: filtered)
-        case .zai, .gemini, .antigravity, .cursor, .opencode, .factory, .copilot, .minimax, .kilo, .kiro, .kimi,
-             .kimik2, .augment, .jetbrains, .amp, .ollama, .synthetic, .openrouter, .warp:
+        case .zai, .gemini, .antigravity, .cursor, .opencode, .alibaba, .factory, .copilot, .minimax, .kilo,
+             .kiro, .kimi,
+             .kimik2, .augment, .jetbrains, .amp, .ollama, .synthetic, .openrouter, .warp, .perplexity:
             return emptyReport
         }
     }
 
     // MARK: - Day keys
 
-    struct CostUsageDayRange: Sendable {
+    struct CostUsageDayRange {
         let sinceKey: String
         let untilKey: String
         let scanSinceKey: String
@@ -557,6 +579,7 @@ enum CostUsageScanner {
                 let input = packed[safe: 0] ?? 0
                 let cached = packed[safe: 1] ?? 0
                 let output = packed[safe: 2] ?? 0
+                let totalTokens = input + output
 
                 dayInput += input
                 dayOutput += output
@@ -566,15 +589,18 @@ enum CostUsageScanner {
                     inputTokens: input,
                     cachedInputTokens: cached,
                     outputTokens: output)
-                breakdown.append(CostUsageDailyReport.ModelBreakdown(modelName: model, costUSD: cost))
+                breakdown.append(
+                    CostUsageDailyReport.ModelBreakdown(
+                        modelName: model,
+                        costUSD: cost,
+                        totalTokens: totalTokens))
                 if let cost {
                     dayCost += cost
                     dayCostSeen = true
                 }
             }
 
-            breakdown.sort { lhs, rhs in (rhs.costUSD ?? -1) < (lhs.costUSD ?? -1) }
-            let top = Array(breakdown.prefix(3))
+            let sortedBreakdown = Self.sortedModelBreakdowns(breakdown)
 
             let dayTotal = dayInput + dayOutput
             let entryCost = dayCostSeen ? dayCost : nil
@@ -585,7 +611,7 @@ enum CostUsageScanner {
                 totalTokens: dayTotal,
                 costUSD: entryCost,
                 modelsUsed: modelNames,
-                modelBreakdowns: top))
+                modelBreakdowns: sortedBreakdown))
 
             totalInput += dayInput
             totalOutput += dayOutput
@@ -616,7 +642,8 @@ enum CostUsageScanner {
         parsedBytes: Int64?,
         lastModel: String? = nil,
         lastTotals: CostUsageCodexTotals? = nil,
-        sessionId: String? = nil) -> CostUsageFileUsage
+        sessionId: String? = nil,
+        claudeRows: [ClaudeUsageRow]? = nil) -> CostUsageFileUsage
     {
         CostUsageFileUsage(
             mtimeUnixMs: mtimeUnixMs,
@@ -625,7 +652,8 @@ enum CostUsageScanner {
             parsedBytes: parsedBytes,
             lastModel: lastModel,
             lastTotals: lastTotals,
-            sessionId: sessionId)
+            sessionId: sessionId,
+            claudeRows: claudeRows)
     }
 
     static func mergeFileDays(
@@ -687,6 +715,26 @@ enum CostUsageScanner {
             out[idx] = max(0, next)
         }
         return out
+    }
+
+    static func sortedModelBreakdowns(_ breakdowns: [CostUsageDailyReport.ModelBreakdown])
+        -> [CostUsageDailyReport.ModelBreakdown]
+    {
+        breakdowns.sorted { lhs, rhs in
+            let lhsCost = lhs.costUSD ?? -1
+            let rhsCost = rhs.costUSD ?? -1
+            if lhsCost != rhsCost {
+                return lhsCost > rhsCost
+            }
+
+            let lhsTokens = lhs.totalTokens ?? -1
+            let rhsTokens = rhs.totalTokens ?? -1
+            if lhsTokens != rhsTokens {
+                return lhsTokens > rhsTokens
+            }
+
+            return lhs.modelName > rhs.modelName
+        }
     }
 
     // MARK: - Date parsing

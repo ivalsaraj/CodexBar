@@ -2,14 +2,21 @@ import CodexBarCore
 import Foundation
 
 extension UsageStore {
+    func prepareRefreshState(for provider: UsageProvider? = nil) {
+        guard provider == nil || provider == .codex else { return }
+        _ = self.settings.persistResolvedCodexActiveSourceCorrectionIfNeeded()
+    }
+
     /// Force refresh Augment session (called from UI button)
     func forceRefreshAugmentSession() async {
         await self.performRuntimeAction(.forceSessionRefresh, for: .augment)
     }
 
     func refreshProvider(_ provider: UsageProvider, allowDisabled: Bool = false) async {
+        self.prepareRefreshState(for: provider)
         guard let spec = self.providerSpecs[provider] else { return }
         let refreshGeneration = self.beginProviderRefreshGeneration(for: provider)
+        let codexExpectedGuard = provider == .codex ? self.currentCodexAccountScopedRefreshGuard() : nil
 
         if !spec.isEnabled(), !allowDisabled {
             self.refreshingProviders.remove(provider)
@@ -87,6 +94,12 @@ extension UsageStore {
         switch outcome.result {
         case let .success(result):
             let scoped = result.usage.scoped(to: provider)
+            if provider == .codex,
+               let codexExpectedGuard,
+               !self.shouldApplyCodexUsageResult(expectedGuard: codexExpectedGuard, usage: scoped)
+            {
+                return
+            }
             let selectedAccount = self.settings.selectedTokenAccount(for: provider)
             let displaySnapshot: UsageSnapshot = if let selectedAccount {
                 self.applyAccountLabel(scoped, provider: provider, account: selectedAccount)
@@ -106,16 +119,32 @@ extension UsageStore {
                         for: provider,
                         accountID: selectedAccount.id)
                 }
+                if provider == .codex {
+                    self.rememberLiveSystemCodexEmailIfNeeded(scoped.accountEmail(for: .codex))
+                    self.seedCodexAccountScopedRefreshGuard(accountEmail: scoped.accountEmail(for: .codex))
+                }
             }
             if provider == .codex, result.sourceLabel == "oauth" {
                 await self.syncActiveCodexAccountTokenFromDiskIfNeeded()
             }
+            await self.recordPlanUtilizationHistorySample(
+                provider: provider,
+                snapshot: scoped)
             if let runtime = self.providerRuntimes[provider] {
                 let context = ProviderRuntimeContext(
                     provider: provider, settings: self.settings, store: self)
                 runtime.providerDidRefresh(context: context, provider: provider)
             }
+            if provider == .codex {
+                self.recordCodexHistoricalSampleIfNeeded(snapshot: scoped)
+            }
         case let .failure(error):
+            if provider == .codex,
+               let codexExpectedGuard,
+               !self.shouldApplyCodexScopedFailure(expectedGuard: codexExpectedGuard)
+            {
+                return
+            }
             await MainActor.run {
                 let hadPriorData = self.snapshots[provider] != nil
                 let shouldSurface =

@@ -35,7 +35,9 @@ extension SettingsStore {
         set {
             self.defaultsState.debugDisableKeychainAccess = newValue
             self.userDefaults.set(newValue, forKey: "debugDisableKeychainAccess")
-            Self.sharedDefaults?.set(newValue, forKey: "debugDisableKeychainAccess")
+            if Self.shouldBridgeSharedDefaults(for: self.userDefaults) {
+                Self.sharedDefaults?.set(newValue, forKey: "debugDisableKeychainAccess")
+            }
             KeychainAccessGate.isDisabled = newValue
         }
     }
@@ -147,6 +149,14 @@ extension SettingsStore {
         set {
             self.defaultsState.showAllTokenAccountsInMenu = newValue
             self.userDefaults.set(newValue, forKey: "showAllTokenAccountsInMenu")
+        }
+    }
+
+    var historicalTrackingEnabled: Bool {
+        get { self.defaultsState.historicalTrackingEnabled }
+        set {
+            self.defaultsState.historicalTrackingEnabled = newValue
+            self.userDefaults.set(newValue, forKey: "historicalTrackingEnabled")
         }
     }
 
