@@ -1045,7 +1045,6 @@ final class CodexDependentProcessesPanelView: NSView {
         nil
     }
 
-
     private func buildView(
         snapshot: CodexDependentProcessSnapshot?,
         expanded: Bool,

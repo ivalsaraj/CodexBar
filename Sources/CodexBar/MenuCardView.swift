@@ -844,7 +844,7 @@ extension UsageMenuCardView.Model {
     }
 
     private static func planDisplay(_ text: String) -> String {
-        let cleaned = UsageFormatter.cleanPlanName(text)
+        let cleaned = CodexPlanFormatting.displayName(text) ?? UsageFormatter.cleanPlanName(text)
         return cleaned.isEmpty ? text : cleaned
     }
 

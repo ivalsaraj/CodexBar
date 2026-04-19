@@ -55,7 +55,10 @@ public enum CodexOAuthCredentialsStore {
             .appendingPathComponent("auth.json")
     }
 
-    public static func load(env: [String: String] = ProcessInfo.processInfo.environment) throws -> CodexOAuthCredentials {
+    public static func load(
+        env: [String: String] = ProcessInfo.processInfo.environment)
+        throws -> CodexOAuthCredentials
+    {
         let url = self.authFilePath(env: env)
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw CodexOAuthCredentialsError.notFound
