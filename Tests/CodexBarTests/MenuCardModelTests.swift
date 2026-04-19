@@ -4,7 +4,6 @@ import SwiftUI
 import Testing
 @testable import CodexBar
 
-// swiftlint:disable type_body_length
 @Suite
 struct MenuCardModelTests {
     @Test
@@ -793,5 +792,3 @@ struct MenuCardModelTests {
         #expect(primary.detailText == "10/100 credits")
     }
 }
-
-// swiftlint:enable type_body_length

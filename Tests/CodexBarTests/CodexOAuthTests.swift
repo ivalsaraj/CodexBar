@@ -299,6 +299,105 @@ struct CodexOAuthTests {
     }
 
     @Test
+    func `keeps valid window when secondary window is malformed`() throws {
+        let json = """
+        {
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 18,
+              "reset_at": 1766948068,
+              "limit_window_seconds": 18000
+            },
+            "secondary_window": {
+              "used_percent": "bad",
+              "reset_at": 1767407914,
+              "limit_window_seconds": 604800
+            }
+          }
+        }
+        """
+        let creds = CodexOAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            idToken: nil,
+            accountId: nil,
+            lastRefresh: Date())
+
+        let snapshot = try CodexOAuthFetchStrategy._mapUsageForTesting(Data(json.utf8), credentials: creds)
+
+        #expect(snapshot?.primary?.usedPercent == 18)
+        #expect(snapshot?.secondary == nil)
+    }
+
+    @Test
+    func `auto mode falls back when primary window is malformed but weekly window survives`() throws {
+        let json = """
+        {
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": "bad",
+              "reset_at": 1766948068,
+              "limit_window_seconds": 18000
+            },
+            "secondary_window": {
+              "used_percent": 43,
+              "reset_at": 1767407914,
+              "limit_window_seconds": 604800
+            }
+          }
+        }
+        """
+        let creds = CodexOAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            idToken: nil,
+            accountId: nil,
+            lastRefresh: Date())
+
+        #expect(throws: UsageError.noRateLimitsFound) {
+            _ = try CodexOAuthFetchStrategy._mapResultForTesting(
+                Data(json.utf8),
+                credentials: creds,
+                sourceMode: .auto)
+        }
+    }
+
+    @Test
+    func `explicit oauth keeps weekly window when primary window is malformed`() throws {
+        let json = """
+        {
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": "bad",
+              "reset_at": 1766948068,
+              "limit_window_seconds": 18000
+            },
+            "secondary_window": {
+              "used_percent": 43,
+              "reset_at": 1767407914,
+              "limit_window_seconds": 604800
+            }
+          }
+        }
+        """
+        let creds = CodexOAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            idToken: nil,
+            accountId: nil,
+            lastRefresh: Date())
+
+        let result = try CodexOAuthFetchStrategy._mapResultForTesting(
+            Data(json.utf8),
+            credentials: creds,
+            sourceMode: .oauth)
+
+        #expect(result.usage.primary == nil)
+        #expect(result.usage.secondary?.usedPercent == 43)
+        #expect(result.usage.secondary?.windowMinutes == 10080)
+    }
+
+    @Test
     func `credits only O auth payload still returns credits result`() throws {
         let json = """
         {
