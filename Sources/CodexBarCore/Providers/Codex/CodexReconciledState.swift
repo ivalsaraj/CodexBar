@@ -3,17 +3,20 @@ import Foundation
 public struct CodexReconciledState: Sendable {
     public let session: RateWindow?
     public let weekly: RateWindow?
+    public let codexUsage: CodexUsageSnapshot?
     public let identity: ProviderIdentitySnapshot?
     public let updatedAt: Date
 
     public init(
         session: RateWindow?,
         weekly: RateWindow?,
+        codexUsage: CodexUsageSnapshot?,
         identity: ProviderIdentitySnapshot?,
         updatedAt: Date)
     {
         self.session = session
         self.weekly = weekly
+        self.codexUsage = codexUsage
         self.identity = identity
         self.updatedAt = updatedAt
     }
@@ -21,10 +24,16 @@ public struct CodexReconciledState: Sendable {
     public static func fromCLI(
         primary: RateWindow?,
         secondary: RateWindow?,
+        codexUsage: CodexUsageSnapshot? = nil,
         identity: ProviderIdentitySnapshot?,
         updatedAt: Date = Date()) -> CodexReconciledState?
     {
-        self.make(primary: primary, secondary: secondary, identity: identity, updatedAt: updatedAt)
+        self.make(
+            primary: primary,
+            secondary: secondary,
+            codexUsage: codexUsage,
+            identity: identity,
+            updatedAt: updatedAt)
     }
 
     public static func fromOAuth(
@@ -35,6 +44,7 @@ public struct CodexReconciledState: Sendable {
         self.make(
             primary: self.makeWindow(response.rateLimit?.primaryWindow),
             secondary: self.makeWindow(response.rateLimit?.secondaryWindow),
+            codexUsage: self.makeCodexUsage(additionalRateLimits: response.additionalRateLimits),
             identity: self.oauthIdentity(response: response, credentials: credentials),
             updatedAt: updatedAt)
     }
@@ -56,6 +66,7 @@ public struct CodexReconciledState: Sendable {
         return self.make(
             primary: snapshot.primaryLimit,
             secondary: snapshot.secondaryLimit,
+            codexUsage: nil,
             identity: identity,
             updatedAt: snapshot.updatedAt)
     }
@@ -65,6 +76,7 @@ public struct CodexReconciledState: Sendable {
             primary: self.session,
             secondary: self.weekly,
             tertiary: nil,
+            codexUsage: self.codexUsage,
             updatedAt: self.updatedAt,
             identity: self.identity)
     }
@@ -83,6 +95,7 @@ public struct CodexReconciledState: Sendable {
     private static func make(
         primary: RateWindow?,
         secondary: RateWindow?,
+        codexUsage: CodexUsageSnapshot?,
         identity: ProviderIdentitySnapshot?,
         updatedAt: Date) -> CodexReconciledState?
     {
@@ -94,8 +107,26 @@ public struct CodexReconciledState: Sendable {
         return CodexReconciledState(
             session: normalized.primary,
             weekly: normalized.secondary,
+            codexUsage: codexUsage,
             identity: identity,
             updatedAt: updatedAt)
+    }
+
+    static func makeCodexUsage(
+        additionalRateLimits: [CodexUsageResponse.AdditionalRateLimit]) -> CodexUsageSnapshot?
+    {
+        guard let spark = additionalRateLimits.first(where: self.isSparkRateLimit) else { return nil }
+        let sparkWindow = self.makeWindow(spark.primaryWindow) ?? self.makeWindow(spark.secondaryWindow)
+        guard sparkWindow != nil else { return nil }
+        return CodexUsageSnapshot(sparkLimit: sparkWindow)
+    }
+
+    private static func isSparkRateLimit(_ limit: CodexUsageResponse.AdditionalRateLimit) -> Bool {
+        if limit.meteredFeature == "codex_bengalfox" {
+            return true
+        }
+        return limit.limitName?.localizedCaseInsensitiveContains("codex-spark") == true
+            || limit.limitName?.localizedCaseInsensitiveContains("codex spark") == true
     }
 
     private static func makeWindow(_ window: CodexUsageResponse.WindowSnapshot?) -> RateWindow? {

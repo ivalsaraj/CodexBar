@@ -104,6 +104,48 @@ struct CodexOAuthTests {
     }
 
     @Test
+    func `decodes codex spark additional rate limit`() throws {
+        let json = """
+        {
+          "plan_type": "prolite",
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 12,
+              "reset_at": 1766948068,
+              "limit_window_seconds": 18000
+            }
+          },
+          "additional_rate_limits": [
+            {
+              "limit_name": "GPT-5.3-Codex-Spark",
+              "metered_feature": "codex_bengalfox",
+              "rate_limit": {
+                "primary_window": {
+                  "used_percent": 35,
+                  "reset_at": 1766948068,
+                  "limit_window_seconds": 18000
+                }
+              }
+            }
+          ]
+        }
+        """
+        let response = try CodexOAuthUsageFetcher._decodeUsageResponseForTesting(Data(json.utf8))
+        #expect(response.additionalRateLimits.count == 1)
+        #expect(response.additionalRateLimits.first?.limitName == "GPT-5.3-Codex-Spark")
+        #expect(response.additionalRateLimits.first?.meteredFeature == "codex_bengalfox")
+
+        let creds = CodexOAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            idToken: nil,
+            accountId: nil,
+            lastRefresh: Date())
+        let mapped = try CodexOAuthFetchStrategy._mapUsageForTesting(Data(json.utf8), credentials: creds)
+        #expect(mapped?.codexUsage?.sparkLimit?.remainingPercent == 65)
+    }
+
+    @Test
     func `maps usage windows from O auth`() throws {
         let json = """
         {

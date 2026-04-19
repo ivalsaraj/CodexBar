@@ -147,6 +147,63 @@ struct MenuCardModelCodexProjectionTests {
     }
 
     @Test
+    func `shows codex spark metric when available from usage snapshot`() throws {
+        let now = Date()
+        let identity = ProviderIdentitySnapshot(
+            providerID: .codex,
+            accountEmail: "codex@example.com",
+            accountOrganization: nil,
+            loginMethod: "Pro Lite")
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 0, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+            secondary: nil,
+            codexUsage: CodexUsageSnapshot(
+                sparkLimit: RateWindow(
+                    usedPercent: 41,
+                    windowMinutes: 300,
+                    resetsAt: now.addingTimeInterval(1800),
+                    resetDescription: nil)),
+            updatedAt: now,
+            identity: identity)
+        let metadata = try #require(ProviderDefaults.metadata[.codex])
+        let codexProjection = CodexConsumerProjection.make(
+            surface: .liveCard,
+            context: CodexConsumerProjection.Context(
+                snapshot: snapshot,
+                rawUsageError: nil,
+                liveCredits: nil,
+                rawCreditsError: nil,
+                liveDashboard: nil,
+                rawDashboardError: nil,
+                dashboardAttachmentAuthorized: false,
+                dashboardRequiresLogin: false,
+                now: now))
+
+        let model = UsageMenuCardView.Model.make(.init(
+            provider: .codex,
+            metadata: metadata,
+            snapshot: snapshot,
+            codexProjection: codexProjection,
+            credits: nil,
+            creditsError: nil,
+            dashboard: nil,
+            dashboardError: nil,
+            tokenSnapshot: nil,
+            tokenError: nil,
+            account: AccountInfo(email: "codex@example.com", plan: "Pro Lite"),
+            isRefreshing: false,
+            lastError: nil,
+            usageBarsShowUsed: false,
+            resetTimeDisplayStyle: .countdown,
+            tokenCostUsageEnabled: false,
+            showOptionalCreditsAndExtraUsage: true,
+            hidePersonalInfo: false,
+            now: now))
+
+        #expect(model.metrics.contains { $0.title == "Codex Spark" && $0.percent == 59 })
+    }
+
+    @Test
     func `uses semantic codex lanes when weekly duration drifts`() throws {
         let now = Date()
         let identity = ProviderIdentitySnapshot(

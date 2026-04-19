@@ -51,6 +51,7 @@ public struct UsageSnapshot: Codable, Sendable {
     public let primary: RateWindow?
     public let secondary: RateWindow?
     public let tertiary: RateWindow?
+    public let codexUsage: CodexUsageSnapshot?
     public let providerCost: ProviderCostSnapshot?
     public let zaiUsage: ZaiUsageSnapshot?
     public let minimaxUsage: MiniMaxUsageSnapshot?
@@ -63,6 +64,7 @@ public struct UsageSnapshot: Codable, Sendable {
         case primary
         case secondary
         case tertiary
+        case codexUsage
         case providerCost
         case openRouterUsage
         case updatedAt
@@ -76,6 +78,7 @@ public struct UsageSnapshot: Codable, Sendable {
         primary: RateWindow?,
         secondary: RateWindow?,
         tertiary: RateWindow? = nil,
+        codexUsage: CodexUsageSnapshot? = nil,
         providerCost: ProviderCostSnapshot? = nil,
         zaiUsage: ZaiUsageSnapshot? = nil,
         minimaxUsage: MiniMaxUsageSnapshot? = nil,
@@ -87,6 +90,7 @@ public struct UsageSnapshot: Codable, Sendable {
         self.primary = primary
         self.secondary = secondary
         self.tertiary = tertiary
+        self.codexUsage = codexUsage
         self.providerCost = providerCost
         self.zaiUsage = zaiUsage
         self.minimaxUsage = minimaxUsage
@@ -101,6 +105,7 @@ public struct UsageSnapshot: Codable, Sendable {
         self.primary = try container.decodeIfPresent(RateWindow.self, forKey: .primary)
         self.secondary = try container.decodeIfPresent(RateWindow.self, forKey: .secondary)
         self.tertiary = try container.decodeIfPresent(RateWindow.self, forKey: .tertiary)
+        self.codexUsage = try container.decodeIfPresent(CodexUsageSnapshot.self, forKey: .codexUsage)
         self.providerCost = try container.decodeIfPresent(ProviderCostSnapshot.self, forKey: .providerCost)
         self.zaiUsage = nil // Not persisted, fetched fresh each time
         self.minimaxUsage = nil // Not persisted, fetched fresh each time
@@ -131,6 +136,7 @@ public struct UsageSnapshot: Codable, Sendable {
         try container.encode(self.primary, forKey: .primary)
         try container.encode(self.secondary, forKey: .secondary)
         try container.encode(self.tertiary, forKey: .tertiary)
+        try container.encodeIfPresent(self.codexUsage, forKey: .codexUsage)
         try container.encodeIfPresent(self.providerCost, forKey: .providerCost)
         try container.encodeIfPresent(self.openRouterUsage, forKey: .openRouterUsage)
         try container.encode(self.updatedAt, forKey: .updatedAt)
@@ -215,6 +221,7 @@ public struct UsageSnapshot: Codable, Sendable {
             primary: self.primary,
             secondary: self.secondary,
             tertiary: self.tertiary,
+            codexUsage: self.codexUsage,
             providerCost: self.providerCost,
             zaiUsage: self.zaiUsage,
             minimaxUsage: self.minimaxUsage,
@@ -328,13 +335,26 @@ private struct RPCRateLimitsErrorBody: Decodable {
     let email: String?
     let planType: String?
     let rateLimit: CodexUsageResponse.RateLimitDetails?
+    let additionalRateLimits: [CodexUsageResponse.AdditionalRateLimit]
     let credits: CodexUsageResponse.CreditDetails?
 
     enum CodingKeys: String, CodingKey {
         case email
         case planType = "plan_type"
         case rateLimit = "rate_limit"
+        case additionalRateLimits = "additional_rate_limits"
         case credits
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.email = try container.decodeIfPresent(String.self, forKey: .email)
+        self.planType = try container.decodeIfPresent(String.self, forKey: .planType)
+        self.rateLimit = try container.decodeIfPresent(CodexUsageResponse.RateLimitDetails.self, forKey: .rateLimit)
+        self.additionalRateLimits = try container.decodeIfPresent(
+            [CodexUsageResponse.AdditionalRateLimit].self,
+            forKey: .additionalRateLimits) ?? []
+        self.credits = try container.decodeIfPresent(CodexUsageResponse.CreditDetails.self, forKey: .credits)
     }
 }
 
@@ -778,6 +798,7 @@ public struct UsageFetcher: Sendable {
         guard let state = CodexReconciledState.fromCLI(
             primary: self.makeWindow(from: body.rateLimit?.primaryWindow),
             secondary: self.makeWindow(from: body.rateLimit?.secondaryWindow),
+            codexUsage: CodexReconciledState.makeCodexUsage(additionalRateLimits: body.additionalRateLimits),
             identity: identity)
         else {
             return nil

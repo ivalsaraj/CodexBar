@@ -38,7 +38,8 @@ struct CodexBarApp: App {
                 "built": buildTimestamp,
             ])
 
-        KeychainAccessGate.isDisabled = UserDefaults.standard.bool(forKey: "debugDisableKeychainAccess")
+        KeychainAccessGate.isDisabled = AppGroupSupport.sharedDefaults()?.bool(forKey: "debugDisableKeychainAccess")
+            ?? UserDefaults.standard.bool(forKey: "debugDisableKeychainAccess")
         KeychainPromptCoordinator.install()
         CodexAccountEnvironment.cleanupOnLaunch()
 

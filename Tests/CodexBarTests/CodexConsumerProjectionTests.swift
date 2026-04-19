@@ -18,6 +18,12 @@ struct CodexConsumerProjectionTests {
                     windowMinutes: 10080,
                     resetsAt: now.addingTimeInterval(3600),
                     resetDescription: nil),
+                codexUsage: CodexUsageSnapshot(
+                    sparkLimit: RateWindow(
+                        usedPercent: 15,
+                        windowMinutes: 300,
+                        resetsAt: now.addingTimeInterval(2700),
+                        resetDescription: nil)),
                 updatedAt: now),
             provider: .codex)
         store.credits = CreditsSnapshot(remaining: 42, events: [], updatedAt: now)
@@ -42,12 +48,44 @@ struct CodexConsumerProjectionTests {
         #expect(projection.visibleRateLanes == [.weekly])
         #expect(projection.planUtilizationLanes.map(\.role.rawValue) == ["weekly"])
         #expect(projection.dashboardVisibility == .attached)
-        #expect(projection.supplementalMetrics == [.codeReview])
+        #expect(projection.supplementalMetrics == [.codeReview, .spark])
         #expect(projection.remainingPercent(for: .codeReview) == 88)
+        #expect(projection.remainingPercent(for: .spark) == 85)
         #expect(projection.credits?.remaining == 42)
         #expect(projection.canShowBuyCredits)
         #expect(projection.hasUsageBreakdown)
         #expect(projection.hasCreditsHistory)
+    }
+
+    @Test
+    func `live card projection surfaces spark without dashboard attachment`() {
+        let store = self.makeStore(suite: "CodexConsumerProjectionTests-spark")
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(
+                    usedPercent: 10,
+                    windowMinutes: 300,
+                    resetsAt: now.addingTimeInterval(1800),
+                    resetDescription: nil),
+                secondary: nil,
+                codexUsage: CodexUsageSnapshot(
+                    sparkLimit: RateWindow(
+                        usedPercent: 37,
+                        windowMinutes: 300,
+                        resetsAt: now.addingTimeInterval(2700),
+                        resetDescription: nil)),
+                updatedAt: now),
+            provider: .codex)
+        store.openAIDashboardAttachmentAuthorized = false
+        store.openAIDashboardRequiresLogin = false
+
+        let projection = store.codexConsumerProjection(surface: .liveCard, now: now)
+
+        #expect(projection.supplementalMetrics == [.spark])
+        #expect(projection.remainingPercent(for: .spark) == 63)
+        #expect(projection.limitWindow(for: .spark)?.windowMinutes == 300)
     }
 
     @Test

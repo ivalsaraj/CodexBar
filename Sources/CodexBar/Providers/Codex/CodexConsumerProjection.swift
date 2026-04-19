@@ -101,6 +101,7 @@ struct CodexConsumerProjection {
 
     enum SupplementalMetric: String, Sendable {
         case codeReview
+        case spark
     }
 
     struct PlanUtilizationLane: Sendable {
@@ -160,6 +161,8 @@ struct CodexConsumerProjection {
     private let rateWindowsByLane: [RateLane: RateWindow]
     private let codeReviewRemainingPercent: Double?
     private let codeReviewLimit: RateWindow?
+    private let sparkRemainingPercent: Double?
+    private let sparkLimit: RateWindow?
 
     static func make(surface: Surface, context: Context) -> CodexConsumerProjection {
         let allowsLiveAdjuncts = surface != .overrideCard
@@ -185,13 +188,15 @@ struct CodexConsumerProjection {
             credits: allowsLiveAdjuncts ? CodexUIErrorMapper.userFacingMessage(context.rawCreditsError) : nil,
             dashboard: allowsLiveAdjuncts ? CodexUIErrorMapper.userFacingMessage(context.rawDashboardError) : nil)
 
-        let supplementalMetrics: [SupplementalMetric] = if surface == .liveCard,
-                                                           dashboardVisibility == .attached,
-                                                           dashboard?.codeReviewRemainingPercent != nil
+        var supplementalMetrics: [SupplementalMetric] = []
+        if surface == .liveCard,
+           dashboardVisibility == .attached,
+           dashboard?.codeReviewRemainingPercent != nil
         {
-            [.codeReview]
-        } else {
-            []
+            supplementalMetrics.append(.codeReview)
+        }
+        if surface == .liveCard, context.snapshot?.codexUsage?.sparkLimit != nil {
+            supplementalMetrics.append(.spark)
         }
 
         let canShowBuyCredits = surface == .liveCard
@@ -217,7 +222,9 @@ struct CodexConsumerProjection {
             hasCreditsHistory: hasCreditsHistory,
             rateWindowsByLane: rateWindowsByLane,
             codeReviewRemainingPercent: dashboardVisibility == .attached ? dashboard?.codeReviewRemainingPercent : nil,
-            codeReviewLimit: dashboardVisibility == .attached ? dashboard?.codeReviewLimit : nil)
+            codeReviewLimit: dashboardVisibility == .attached ? dashboard?.codeReviewLimit : nil,
+            sparkRemainingPercent: context.snapshot?.codexUsage?.sparkLimit?.remainingPercent,
+            sparkLimit: context.snapshot?.codexUsage?.sparkLimit)
     }
 
     func rateWindow(for lane: RateLane) -> RateWindow? {
@@ -228,6 +235,8 @@ struct CodexConsumerProjection {
         switch metric {
         case .codeReview:
             self.codeReviewRemainingPercent
+        case .spark:
+            self.sparkRemainingPercent
         }
     }
 
@@ -235,6 +244,8 @@ struct CodexConsumerProjection {
         switch metric {
         case .codeReview:
             self.codeReviewLimit
+        case .spark:
+            self.sparkLimit
         }
     }
 

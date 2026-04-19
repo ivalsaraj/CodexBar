@@ -5,7 +5,6 @@ import SweetCookieKit
 
 public enum KeychainAccessGate {
     private static let flagKey = "debugDisableKeychainAccess"
-    private static let appGroupID = "group.com.steipete.codexbar"
     @TaskLocal private static var taskOverrideValue: Bool?
     private nonisolated(unsafe) static var overrideValue: Bool?
 
@@ -14,7 +13,7 @@ public enum KeychainAccessGate {
             if let taskOverrideValue { return taskOverrideValue }
             if let overrideValue { return overrideValue }
             if UserDefaults.standard.bool(forKey: Self.flagKey) { return true }
-            if let shared = UserDefaults(suiteName: Self.appGroupID),
+            if let shared = AppGroupSupport.sharedDefaults(),
                shared.bool(forKey: Self.flagKey)
             {
                 return true

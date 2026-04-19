@@ -1030,6 +1030,26 @@ extension UsageMenuCardView.Model {
                 pacePercent: nil,
                 paceOnTop: true))
         }
+        if let codexProjection = input.codexProjection,
+           codexProjection.supplementalMetrics.contains(.spark),
+           let remaining = codexProjection.remainingPercent(for: .spark)
+        {
+            let percent = input.usageBarsShowUsed ? (100 - remaining) : remaining
+            let resetText = codexProjection.limitWindow(for: .spark).flatMap {
+                Self.resetText(for: $0, style: input.resetTimeDisplayStyle, now: input.now)
+            }
+            metrics.append(Metric(
+                id: "codex-spark",
+                title: "Codex Spark",
+                percent: Self.clamped(percent),
+                percentStyle: percentStyle,
+                resetText: resetText,
+                detailText: nil,
+                detailLeftText: nil,
+                detailRightText: nil,
+                pacePercent: nil,
+                paceOnTop: true))
+        }
         return metrics
     }
 
