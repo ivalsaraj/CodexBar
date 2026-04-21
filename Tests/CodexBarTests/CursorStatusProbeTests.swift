@@ -545,6 +545,44 @@ struct CursorStatusProbeTests {
 
         #expect(snapshot.requestsUsed == 240)
         #expect(snapshot.requestsLimit == 500)
+        #expect(snapshot.legacyUsageMetric == .requests)
+    }
+
+    @Test
+    func `parse usage summary falls back to token quota when request quota missing`() {
+        let summary = CursorUsageSummary(
+            billingCycleStart: nil,
+            billingCycleEnd: nil,
+            membershipType: "enterprise",
+            limitType: nil,
+            isUnlimited: nil,
+            autoModelSelectedDisplayMessage: nil,
+            namedModelSelectedDisplayMessage: nil,
+            individualUsage: nil,
+            teamUsage: nil)
+        let requestUsage = CursorUsageResponse(
+            gpt4: CursorModelUsage(
+                numRequests: nil,
+                numRequestsTotal: nil,
+                numTokens: 123_456,
+                maxRequestUsage: nil,
+                maxTokenUsage: 1_000_000),
+            startOfMonth: nil)
+
+        let snapshot = CursorStatusProbe(browserDetection: BrowserDetection(cacheTTL: 0)).parseUsageSummary(
+            summary,
+            userInfo: nil,
+            rawJSON: nil,
+            requestUsage: requestUsage)
+        let usageSnapshot = snapshot.toUsageSnapshot()
+
+        #expect(snapshot.requestsUsed == 123_456)
+        #expect(snapshot.requestsLimit == 1_000_000)
+        #expect(snapshot.legacyUsageMetric == .tokens)
+        #expect(snapshot.isLegacyRequestPlan == true)
+        #expect(usageSnapshot.primary?.usedPercent == 12.3456)
+        #expect(usageSnapshot.cursorRequests?.metric == .tokens)
+        #expect(usageSnapshot.cursorRequests?.summaryText == "Tokens: 123K / 1M")
     }
 
     // MARK: - Imported Session Scanning

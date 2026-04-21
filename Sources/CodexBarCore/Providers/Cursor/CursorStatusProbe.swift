@@ -234,9 +234,9 @@ public struct CursorTeamUsage: Codable, Sendable {
     public let onDemand: CursorOnDemandUsage?
 }
 
-// MARK: - Cursor Usage API Models (Legacy Request-Based Plans)
+// MARK: - Cursor Usage API Models (Legacy Quota Plans)
 
-/// Response from `/api/usage?user=ID` endpoint for legacy request-based plans.
+/// Response from `/api/usage?user=ID` endpoint for legacy quota-based plans.
 public struct CursorUsageResponse: Codable, Sendable {
     public let gpt4: CursorModelUsage?
     public let startOfMonth: String?
@@ -307,16 +307,18 @@ public struct CursorStatusSnapshot: Sendable {
     /// Raw API response for debugging
     public let rawJSON: String?
 
-    // MARK: - Legacy Plan (Request-Based) Fields
+    // MARK: - Legacy Plan Fields
 
-    /// Requests used this billing cycle (legacy plans only)
+    /// Legacy quota usage this billing cycle (request count or token count).
     public let requestsUsed: Int?
-    /// Request limit (non-nil indicates legacy request-based plan)
+    /// Legacy quota limit (request count or token count).
     public let requestsLimit: Int?
+    /// Legacy quota metric kind.
+    public let legacyUsageMetric: CursorRequestUsage.Metric?
 
-    /// Whether this is a legacy request-based plan (vs token-based)
+    /// Whether this plan uses the legacy request/token quota endpoint.
     public var isLegacyRequestPlan: Bool {
-        self.requestsLimit != nil
+        self.legacyUsageMetric != nil
     }
 
     public init(
@@ -335,7 +337,8 @@ public struct CursorStatusSnapshot: Sendable {
         accountName: String?,
         rawJSON: String?,
         requestsUsed: Int? = nil,
-        requestsLimit: Int? = nil)
+        requestsLimit: Int? = nil,
+        legacyUsageMetric: CursorRequestUsage.Metric? = nil)
     {
         self.planPercentUsed = planPercentUsed
         self.autoPercentUsed = autoPercentUsed
@@ -353,11 +356,12 @@ public struct CursorStatusSnapshot: Sendable {
         self.rawJSON = rawJSON
         self.requestsUsed = requestsUsed
         self.requestsLimit = requestsLimit
+        self.legacyUsageMetric = legacyUsageMetric
     }
 
     /// Convert to UsageSnapshot for the common provider interface
     public func toUsageSnapshot() -> UsageSnapshot {
-        // Primary: For legacy request-based plans, use request usage; otherwise use plan percentage
+        // Primary: For legacy quota plans, use the quota percent; otherwise use plan percentage.
         let primaryUsedPercent: Double = if self.isLegacyRequestPlan,
                                             let used = self.requestsUsed,
                                             let limit = self.requestsLimit,
@@ -411,11 +415,12 @@ public struct CursorStatusSnapshot: Sendable {
             nil
         }
 
-        // Legacy plan request usage (when maxRequestUsage is set)
+        // Legacy plan quota usage.
         let cursorRequests: CursorRequestUsage? = if let used = self.requestsUsed,
-                                                     let limit = self.requestsLimit
+                                                     let limit = self.requestsLimit,
+                                                     let metric = self.legacyUsageMetric
         {
-            CursorRequestUsage(used: used, limit: limit)
+            CursorRequestUsage(used: used, limit: limit, metric: metric)
         } else {
             nil
         }
@@ -970,9 +975,19 @@ public struct CursorStatusProbe: Sendable {
         let teamOnDemandUsed: Double? = summary.teamUsage?.onDemand?.used.map { Double($0) / 100.0 }
         let teamOnDemandLimit: Double? = summary.teamUsage?.onDemand?.limit.map { Double($0) / 100.0 }
 
-        // Legacy request-based plan: maxRequestUsage being non-nil indicates a request-based plan
-        let requestsUsed: Int? = requestUsage?.gpt4?.numRequestsTotal ?? requestUsage?.gpt4?.numRequests
-        let requestsLimit: Int? = requestUsage?.gpt4?.maxRequestUsage
+        let legacyQuotaUsage: CursorRequestUsage? = {
+            guard let gpt4 = requestUsage?.gpt4 else { return nil }
+            if let limit = gpt4.maxRequestUsage {
+                let used = gpt4.numRequestsTotal ?? gpt4.numRequests ?? 0
+                return CursorRequestUsage(used: used, limit: limit, metric: .requests)
+            }
+            if let used = gpt4.numTokens,
+               let limit = gpt4.maxTokenUsage
+            {
+                return CursorRequestUsage(used: used, limit: limit, metric: .tokens)
+            }
+            return nil
+        }()
 
         return CursorStatusSnapshot(
             planPercentUsed: planPercentUsed,
@@ -989,8 +1004,9 @@ public struct CursorStatusProbe: Sendable {
             accountEmail: userInfo?.email,
             accountName: userInfo?.name,
             rawJSON: rawJSON,
-            requestsUsed: requestsUsed,
-            requestsLimit: requestsLimit)
+            requestsUsed: legacyQuotaUsage?.used,
+            requestsLimit: legacyQuotaUsage?.limit,
+            legacyUsageMetric: legacyQuotaUsage?.metric)
     }
 }
 
