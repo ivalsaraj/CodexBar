@@ -951,6 +951,7 @@ extension UsageMenuCardView.Model {
         let percentStyle: PercentStyle = input.usageBarsShowUsed ? .used : .left
         let zaiUsage = input.provider == .zai ? snapshot.zaiUsage : nil
         let zaiTokenDetail = Self.zaiLimitDetailText(limit: zaiUsage?.tokenLimit)
+        let zaiWeeklyDetail = Self.zaiLimitDetailText(limit: zaiUsage?.secondaryTokenLimit)
         let zaiTimeDetail = Self.zaiLimitDetailText(limit: zaiUsage?.timeLimit)
         let openRouterQuotaDetail = Self.openRouterQuotaDetail(provider: input.provider, snapshot: snapshot)
         if input.provider == .codex, let codexProjection = input.codexProjection {
@@ -971,7 +972,7 @@ extension UsageMenuCardView.Model {
                 input: input,
                 weekly: weekly,
                 percentStyle: percentStyle,
-                zaiTimeDetail: zaiTimeDetail))
+                zaiSecondaryDetail: zaiWeeklyDetail))
         }
         if input.provider == .kilo,
            metrics.contains(where: { $0.id == "primary" }),
@@ -987,9 +988,11 @@ extension UsageMenuCardView.Model {
         }
         if input.metadata.supportsOpus, let opus = snapshot.tertiary {
             var tertiaryDetailText: String?
-            if input.provider == .alibaba,
-               let detail = opus.resetDescription,
-               !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if input.provider == .zai {
+                tertiaryDetailText = zaiTimeDetail ?? Self.rateWindowDetailText(opus)
+            } else if input.provider == .alibaba,
+                      let detail = opus.resetDescription,
+                      !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             {
                 tertiaryDetailText = detail
             }
@@ -1104,7 +1107,7 @@ extension UsageMenuCardView.Model {
         input: Input,
         weekly: RateWindow,
         percentStyle: PercentStyle,
-        zaiTimeDetail: String?) -> Metric
+        zaiSecondaryDetail: String?) -> Metric
     {
         let paceDetail = Self.weeklyPaceDetail(
             window: weekly,
@@ -1113,7 +1116,7 @@ extension UsageMenuCardView.Model {
             showUsed: input.usageBarsShowUsed)
         var weeklyResetText = Self.resetText(for: weekly, style: input.resetTimeDisplayStyle, now: input.now)
         var weeklyDetailText: String? = if input.provider == .zai {
-            zaiTimeDetail ?? Self.rateWindowDetailText(weekly)
+            zaiSecondaryDetail ?? Self.rateWindowDetailText(weekly)
         } else {
             nil
         }

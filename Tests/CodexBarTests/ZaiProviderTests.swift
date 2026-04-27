@@ -364,6 +364,58 @@ struct ZaiUsageParsingTests {
         #expect(snapshot.tokenLimit?.percentage == 21)
         #expect(usage.primary?.resetDescription == "5 hours window")
     }
+
+    @Test
+    func `keeps secondary token limit separate from MCP when multiple token limits are returned`() throws {
+        let json = """
+        {
+          "code": 200,
+          "msg": "Operation successful",
+          "data": {
+            "limits": [
+              {
+                "type": "TOKENS_LIMIT",
+                "unit": 3,
+                "number": 5,
+                "percentage": 21,
+                "nextResetTime": 1777302719973
+              },
+              {
+                "type": "TOKENS_LIMIT",
+                "unit": 6,
+                "number": 1,
+                "percentage": 30,
+                "nextResetTime": 1777833522998
+              },
+              {
+                "type": "TIME_LIMIT",
+                "unit": 5,
+                "number": 1,
+                "usage": 1000,
+                "currentValue": 0,
+                "remaining": 1000,
+                "percentage": 0,
+                "usageDetails": [
+                  { "modelCode": "search-prime", "usage": 0 }
+                ]
+              }
+            ]
+          },
+          "success": true
+        }
+        """
+
+        let snapshot = try ZaiUsageFetcher.parseUsageSnapshot(from: Data(json.utf8))
+        let usage = snapshot.toUsageSnapshot()
+
+        #expect(snapshot.tokenLimit?.windowMinutes == 300)
+        #expect(snapshot.secondaryTokenLimit?.windowMinutes == 10080)
+        #expect(snapshot.secondaryTokenLimit?.percentage == 30)
+        #expect(snapshot.timeLimit?.usageDetails.count == 1)
+        #expect(usage.primary?.resetDescription == "5 hours window")
+        #expect(usage.secondary?.resetDescription == "1 week window")
+        #expect(usage.tertiary?.resetDescription == "1 minute window")
+    }
 }
 
 struct ZaiAPIRegionTests {

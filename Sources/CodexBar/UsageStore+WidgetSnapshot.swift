@@ -114,6 +114,27 @@ extension UsageStore {
             }
         }
 
+        if provider == .zai {
+            let rows: [WidgetSnapshot.WidgetUsageRowSnapshot] = [
+                WidgetSnapshot.WidgetUsageRowSnapshot(
+                    id: "primary",
+                    title: metadata?.sessionLabel ?? "Session",
+                    percentLeft: snapshot.primary?.remainingPercent,
+                    detailText: snapshot.primary.flatMap(Self.widgetUsageRowDetail)),
+                WidgetSnapshot.WidgetUsageRowSnapshot(
+                    id: "secondary",
+                    title: metadata?.weeklyLabel ?? "Weekly",
+                    percentLeft: snapshot.secondary?.remainingPercent,
+                    detailText: snapshot.secondary.flatMap(Self.widgetUsageRowDetail)),
+                WidgetSnapshot.WidgetUsageRowSnapshot(
+                    id: "tertiary",
+                    title: metadata?.opusLabel ?? "MCP",
+                    percentLeft: snapshot.tertiary?.remainingPercent,
+                    detailText: snapshot.tertiary.flatMap(Self.widgetUsageRowDetail)),
+            ]
+            return rows.filter { $0.percentLeft != nil }
+        }
+
         let rows: [WidgetSnapshot.WidgetUsageRowSnapshot] = [
             WidgetSnapshot.WidgetUsageRowSnapshot(
                 id: "primary",
