@@ -1254,6 +1254,7 @@ extension UsageMenuCardView.Model {
     private static func zaiLimitDetailText(limit: ZaiLimitEntry?) -> String? {
         guard let limit else { return nil }
 
+        var parts: [String] = []
         if let currentValue = limit.currentValue,
            let usage = limit.usage,
            let remaining = limit.remaining
@@ -1261,10 +1262,14 @@ extension UsageMenuCardView.Model {
             let currentStr = UsageFormatter.tokenCountString(currentValue)
             let usageStr = UsageFormatter.tokenCountString(usage)
             let remainingStr = UsageFormatter.tokenCountString(remaining)
-            return "\(currentStr) / \(usageStr) (\(remainingStr) remaining)"
+            parts.append("\(currentStr) / \(usageStr) (\(remainingStr) remaining)")
         }
 
-        return nil
+        if let windowLabel = limit.windowLabel {
+            parts.append(windowLabel)
+        }
+
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private static func openRouterQuotaDetail(provider: UsageProvider, snapshot: UsageSnapshot) -> String? {

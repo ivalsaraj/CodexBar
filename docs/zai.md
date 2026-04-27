@@ -39,6 +39,11 @@ z.ai is API-token based. No browser cookies.
 - Usage details:
   - `usageDetails[]` per model (MCP usage list).
 
+## Menu display
+- The menu card shows the token window duration (for example, `5 hours window`) even when the API omits
+  `usage`, `currentValue`, or `remaining` from the token limit entry.
+- When quota counts are available, the menu card shows both the count detail and the window duration.
+
 ## Key files
 - `Sources/CodexBarCore/Providers/Zai/ZaiUsageStats.swift`
 - `Sources/CodexBarCore/Providers/Zai/ZaiSettingsReader.swift`
