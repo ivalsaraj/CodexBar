@@ -1282,7 +1282,23 @@ extension UsageMenuCardView.Model {
 
     private static func rateWindowDetailText(_ window: RateWindow) -> String? {
         let detail = window.resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return detail?.isEmpty == false ? detail : nil
+        if detail?.isEmpty == false {
+            return detail
+        }
+        return Self.rateWindowLabel(minutes: window.windowMinutes)
+    }
+
+    private static func rateWindowLabel(minutes: Int?) -> String? {
+        guard let minutes, minutes > 0 else { return nil }
+        if minutes.isMultiple(of: 24 * 60) {
+            let days = minutes / (24 * 60)
+            return "\(days) \(days == 1 ? "day" : "days") window"
+        }
+        if minutes.isMultiple(of: 60) {
+            let hours = minutes / 60
+            return "\(hours) \(hours == 1 ? "hour" : "hours") window"
+        }
+        return "\(minutes) \(minutes == 1 ? "minute" : "minutes") window"
     }
 
     private static func openRouterQuotaDetail(provider: UsageProvider, snapshot: UsageSnapshot) -> String? {
