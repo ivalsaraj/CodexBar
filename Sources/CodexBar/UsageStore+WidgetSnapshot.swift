@@ -109,7 +109,8 @@ extension UsageStore {
                 return WidgetSnapshot.WidgetUsageRowSnapshot(
                     id: lane.rawValue,
                     title: title,
-                    percentLeft: window.remainingPercent)
+                    percentLeft: window.remainingPercent,
+                    detailText: Self.widgetUsageRowDetail(window: window))
             }
         }
 
@@ -117,12 +118,19 @@ extension UsageStore {
             WidgetSnapshot.WidgetUsageRowSnapshot(
                 id: "primary",
                 title: metadata?.sessionLabel ?? "Session",
-                percentLeft: snapshot.primary?.remainingPercent),
+                percentLeft: snapshot.primary?.remainingPercent,
+                detailText: snapshot.primary.flatMap(Self.widgetUsageRowDetail)),
             WidgetSnapshot.WidgetUsageRowSnapshot(
                 id: "secondary",
                 title: metadata?.weeklyLabel ?? "Weekly",
-                percentLeft: snapshot.secondary?.remainingPercent),
+                percentLeft: snapshot.secondary?.remainingPercent,
+                detailText: snapshot.secondary.flatMap(Self.widgetUsageRowDetail)),
         ]
         return rows.filter { $0.percentLeft != nil }
+    }
+
+    private nonisolated static func widgetUsageRowDetail(window: RateWindow) -> String? {
+        let detail = window.resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return detail?.isEmpty == false ? detail : nil
     }
 }

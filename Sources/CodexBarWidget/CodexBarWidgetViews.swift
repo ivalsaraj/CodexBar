@@ -294,6 +294,7 @@ private struct SwitcherSmallUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
+                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let codeReview = entry.codeReviewRemainingPercent {
@@ -315,6 +316,7 @@ private struct SwitcherMediumUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
+                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let credits = entry.creditsRemaining {
@@ -338,6 +340,7 @@ private struct SwitcherLargeUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
+                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let codeReview = entry.codeReviewRemainingPercent {
@@ -377,6 +380,7 @@ private struct SmallUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
+                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let codeReview = entry.codeReviewRemainingPercent {
@@ -400,6 +404,7 @@ private struct MediumUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
+                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let credits = entry.creditsRemaining {
@@ -425,6 +430,7 @@ private struct LargeUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
+                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let codeReview = entry.codeReviewRemainingPercent {
@@ -459,11 +465,19 @@ struct WidgetUsageRow: Identifiable, Equatable {
     let id: String
     let title: String
     let percentLeft: Double?
+    let detailText: String?
+
+    init(id: String, title: String, percentLeft: Double?, detailText: String? = nil) {
+        self.id = id
+        self.title = title
+        self.percentLeft = percentLeft
+        self.detailText = detailText
+    }
 
     static func rows(for entry: WidgetSnapshot.ProviderEntry) -> [WidgetUsageRow] {
         if let usageRows = entry.usageRows {
             return usageRows.map { row in
-                WidgetUsageRow(id: row.id, title: row.title, percentLeft: row.percentLeft)
+                WidgetUsageRow(id: row.id, title: row.title, percentLeft: row.percentLeft, detailText: row.detailText)
             }
         }
 
@@ -472,12 +486,19 @@ struct WidgetUsageRow: Identifiable, Equatable {
             WidgetUsageRow(
                 id: "primary",
                 title: metadata?.sessionLabel ?? "Session",
-                percentLeft: entry.primary?.remainingPercent),
+                percentLeft: entry.primary?.remainingPercent,
+                detailText: entry.primary.flatMap(Self.detailText)),
             WidgetUsageRow(
                 id: "secondary",
                 title: metadata?.weeklyLabel ?? "Weekly",
-                percentLeft: entry.secondary?.remainingPercent),
+                percentLeft: entry.secondary?.remainingPercent,
+                detailText: entry.secondary.flatMap(Self.detailText)),
         ].filter { $0.percentLeft != nil }
+    }
+
+    private static func detailText(window: RateWindow) -> String? {
+        let detail = window.resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return detail?.isEmpty == false ? detail : nil
     }
 }
 
@@ -523,7 +544,15 @@ private struct HeaderView: View {
 private struct UsageBarRow: View {
     let title: String
     let percentLeft: Double?
+    let detailText: String?
     let color: Color
+
+    init(title: String, percentLeft: Double?, detailText: String? = nil, color: Color) {
+        self.title = title
+        self.percentLeft = percentLeft
+        self.detailText = detailText
+        self.color = color
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -543,6 +572,11 @@ private struct UsageBarRow: View {
                 }
             }
             .frame(height: 6)
+            if let detailText {
+                Text(detailText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

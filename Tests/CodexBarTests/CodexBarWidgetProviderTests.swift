@@ -80,7 +80,11 @@ struct CodexBarWidgetProviderTests {
             secondary: RateWindow(usedPercent: 25, windowMinutes: 10080, resetsAt: nil, resetDescription: nil),
             tertiary: nil,
             usageRows: [
-                WidgetSnapshot.WidgetUsageRowSnapshot(id: "weekly", title: "Weekly", percentLeft: 75),
+                WidgetSnapshot.WidgetUsageRowSnapshot(
+                    id: "weekly",
+                    title: "Weekly",
+                    percentLeft: 75,
+                    detailText: "7 days window"),
             ],
             creditsRemaining: nil,
             codeReviewRemainingPercent: nil,
@@ -89,6 +93,6 @@ struct CodexBarWidgetProviderTests {
 
         let rows = WidgetUsageRow.rows(for: entry)
 
-        #expect(rows == [WidgetUsageRow(id: "weekly", title: "Weekly", percentLeft: 75)])
+        #expect(rows == [WidgetUsageRow(id: "weekly", title: "Weekly", percentLeft: 75, detailText: "7 days window")])
     }
 }

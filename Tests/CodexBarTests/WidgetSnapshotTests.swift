@@ -12,7 +12,11 @@ struct WidgetSnapshotTests {
             secondary: RateWindow(usedPercent: 20, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
             tertiary: nil,
             usageRows: [
-                WidgetSnapshot.WidgetUsageRowSnapshot(id: "session", title: "Session", percentLeft: 90),
+                WidgetSnapshot.WidgetUsageRowSnapshot(
+                    id: "session",
+                    title: "Session",
+                    percentLeft: 90,
+                    detailText: "5 hours window"),
                 WidgetSnapshot.WidgetUsageRowSnapshot(id: "weekly", title: "Weekly", percentLeft: 80),
             ],
             creditsRemaining: 123.4,
@@ -43,6 +47,7 @@ struct WidgetSnapshotTests {
         #expect(decoded.entries.first?.provider == .codex)
         #expect(decoded.entries.first?.tokenUsage?.sessionTokens == 1200)
         #expect(decoded.entries.first?.usageRows?.map(\.id) == ["session", "weekly"])
+        #expect(decoded.entries.first?.usageRows?.first?.detailText == "5 hours window")
         #expect(decoded.enabledProviders == [.codex, .claude])
     }
 
