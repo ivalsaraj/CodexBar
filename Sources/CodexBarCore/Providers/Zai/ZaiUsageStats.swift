@@ -371,7 +371,7 @@ public struct ZaiUsageFetcher: Sendable {
             if let entry = limit.toLimitEntry() {
                 switch entry.type {
                 case .tokensLimit:
-                    tokenLimit = entry
+                    tokenLimit = self.preferredTokenLimit(current: tokenLimit, candidate: entry)
                 case .timeLimit:
                     timeLimit = entry
                 }
@@ -383,6 +383,20 @@ public struct ZaiUsageFetcher: Sendable {
             timeLimit: timeLimit,
             planName: responseData.planName,
             updatedAt: Date())
+    }
+
+    private static func preferredTokenLimit(current: ZaiLimitEntry?, candidate: ZaiLimitEntry) -> ZaiLimitEntry {
+        guard let current else { return candidate }
+        switch (current.windowMinutes, candidate.windowMinutes) {
+        case let (currentMinutes?, candidateMinutes?):
+            return candidateMinutes < currentMinutes ? candidate : current
+        case (nil, _?):
+            return candidate
+        case (_?, nil):
+            return current
+        case (nil, nil):
+            return current
+        }
     }
 
     private static func quotaURL(baseURLString: String) -> URL? {

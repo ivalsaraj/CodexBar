@@ -32,6 +32,7 @@ z.ai is API-token based. No browser cookies.
 - Limit types:
   - `TOKENS_LIMIT` → primary (tokens window).
   - `TIME_LIMIT` → secondary (MCP/time window) if tokens also present.
+  - Multiple `TOKENS_LIMIT` entries → prefer the shortest known token window for the primary Tokens row.
 - Window duration:
   - Unit + number → minutes/hours/days.
 - Reset:
