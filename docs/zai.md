@@ -43,6 +43,8 @@ z.ai is API-token based. No browser cookies.
 - The menu card shows the token window duration (for example, `5 hours window`) even when the API omits
   `usage`, `currentValue`, or `remaining` from the token limit entry.
 - When quota counts are available, the menu card shows both the count detail and the window duration.
+- Cached or reconstructed menu snapshots fall back to the rate-window description when the raw z.ai
+  limit entry is not present.
 - Widgets receive the same token window duration as usage-row detail text, so the z.ai widget can show
   the five-hour token limit instead of only the percentage.
 

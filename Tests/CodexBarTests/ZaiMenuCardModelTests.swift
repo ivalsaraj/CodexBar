@@ -47,4 +47,46 @@ struct ZaiMenuCardModelTests {
         let primary = try #require(model.metrics.first)
         #expect(primary.detailText == "5 hours window")
     }
+
+    @Test
+    func `zai model falls back to rate window detail when raw usage is unavailable`() throws {
+        let now = Date()
+        let metadata = try #require(ProviderDefaults.metadata[.zai])
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(
+                usedPercent: 28,
+                windowMinutes: 300,
+                resetsAt: now.addingTimeInterval(3600),
+                resetDescription: "5 hours window"),
+            secondary: RateWindow(
+                usedPercent: 0,
+                windowMinutes: nil,
+                resetsAt: now.addingTimeInterval(48 * 3600),
+                resetDescription: "1 minute window"),
+            tertiary: nil,
+            updatedAt: now)
+
+        let model = UsageMenuCardView.Model.make(.init(
+            provider: .zai,
+            metadata: metadata,
+            snapshot: snapshot,
+            credits: nil,
+            creditsError: nil,
+            dashboard: nil,
+            dashboardError: nil,
+            tokenSnapshot: nil,
+            tokenError: nil,
+            account: AccountInfo(email: nil, plan: nil),
+            isRefreshing: false,
+            lastError: nil,
+            usageBarsShowUsed: false,
+            resetTimeDisplayStyle: .absolute,
+            tokenCostUsageEnabled: false,
+            showOptionalCreditsAndExtraUsage: true,
+            hidePersonalInfo: false,
+            now: now))
+
+        #expect(model.metrics.first?.detailText == "5 hours window")
+        #expect(model.metrics.dropFirst().first?.detailText == "1 minute window")
+    }
 }

@@ -1060,7 +1060,11 @@ extension UsageMenuCardView.Model {
         zaiTokenDetail: String?,
         openRouterQuotaDetail: String?) -> Metric
     {
-        var primaryDetailText: String? = input.provider == .zai ? zaiTokenDetail : nil
+        var primaryDetailText: String? = if input.provider == .zai {
+            zaiTokenDetail ?? Self.rateWindowDetailText(primary)
+        } else {
+            nil
+        }
         var primaryResetText = Self.resetText(for: primary, style: input.resetTimeDisplayStyle, now: input.now)
         if input.provider == .openrouter,
            let openRouterQuotaDetail
@@ -1108,7 +1112,11 @@ extension UsageMenuCardView.Model {
             pace: input.weeklyPace,
             showUsed: input.usageBarsShowUsed)
         var weeklyResetText = Self.resetText(for: weekly, style: input.resetTimeDisplayStyle, now: input.now)
-        var weeklyDetailText: String? = input.provider == .zai ? zaiTimeDetail : nil
+        var weeklyDetailText: String? = if input.provider == .zai {
+            zaiTimeDetail ?? Self.rateWindowDetailText(weekly)
+        } else {
+            nil
+        }
         if input.provider == .warp,
            let detail = weekly.resetDescription,
            !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1270,6 +1278,11 @@ extension UsageMenuCardView.Model {
         }
 
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private static func rateWindowDetailText(_ window: RateWindow) -> String? {
+        let detail = window.resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return detail?.isEmpty == false ? detail : nil
     }
 
     private static func openRouterQuotaDetail(provider: UsageProvider, snapshot: UsageSnapshot) -> String? {
