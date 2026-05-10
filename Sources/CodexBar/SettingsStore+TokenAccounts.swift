@@ -122,6 +122,9 @@ extension SettingsStore {
                 "provider": provider.rawValue,
                 "count": "\(filtered.count)",
             ])
+        if provider == .opencode {
+            self.pruneOpenCodeWorkspaceAccountsIfNeeded()
+        }
     }
 
     func ensureTokenAccountsLoaded() {

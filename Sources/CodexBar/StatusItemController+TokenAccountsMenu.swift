@@ -237,7 +237,7 @@ extension StatusItemController {
     }
 
     private func switchTokenAccount(provider: UsageProvider, index: Int, menu: NSMenu) {
-        let accounts = self.settings.tokenAccounts(for: provider)
+        let accounts = self.store.tokenAccounts(for: provider)
         guard !accounts.isEmpty else { return }
         let clamped = max(0, min(index, max(0, accounts.count - 1)))
         let selectedAccount = accounts[clamped]
@@ -275,7 +275,11 @@ extension StatusItemController {
                 return
             }
         } else {
-            self.settings.setActiveTokenAccountIndex(clamped, for: provider)
+            if provider == .opencode {
+                guard self.settings.setActiveOpenCodeWorkspaceAccount(id: selectedAccount.id) else { return }
+            } else {
+                self.settings.setActiveTokenAccountIndex(clamped, for: provider)
+            }
         }
 
         if let cached = self.store.cachedTokenAccountSnapshot(
@@ -322,9 +326,15 @@ extension StatusItemController {
 
     func tokenAccountMenuDisplay(for provider: UsageProvider) -> TokenAccountMenuDisplay? {
         guard TokenAccountSupportCatalog.support(for: provider) != nil else { return nil }
-        let accounts = self.settings.tokenAccounts(for: provider)
+        let accounts = self.store.tokenAccounts(for: provider)
         guard accounts.count > 1 else { return nil }
-        let configuredIndex = self.settings.tokenAccountsData(for: provider)?.clampedActiveIndex() ?? 0
+        let configuredIndex = if let selected = self.store.selectedTokenAccount(for: provider),
+                                 let index = accounts.firstIndex(where: { $0.id == selected.id })
+        {
+            index
+        } else {
+            0
+        }
         let activeIndex = min(max(configuredIndex, 0), accounts.count - 1)
         let selectedIndex = Self.resolvedTokenAccountSelectedIndex(
             accounts: accounts,

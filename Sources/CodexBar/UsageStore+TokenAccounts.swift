@@ -46,7 +46,17 @@ extension UsageStore {
 
     func tokenAccounts(for provider: UsageProvider) -> [ProviderTokenAccount] {
         guard TokenAccountSupportCatalog.support(for: provider) != nil else { return [] }
+        if provider == .opencode {
+            return self.settings.openCodeMenuTokenAccounts
+        }
         return self.settings.tokenAccounts(for: provider)
+    }
+
+    func selectedTokenAccount(for provider: UsageProvider) -> ProviderTokenAccount? {
+        if provider == .opencode {
+            return self.settings.selectedOpenCodeMenuTokenAccount ?? self.settings.selectedTokenAccount(for: provider)
+        }
+        return self.settings.selectedTokenAccount(for: provider)
     }
 
     func shouldFetchAllTokenAccounts(provider: UsageProvider, accounts: [ProviderTokenAccount]) -> Bool {
@@ -83,7 +93,7 @@ extension UsageStore {
         accounts: [ProviderTokenAccount],
         refreshGeneration: Int? = nil) async
     {
-        let selectedAccount = self.settings.selectedTokenAccount(for: provider)
+        let selectedAccount = self.selectedTokenAccount(for: provider)
         let limitedAccounts = self.limitedTokenAccounts(accounts, selected: selectedAccount)
         let effectiveSelected = selectedAccount ?? limitedAccounts.first
         var snapshots: [TokenAccountUsageSnapshot] = []

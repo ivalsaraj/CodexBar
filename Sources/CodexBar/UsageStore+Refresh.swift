@@ -100,7 +100,7 @@ extension UsageStore {
             {
                 return
             }
-            let selectedAccount = self.settings.selectedTokenAccount(for: provider)
+            let selectedAccount = self.selectedTokenAccount(for: provider)
             let displaySnapshot: UsageSnapshot = if let selectedAccount {
                 self.applyAccountLabel(scoped, provider: provider, account: selectedAccount)
             } else {

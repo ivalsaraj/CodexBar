@@ -14,6 +14,7 @@ struct ProvidersPane: View {
     @State private var settingsLastAppActiveRunAtByID: [String: Date] = [:]
     @State private var activeConfirmation: ProviderSettingsConfirmationState?
     @State private var codexAccountsNotice: CodexAccountsSectionNotice?
+    @State private var openCodeAccountsNotice: String?
     @State private var isAuthenticatingLiveCodexAccount = false
     @State private var selectedProvider: UsageProvider?
     @State private var codexSwitchError: String?
@@ -77,7 +78,9 @@ struct ProvidersPane: View {
                             }
                         }
                     },
-                    showsSupplementarySettingsContent: self.codexAccountsSectionState(for: provider) != nil,
+                    showsSupplementarySettingsContent:
+                    self.codexAccountsSectionState(for: provider) != nil ||
+                        self.openCodeAccountsSectionState(for: provider) != nil,
                     supplementarySettingsContent: {
                         if let state = self.codexAccountsSectionState(for: provider) {
                             CodexAccountsSectionView(
@@ -104,6 +107,18 @@ struct ProvidersPane: View {
                                     Task { @MainActor in
                                         await self.addManagedCodexAccount()
                                     }
+                                })
+                        } else if let state = self.openCodeAccountsSectionState(for: provider) {
+                            OpenCodeAccountsSectionView(
+                                state: state,
+                                setActiveAccount: { accountID in
+                                    self.selectOpenCodeWorkspaceAccount(id: accountID)
+                                },
+                                saveAccount: { draft in
+                                    await self.saveOpenCodeAccount(draft)
+                                },
+                                removeAccount: { account in
+                                    self.requestOpenCodeWorkspaceAccountRemoval(account)
                                 })
                         }
                     })
@@ -216,6 +231,16 @@ struct ProvidersPane: View {
             notice: self.codexAccountsNotice ?? degradedNotice)
     }
 
+    func openCodeAccountsSectionState(for provider: UsageProvider) -> OpenCodeAccountsSectionState? {
+        guard provider == .opencode else { return nil }
+        self.settings.ensureOpenCodeWorkspaceAccountMigrationIfNeeded()
+        return OpenCodeAccountsSectionState(
+            accounts: self.settings.openCodeWorkspaceAccounts,
+            activeAccountID: self.settings.selectedOpenCodeWorkspaceAccount?.id,
+            unboundTokenAccounts: self.settings.unboundOpenCodeTokenAccounts,
+            notice: self.openCodeAccountsNotice)
+    }
+
     func selectCodexVisibleAccount(id: String) async {
         self.codexAccountsNotice = nil
         guard self.settings.selectCodexVisibleAccount(id: id) else { return }
@@ -306,6 +331,112 @@ struct ProvidersPane: View {
             onConfirm: {
                 Task { @MainActor in
                     await self.removeManagedCodexAccount(id: accountID)
+                }
+            })
+    }
+
+    func selectOpenCodeWorkspaceAccount(id: UUID) {
+        self.openCodeAccountsNotice = nil
+        guard self.settings.setActiveOpenCodeWorkspaceAccount(id: id) else { return }
+        Task { @MainActor in
+            await ProviderInteractionContext.$current.withValue(.userInitiated) {
+                await self.store.refreshProvider(.opencode, allowDisabled: true)
+            }
+        }
+    }
+
+    func saveOpenCodeAccount(_ draft: OpenCodeAccountDraft) async {
+        self.openCodeAccountsNotice = nil
+
+        let tokenAccountID: UUID
+        let tokenValue: String
+        if let existingTokenAccountID = draft.existingTokenAccountID {
+            guard let account = self.settings
+                .tokenAccounts(for: .opencode)
+                .first(where: { $0.id == existingTokenAccountID })
+            else {
+                self.openCodeAccountsNotice = "The selected OpenCode credential is no longer available."
+                return
+            }
+            tokenAccountID = account.id
+            tokenValue = account.token
+        } else {
+            let trimmedToken = draft.token.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedToken.isEmpty else {
+                self.openCodeAccountsNotice = "Paste an OpenCode Cookie header before adding a new account."
+                return
+            }
+            self.settings.addTokenAccount(provider: .opencode, label: draft.label, token: trimmedToken)
+            guard let account = self.settings.tokenAccounts(for: .opencode).last else {
+                self.openCodeAccountsNotice = "CodexBar could not save the new OpenCode credential."
+                return
+            }
+            tokenAccountID = account.id
+            tokenValue = account.token
+        }
+
+        let resolvedWorkspace: OpenCodeDiscoveredWorkspace
+        let trimmedWorkspace = draft.workspaceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedWorkspace.isEmpty {
+            guard let workspaceID = OpenCodeWorkspaceDiscovery.normalizeWorkspaceID(trimmedWorkspace) else {
+                self.openCodeAccountsNotice = "Enter a valid OpenCode workspace ID or workspace URL."
+                return
+            }
+            resolvedWorkspace = OpenCodeDiscoveredWorkspace(
+                workspaceID: workspaceID,
+                workspaceLabel: draft.workspaceLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?
+                    workspaceID : draft.workspaceLabel,
+                ownerLabel: nil)
+        } else {
+            do {
+                let discovered = try await OpenCodeWorkspaceDiscovery.discoverWorkspaces(
+                    cookieHeader: tokenValue,
+                    timeout: 15)
+                if discovered.count == 1, let first = discovered.first {
+                    resolvedWorkspace = first
+                } else if discovered.isEmpty {
+                    self.openCodeAccountsNotice = "No OpenCode workspaces were discovered for this credential."
+                    return
+                } else {
+                    self.openCodeAccountsNotice =
+                        "Multiple OpenCode workspaces were found. Enter a workspace ID or URL to bind this credential."
+                    return
+                }
+            } catch {
+                self.openCodeAccountsNotice = error.localizedDescription
+                return
+            }
+        }
+
+        guard let accountID = self.settings.saveOpenCodeWorkspaceAccount(
+            tokenAccountID: tokenAccountID,
+            label: draft.label,
+            workspaceID: resolvedWorkspace.workspaceID,
+            workspaceLabel: draft.workspaceLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?
+                resolvedWorkspace.workspaceLabel : draft.workspaceLabel,
+            discoveredOwnerLabel: resolvedWorkspace.ownerLabel)
+        else {
+            self.openCodeAccountsNotice = "CodexBar could not save the OpenCode workspace account."
+            return
+        }
+
+        _ = self.settings.setActiveOpenCodeWorkspaceAccount(id: accountID)
+        await ProviderInteractionContext.$current.withValue(.userInitiated) {
+            await self.store.refreshProvider(.opencode, allowDisabled: true)
+        }
+    }
+
+    func requestOpenCodeWorkspaceAccountRemoval(_ account: OpenCodeWorkspaceAccount) {
+        self.activeConfirmation = ProviderSettingsConfirmationState(
+            title: "Remove OpenCode account?",
+            message: "Remove \(account.workspaceLabel) from CodexBar?",
+            confirmTitle: "Remove",
+            onConfirm: {
+                self.settings.removeOpenCodeWorkspaceAccount(id: account.id)
+                Task { @MainActor in
+                    await ProviderInteractionContext.$current.withValue(.userInitiated) {
+                        await self.store.refreshProvider(.opencode, allowDisabled: true)
+                    }
                 }
             })
     }
