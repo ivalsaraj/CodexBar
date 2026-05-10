@@ -180,6 +180,7 @@ Implement `SettingsStore` helpers for:
 - adding/saving a workspace account from `tokenAccountID + workspace`
 - editing account label/workspace metadata
 - removing a workspace account
+- cascading removal or invalidation when a referenced `tokenAccountID` is removed from `tokenAccounts`
 - repairing/rebinding workspace metadata when discovery changes
 
 **Step 2: Make dashboard routing resolve through the saved account**
@@ -198,7 +199,16 @@ When appropriate, support a lightweight migration path from:
 
 Do not silently invent workspace bindings for multiple old token accounts.
 
-**Step 4: Run focused tests**
+**Step 4: Define the legacy multi-token migration contract explicitly**
+
+If OpenCode already has multiple saved `tokenAccounts` but no saved OpenCode workspace accounts yet:
+- treat those credentials as unbound legacy credentials
+- surface them in the new OpenCode Accounts UI as bindable entries
+- allow binding through workspace discovery or manual workspace entry
+- do not require the user to re-import the credential
+- do not allow an unbound legacy credential to behave like a fully selectable saved workspace account until binding is complete
+
+**Step 5: Run focused tests**
 
 Run:
 
@@ -210,7 +220,7 @@ swift test --filter OpenCodeStatusMenuTests
 Expected:
 - OpenCode settings selection and dashboard URL tests pass
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
 git add Sources/CodexBar/Providers/OpenCode/OpenCodeSettingsStore.swift Tests/CodexBarTests/SettingsStoreCoverageTests.swift Tests/CodexBarTests/OpenCodeStatusMenuTests.swift
@@ -234,7 +244,9 @@ Do not force this through the generic token-account row if it makes the flow awk
 The OpenCode settings surface needs:
 - active account picker
 - list of saved workspace accounts
+- list or state for unbound legacy credentials awaiting workspace binding
 - import/add account flow
+- bind-workspace flow for legacy credentials
 - rediscover/repair actions
 - remove action
 - manual workspace fallback path
@@ -285,28 +297,34 @@ Projection must provide:
 - visible label
 - linked token account
 - workspace ID
+- saved workspace-account identity
 - active selection
 - preview selection
 
-**Step 2: Keep preview fetches account-scoped**
+**Step 2: Rekey OpenCode menu preview state by saved workspace-account identity**
+
+Any OpenCode preview and switch state used by the menu should key off the saved workspace-account identity rather than provider-global state or raw token-account index. This is required so two saved workspace accounts that share one credential cannot overwrite each other's preview state.
+
+**Step 3: Keep preview fetches account-scoped**
 
 When previewing/switching OpenCode accounts:
 - use the linked credential
 - use the saved workspace ID
 - never allow runtime fallback to a different discovered workspace
 
-**Step 3: Update dashboard action routing**
+**Step 4: Update dashboard action routing**
 
 When the user opens the OpenCode dashboard from the menu, route directly to the selected saved workspace account's `/go` page.
 
-**Step 4: Add tests for no silent workspace drift**
+**Step 5: Add tests for no silent workspace drift**
 
 Explicitly cover:
 - multiple discovered workspaces returned in different order
 - selected saved workspace still wins
 - menu labels use saved workspace labels
+- two saved workspace accounts that share one `tokenAccountID` keep distinct preview state
 
-**Step 5: Run focused tests**
+**Step 6: Run focused tests**
 
 Run:
 
@@ -318,7 +336,7 @@ swift test --filter OpenCodeAccountMenuStateTests
 Expected:
 - OpenCode menu switching behaves deterministically
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
 git add Sources/CodexBar/StatusItemController+TokenAccountsMenu.swift Sources/CodexBar/StatusItemController+Menu.swift Sources/CodexBar/StatusItemController+Actions.swift Sources/CodexBar/UsageStore+TokenAccounts.swift Tests/CodexBarTests/OpenCodeStatusMenuTests.swift Tests/CodexBarTests/OpenCodeAccountMenuStateTests.swift
@@ -355,6 +373,7 @@ Cover:
 - saved workspace used even when discovery returns another workspace first
 - saved workspace missing produces a repair/error state instead of silent substitution
 - manual workspace fallback still works
+- two saved workspace accounts that share one `tokenAccountID` do not leak cached preview/utilization state across accounts
 
 **Step 4: Run focused OpenCode tests**
 
@@ -391,6 +410,8 @@ Document:
 - import/discovery/manual fallback behavior
 - saved workspace determinism
 - repair flow expectations
+
+If any of the targeted docs files do not exist, create them instead of skipping the docs commit.
 
 **Step 2: Update config docs**
 

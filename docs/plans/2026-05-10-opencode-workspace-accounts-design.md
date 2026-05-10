@@ -241,6 +241,8 @@ OpenCode history should be owned by the saved workspace account identity, not on
 
 That means:
 - preview caches should key off the saved account identity
+- menu preview selection and preview snapshot overrides should key off the saved account identity
+- any future utilization/history ownership should key off the saved account identity even when two accounts share one credential
 - plan/utilization ownership should be extendable to workspace accounts when OpenCode gains history support
 - dashboard and menu state should remain stable across cookie rediscovery
 
@@ -257,7 +259,7 @@ Existing OpenCode users may already have:
 Migration behavior:
 - do not discard existing OpenCode token accounts
 - if exactly one token account and one provider-level `workspaceID` exist, create one initial OpenCode workspace account from them
-- if multiple token accounts exist but no saved workspace accounts exist yet, require the user to complete the new account-binding flow
+- if multiple token accounts exist but no saved workspace accounts exist yet, surface them as unbound credentials and require the user to bind each one through discovery or manual workspace entry; do not require re-import
 - keep the provider-level `workspaceID` only as a fallback/migration seam until the provider-specific account model fully owns it
 
 ---
