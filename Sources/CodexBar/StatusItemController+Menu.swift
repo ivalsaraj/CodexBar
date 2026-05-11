@@ -1489,7 +1489,7 @@ extension StatusItemController {
         let metadata = self.store.metadata(for: target)
         let accountSwitchInFlight = self.tokenAccountSwitchInFlight.contains(target) ||
             self.tokenAccountPreviewInFlight.contains(target)
-        let activeAccountID = self.settings.selectedTokenAccount(for: target)?.id
+        let activeAccountID = self.store.selectedTokenAccount(for: target)?.id
         let previewSelectionID = self.tokenAccountPreviewSelection[target]
         let suppressActiveSnapshotFallback = Self.shouldSuppressActiveSnapshotFallback(
             previewSelectionID: previewSelectionID,

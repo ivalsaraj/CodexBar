@@ -36,6 +36,9 @@ read_when:
   - `Import current login` imports the current browser session and auto-adds every discovered workspace.
   - `Refresh workspaces` re-discovers workspaces for the saved OpenCode login and dedupes by workspace ID.
   - Manual add only needs a `wrk_…` ID or full workspace URL and reuses the saved OpenCode login.
+- OpenCode status-menu switching must compare preview and active selections with workspace account IDs. The linked cookie
+  credential ID is shared across workspaces and must not be used to decide whether returning to the active workspace can
+  reuse the live snapshot.
 - Cookie import defaults to Chrome-only to avoid extra browser prompts; pass a browser list to override.
 - Set `CODEXBAR_OPENCODE_WORKSPACE_ID` to skip workspace lookup and force a specific workspace.
 - When both settings and `CODEXBAR_OPENCODE_WORKSPACE_ID` are present, the environment override wins for both fetching and dashboard navigation.
