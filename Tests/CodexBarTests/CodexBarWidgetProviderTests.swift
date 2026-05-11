@@ -11,6 +11,32 @@ struct CodexBarWidgetProviderTests {
     }
 
     @Test
+    func `provider choice supports cursor`() {
+        #expect(ProviderChoice(provider: .cursor) == .cursor)
+        #expect(ProviderChoice.cursor.provider == .cursor)
+    }
+
+    @Test
+    func `provider choice supports opencode go`() {
+        #expect(ProviderChoice(provider: .opencodego) == .opencodego)
+        #expect(ProviderChoice.opencodego.provider == .opencodego)
+    }
+
+    @Test
+    func `provider cost period line includes renewal when available`() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let resetAt = now.addingTimeInterval(6 * 24 * 60 * 60)
+        let cost = WidgetSnapshot.ProviderCostSummary(
+            used: 12,
+            limit: 200,
+            currencyCode: "USD",
+            period: "Monthly",
+            resetsAt: resetAt)
+
+        #expect(WidgetFormat.providerCostPeriodLine(cost, now: now) == "Monthly · renews in 6 days")
+    }
+
+    @Test
     func `supported providers keep alibaba when it is the only enabled provider`() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let entry = WidgetSnapshot.ProviderEntry(
@@ -94,5 +120,18 @@ struct CodexBarWidgetProviderTests {
         let rows = WidgetUsageRow.rows(for: entry)
 
         #expect(rows == [WidgetUsageRow(id: "weekly", title: "Weekly", percentLeft: 75, detailText: "7 days window")])
+    }
+
+    @Test
+    func `widget selection store preserves opencode workspace account selection`() {
+        let bundleID = "com.steipete.codexbar.tests.widget-selection-\(UUID().uuidString)"
+        let accountID = UUID()
+
+        WidgetSelectionStore.saveSelectedProvider(.opencode, bundleID: bundleID)
+        WidgetSelectionStore.saveSelectedAccountID(accountID, for: .opencode, bundleID: bundleID)
+        WidgetSelectionStore.saveSelectedProvider(.codex, bundleID: bundleID)
+
+        #expect(WidgetSelectionStore.loadSelectedProvider(bundleID: bundleID) == .codex)
+        #expect(WidgetSelectionStore.loadSelectedAccountID(for: .opencode, bundleID: bundleID) == accountID)
     }
 }

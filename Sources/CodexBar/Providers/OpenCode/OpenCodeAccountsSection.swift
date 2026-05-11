@@ -5,7 +5,7 @@ import SwiftUI
 struct OpenCodeAccountsSectionState {
     let accounts: [OpenCodeWorkspaceAccount]
     let activeAccountID: UUID?
-    let unboundTokenAccounts: [ProviderTokenAccount]
+    let hasReusableCredential: Bool
     let notice: String?
 
     var activeAccount: OpenCodeWorkspaceAccount? {
@@ -22,10 +22,27 @@ struct OpenCodeAccountsSectionState {
     }
 }
 
+enum OpenCodeAccountSaveResult: Equatable {
+    case success(String)
+    case noChange(String)
+    case failure(String)
+
+    var notice: String {
+        switch self {
+        case let .success(message), let .noChange(message), let .failure(message):
+            message
+        }
+    }
+
+    var shouldResetForm: Bool {
+        if case .success = self {
+            return true
+        }
+        return false
+    }
+}
+
 struct OpenCodeAccountDraft: Sendable {
-    let existingTokenAccountID: UUID?
-    let label: String
-    let token: String
     let workspaceID: String
     let workspaceLabel: String
 }
@@ -34,17 +51,20 @@ struct OpenCodeAccountDraft: Sendable {
 struct OpenCodeAccountsSectionView: View {
     let state: OpenCodeAccountsSectionState
     let setActiveAccount: (UUID) -> Void
-    let saveAccount: (OpenCodeAccountDraft) async -> Void
+    let importCurrentLogin: @MainActor @Sendable () async -> OpenCodeAccountSaveResult
+    let refreshAccounts: @MainActor @Sendable () async -> OpenCodeAccountSaveResult
+    let saveAccount: @MainActor @Sendable (OpenCodeAccountDraft) async -> OpenCodeAccountSaveResult
     let removeAccount: (OpenCodeWorkspaceAccount) -> Void
 
-    @State private var selectedCredentialID: String = Self.newCredentialID
-    @State private var label = ""
-    @State private var token = ""
     @State private var workspaceID = ""
     @State private var workspaceLabel = ""
-    @State private var isSaving = false
+    @State private var activeOperation: Operation?
 
-    private static let newCredentialID = "new"
+    private enum Operation {
+        case importing
+        case refreshing
+        case saving
+    }
 
     var body: some View {
         ProviderSettingsSection(title: "Accounts") {
@@ -110,60 +130,33 @@ struct OpenCodeAccountsSectionView: View {
                 }
             }
 
-            if !self.state.unboundTokenAccounts.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Unbound credentials")
-                        .font(.subheadline.weight(.semibold))
-
-                    ForEach(self.state.unboundTokenAccounts, id: \.id) { account in
-                        Text(account.displayName)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button("Import current login") {
+                    self.runOperation(.importing, shouldResetOnSuccess: false) {
+                        await self.importCurrentLogin()
                     }
-
-                    Text("Bind one of these existing credentials to a workspace below, or add a new credential.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(self.activeOperation != nil)
+
+                Button("Refresh workspaces") {
+                    self.runOperation(.refreshing, shouldResetOnSuccess: false) {
+                        await self.refreshAccounts()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(self.activeOperation != nil || !self.state.hasReusableCredential)
             }
 
+            Text(self.state.hasReusableCredential
+                ? "CodexBar reuses your saved OpenCode login and keeps workspaces in sync."
+                : "Import your current OpenCode login first to add workspaces without pasting cookies.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
             VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("Credential")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: ProviderSettingsMetrics.pickerLabelWidth, alignment: .leading)
-
-                    Picker("", selection: self.$selectedCredentialID) {
-                        Text("New credential").tag(Self.newCredentialID)
-                        ForEach(self.state.unboundTokenAccounts, id: \.id) { account in
-                            Text(account.displayName).tag(account.id.uuidString)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                }
-
-                HStack(alignment: .center, spacing: 10) {
-                    Text("Label")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: ProviderSettingsMetrics.pickerLabelWidth, alignment: .leading)
-
-                    TextField("Workspace Account", text: self.$label)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                if self.selectedCredentialID == Self.newCredentialID {
-                    HStack(alignment: .center, spacing: 10) {
-                        Text("Cookie")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: ProviderSettingsMetrics.pickerLabelWidth, alignment: .leading)
-
-                        SecureField("Cookie: …", text: self.$token)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                }
-
                 HStack(alignment: .center, spacing: 10) {
                     Text("Workspace")
                         .font(.subheadline.weight(.semibold))
@@ -182,29 +175,21 @@ struct OpenCodeAccountsSectionView: View {
                         .textFieldStyle(.roundedBorder)
                 }
 
-                Text("Leave Workspace empty to auto-discover when only one workspace is available for that credential.")
+                Text("Paste a `wrk_…` ID or an OpenCode workspace URL. CodexBar reuses your current OpenCode login.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                Button(self.selectedCredentialID == Self.newCredentialID ? "Add Account" : "Bind Workspace") {
+                Button("Add workspace") {
                     let draft = OpenCodeAccountDraft(
-                        existingTokenAccountID: self.selectedTokenAccountID,
-                        label: self.label,
-                        token: self.token,
                         workspaceID: self.workspaceID,
                         workspaceLabel: self.workspaceLabel)
-                    self.isSaving = true
-                    Task {
+                    self.runOperation(.saving, shouldResetOnSuccess: true) {
                         await self.saveAccount(draft)
-                        await MainActor.run {
-                            self.resetForm()
-                            self.isSaving = false
-                        }
                     }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(self.isSaving)
+                .disabled(self.activeOperation != nil)
             }
 
             if let notice = self.state.notice, !notice.isEmpty {
@@ -224,11 +209,6 @@ struct OpenCodeAccountsSectionView: View {
             set: { self.setActiveAccount($0) })
     }
 
-    private var selectedTokenAccountID: UUID? {
-        guard self.selectedCredentialID != Self.newCredentialID else { return nil }
-        return UUID(uuidString: self.selectedCredentialID)
-    }
-
     private func accountDisplayName(_ account: OpenCodeWorkspaceAccount) -> String {
         let base = account.workspaceLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         return base.isEmpty ? account.label : base
@@ -243,9 +223,24 @@ struct OpenCodeAccountsSectionView: View {
     }
 
     private func resetForm() {
-        self.label = ""
-        self.token = ""
         self.workspaceID = ""
         self.workspaceLabel = ""
+    }
+
+    private func runOperation(
+        _ operation: Operation,
+        shouldResetOnSuccess: Bool,
+        action: @escaping @Sendable () async -> OpenCodeAccountSaveResult)
+    {
+        self.activeOperation = operation
+        Task {
+            let result = await action()
+            await MainActor.run {
+                if shouldResetOnSuccess, result.shouldResetForm {
+                    self.resetForm()
+                }
+                self.activeOperation = nil
+            }
+        }
     }
 }

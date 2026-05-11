@@ -27,14 +27,48 @@ extension UsageStore {
 
     private func makeWidgetSnapshot() -> WidgetSnapshot {
         let enabledProviders = self.enabledProviders()
-        let entries = UsageProvider.allCases.compactMap { provider in
-            self.makeWidgetEntry(for: provider)
+        let entries = UsageProvider.allCases.flatMap { provider in
+            self.makeWidgetEntries(for: provider)
         }
         return WidgetSnapshot(entries: entries, enabledProviders: enabledProviders, generatedAt: Date())
     }
 
-    private func makeWidgetEntry(for provider: UsageProvider) -> WidgetSnapshot.ProviderEntry? {
-        guard let snapshot = self.snapshots[provider] else { return nil }
+    private func makeWidgetEntries(for provider: UsageProvider) -> [WidgetSnapshot.ProviderEntry] {
+        if provider == .opencode {
+            let workspaceAccounts = self.settings.openCodeWorkspaceAccounts
+            guard !workspaceAccounts.isEmpty else {
+                guard let entry = self.makeWidgetEntry(for: provider, snapshot: self.snapshots[provider]) else {
+                    return []
+                }
+                return [entry]
+            }
+
+            let cachedSnapshots = self.tokenAccountSnapshotCache[provider] ?? [:]
+            return workspaceAccounts.compactMap { account in
+                let snapshot = if account.id == self.settings.selectedOpenCodeWorkspaceAccount?.id {
+                    self.snapshots[provider] ?? cachedSnapshots[account.id]
+                } else {
+                    cachedSnapshots[account.id]
+                }
+                return self.makeWidgetEntry(
+                    for: provider,
+                    snapshot: snapshot,
+                    accountID: account.id,
+                    accountLabel: account.workspaceLabel)
+            }
+        }
+
+        guard let entry = self.makeWidgetEntry(for: provider, snapshot: self.snapshots[provider]) else { return [] }
+        return [entry]
+    }
+
+    private func makeWidgetEntry(
+        for provider: UsageProvider,
+        snapshot: UsageSnapshot?,
+        accountID: UUID? = nil,
+        accountLabel: String? = nil) -> WidgetSnapshot.ProviderEntry?
+    {
+        guard let snapshot else { return nil }
 
         let tokenSnapshot = self.tokenSnapshots[provider]
         let dailyUsage = tokenSnapshot?.daily.map { entry in
@@ -44,7 +78,10 @@ extension UsageStore {
                 costUSD: entry.costUSD)
         } ?? []
 
-        let tokenUsage = Self.widgetTokenUsageSummary(from: tokenSnapshot)
+        let tokenUsage = Self.widgetTokenUsageSummary(
+            provider: provider,
+            usageSnapshot: snapshot,
+            tokenSnapshot: tokenSnapshot)
         let usageRows = self.widgetUsageRows(provider: provider, snapshot: snapshot)
 
         let creditsRemaining: Double?
@@ -64,6 +101,8 @@ extension UsageStore {
 
         return WidgetSnapshot.ProviderEntry(
             provider: provider,
+            accountID: accountID,
+            accountLabel: accountLabel,
             updatedAt: snapshot.updatedAt,
             primary: snapshot.primary,
             secondary: snapshot.secondary,
@@ -71,14 +110,41 @@ extension UsageStore {
             usageRows: usageRows,
             creditsRemaining: creditsRemaining,
             codeReviewRemainingPercent: codeReviewRemaining,
+            providerCost: Self.widgetProviderCostSummary(from: snapshot.providerCost),
             tokenUsage: tokenUsage,
             dailyUsage: dailyUsage)
     }
 
-    private nonisolated static func widgetTokenUsageSummary(
-        from snapshot: CostUsageTokenSnapshot?) -> WidgetSnapshot.TokenUsageSummary?
+    private nonisolated static func widgetProviderCostSummary(
+        from cost: ProviderCostSnapshot?) -> WidgetSnapshot.ProviderCostSummary?
     {
-        guard let snapshot else { return nil }
+        guard let cost, cost.limit > 0 else { return nil }
+        return WidgetSnapshot.ProviderCostSummary(
+            used: cost.used,
+            limit: cost.limit,
+            currencyCode: cost.currencyCode,
+            period: cost.period,
+            resetsAt: cost.resetsAt)
+    }
+
+    private nonisolated static func widgetTokenUsageSummary(
+        provider: UsageProvider,
+        usageSnapshot: UsageSnapshot,
+        tokenSnapshot: CostUsageTokenSnapshot?) -> WidgetSnapshot.TokenUsageSummary?
+    {
+        if provider == .cursor,
+           let cursorTokenUsage = usageSnapshot.cursorTokenUsage
+        {
+            return WidgetSnapshot.TokenUsageSummary(
+                sessionCostUSD: nil,
+                sessionTokens: cursorTokenUsage.billingCycleTokensUsed,
+                last30DaysCostUSD: nil,
+                last30DaysTokens: nil,
+                sessionLabel: "Cycle",
+                last30DaysLabel: nil)
+        }
+
+        guard let snapshot = tokenSnapshot else { return nil }
         let fallbackTokens = snapshot.daily.compactMap(\.totalTokens).reduce(0, +)
         let monthTokensValue = snapshot.last30DaysTokens ?? (fallbackTokens > 0 ? fallbackTokens : nil)
         return WidgetSnapshot.TokenUsageSummary(

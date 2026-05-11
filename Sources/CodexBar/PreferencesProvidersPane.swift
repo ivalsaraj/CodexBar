@@ -2,6 +2,21 @@ import AppKit
 import CodexBarCore
 import SwiftUI
 
+protocol OpenCodeWorkspaceFlowing: Sendable {
+    func importSession(browserDetection: BrowserDetection) async throws -> OpenCodeCookieImporter.SessionInfo
+    func discoverWorkspaces(cookieHeader: String) async throws -> [OpenCodeDiscoveredWorkspace]
+}
+
+struct DefaultOpenCodeWorkspaceFlow: OpenCodeWorkspaceFlowing {
+    func importSession(browserDetection: BrowserDetection) async throws -> OpenCodeCookieImporter.SessionInfo {
+        try OpenCodeCookieImporter.importSession(browserDetection: browserDetection)
+    }
+
+    func discoverWorkspaces(cookieHeader: String) async throws -> [OpenCodeDiscoveredWorkspace] {
+        try await OpenCodeWorkspaceDiscovery.discoverWorkspaces(cookieHeader: cookieHeader, timeout: 15)
+    }
+}
+
 @MainActor
 struct ProvidersPane: View {
     @Bindable var settings: SettingsStore
@@ -9,6 +24,7 @@ struct ProvidersPane: View {
     let managedCodexAccountCoordinator: ManagedCodexAccountCoordinator
     let codexAccountPromotionCoordinator: CodexAccountPromotionCoordinator
     let codexAmbientLoginRunner: any CodexAmbientLoginRunning
+    let openCodeWorkspaceFlow: any OpenCodeWorkspaceFlowing
     @State private var expandedErrors: Set<UsageProvider> = []
     @State private var settingsStatusTextByID: [String: String] = [:]
     @State private var settingsLastAppActiveRunAtByID: [String: Date] = [:]
@@ -28,7 +44,8 @@ struct ProvidersPane: View {
         store: UsageStore,
         managedCodexAccountCoordinator: ManagedCodexAccountCoordinator = ManagedCodexAccountCoordinator(),
         codexAccountPromotionCoordinator: CodexAccountPromotionCoordinator? = nil,
-        codexAmbientLoginRunner: any CodexAmbientLoginRunning = DefaultCodexAmbientLoginRunner())
+        codexAmbientLoginRunner: any CodexAmbientLoginRunning = DefaultCodexAmbientLoginRunner(),
+        openCodeWorkspaceFlow: any OpenCodeWorkspaceFlowing = DefaultOpenCodeWorkspaceFlow())
     {
         self.settings = settings
         self.store = store
@@ -39,6 +56,7 @@ struct ProvidersPane: View {
                 usageStore: store,
                 managedAccountCoordinator: managedCodexAccountCoordinator)
         self.codexAmbientLoginRunner = codexAmbientLoginRunner
+        self.openCodeWorkspaceFlow = openCodeWorkspaceFlow
     }
 
     var body: some View {
@@ -113,6 +131,12 @@ struct ProvidersPane: View {
                                 state: state,
                                 setActiveAccount: { accountID in
                                     self.selectOpenCodeWorkspaceAccount(id: accountID)
+                                },
+                                importCurrentLogin: {
+                                    await self.importOpenCodeCurrentLogin()
+                                },
+                                refreshAccounts: {
+                                    await self.refreshOpenCodeWorkspaceAccounts()
                                 },
                                 saveAccount: { draft in
                                     await self.saveOpenCodeAccount(draft)
@@ -237,7 +261,7 @@ struct ProvidersPane: View {
         return OpenCodeAccountsSectionState(
             accounts: self.settings.openCodeWorkspaceAccounts,
             activeAccountID: self.settings.selectedOpenCodeWorkspaceAccount?.id,
-            unboundTokenAccounts: self.settings.unboundOpenCodeTokenAccounts,
+            hasReusableCredential: self.settings.reusableOpenCodeCredential() != nil,
             notice: self.openCodeAccountsNotice)
     }
 
@@ -345,85 +369,77 @@ struct ProvidersPane: View {
         }
     }
 
-    func saveOpenCodeAccount(_ draft: OpenCodeAccountDraft) async {
+    func importOpenCodeCurrentLogin() async -> OpenCodeAccountSaveResult {
+        self.openCodeAccountsNotice = nil
+        do {
+            let session = try await self.openCodeWorkspaceFlow.importSession(
+                browserDetection: self.store.browserDetection)
+            guard let tokenAccount = self.settings.saveOrReuseOpenCodeCredential(
+                label: "OpenCode (\(session.sourceLabel))",
+                token: session.cookieHeader)
+            else {
+                return self.finishOpenCodeAccountAction(.failure(
+                    "CodexBar could not save the imported OpenCode login."))
+            }
+            return await self.discoverAndSaveOpenCodeWorkspaces(
+                tokenAccount: tokenAccount,
+                successAction: "imported",
+                selectsImportedWorkspace: true)
+        } catch {
+            return self.finishOpenCodeAccountAction(.failure(error.localizedDescription))
+        }
+    }
+
+    func refreshOpenCodeWorkspaceAccounts() async -> OpenCodeAccountSaveResult {
+        self.openCodeAccountsNotice = nil
+        guard let tokenAccount = self.settings.reusableOpenCodeCredential() else {
+            return self.finishOpenCodeAccountAction(.failure("Import your current OpenCode login first."))
+        }
+        return await self.discoverAndSaveOpenCodeWorkspaces(tokenAccount: tokenAccount, successAction: "synced")
+    }
+
+    func saveOpenCodeAccount(_ draft: OpenCodeAccountDraft) async -> OpenCodeAccountSaveResult {
         self.openCodeAccountsNotice = nil
 
-        let tokenAccountID: UUID
-        let tokenValue: String
-        if let existingTokenAccountID = draft.existingTokenAccountID {
-            guard let account = self.settings
-                .tokenAccounts(for: .opencode)
-                .first(where: { $0.id == existingTokenAccountID })
-            else {
-                self.openCodeAccountsNotice = "The selected OpenCode credential is no longer available."
-                return
-            }
-            tokenAccountID = account.id
-            tokenValue = account.token
-        } else {
-            let trimmedToken = draft.token.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedToken.isEmpty else {
-                self.openCodeAccountsNotice = "Paste an OpenCode Cookie header before adding a new account."
-                return
-            }
-            self.settings.addTokenAccount(provider: .opencode, label: draft.label, token: trimmedToken)
-            guard let account = self.settings.tokenAccounts(for: .opencode).last else {
-                self.openCodeAccountsNotice = "CodexBar could not save the new OpenCode credential."
-                return
-            }
-            tokenAccountID = account.id
-            tokenValue = account.token
+        guard let tokenAccount = self.settings.reusableOpenCodeCredential() else {
+            return self.finishOpenCodeAccountAction(.failure("Import your current OpenCode login first."))
         }
 
-        let resolvedWorkspace: OpenCodeDiscoveredWorkspace
         let trimmedWorkspace = draft.workspaceID.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedWorkspace.isEmpty {
-            guard let workspaceID = OpenCodeWorkspaceDiscovery.normalizeWorkspaceID(trimmedWorkspace) else {
-                self.openCodeAccountsNotice = "Enter a valid OpenCode workspace ID or workspace URL."
-                return
-            }
-            resolvedWorkspace = OpenCodeDiscoveredWorkspace(
-                workspaceID: workspaceID,
-                workspaceLabel: draft.workspaceLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?
-                    workspaceID : draft.workspaceLabel,
-                ownerLabel: nil)
-        } else {
-            do {
-                let discovered = try await OpenCodeWorkspaceDiscovery.discoverWorkspaces(
-                    cookieHeader: tokenValue,
-                    timeout: 15)
-                if discovered.count == 1, let first = discovered.first {
-                    resolvedWorkspace = first
-                } else if discovered.isEmpty {
-                    self.openCodeAccountsNotice = "No OpenCode workspaces were discovered for this credential."
-                    return
-                } else {
-                    self.openCodeAccountsNotice =
-                        "Multiple OpenCode workspaces were found. Enter a workspace ID or URL to bind this credential."
-                    return
-                }
-            } catch {
-                self.openCodeAccountsNotice = error.localizedDescription
-                return
-            }
+        guard !trimmedWorkspace.isEmpty else {
+            return self.finishOpenCodeAccountAction(.failure("Enter an OpenCode workspace ID or workspace URL."))
+        }
+        guard let workspaceID = OpenCodeWorkspaceDiscovery.normalizeWorkspaceID(trimmedWorkspace) else {
+            return self.finishOpenCodeAccountAction(.failure(
+                "Enter a valid OpenCode workspace ID or workspace URL."))
         }
 
+        if let existing = self.settings.openCodeWorkspaceAccount(
+            tokenAccountID: tokenAccount.id,
+            workspaceID: workspaceID)
+        {
+            _ = self.settings.setActiveOpenCodeWorkspaceAccount(id: existing.id)
+            await self.refreshOpenCodeProvider()
+            return self.finishOpenCodeAccountAction(.noChange(
+                "\(existing.workspaceLabel) is already saved."))
+        }
+
+        let resolvedWorkspaceLabel = draft.workspaceLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayLabel = resolvedWorkspaceLabel.isEmpty ? workspaceID : resolvedWorkspaceLabel
         guard let accountID = self.settings.saveOpenCodeWorkspaceAccount(
-            tokenAccountID: tokenAccountID,
-            label: draft.label,
-            workspaceID: resolvedWorkspace.workspaceID,
-            workspaceLabel: draft.workspaceLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?
-                resolvedWorkspace.workspaceLabel : draft.workspaceLabel,
-            discoveredOwnerLabel: resolvedWorkspace.ownerLabel)
+            tokenAccountID: tokenAccount.id,
+            label: displayLabel,
+            workspaceID: workspaceID,
+            workspaceLabel: displayLabel,
+            discoveredOwnerLabel: nil)
         else {
-            self.openCodeAccountsNotice = "CodexBar could not save the OpenCode workspace account."
-            return
+            return self.finishOpenCodeAccountAction(.failure(
+                "CodexBar could not save the OpenCode workspace account."))
         }
 
         _ = self.settings.setActiveOpenCodeWorkspaceAccount(id: accountID)
-        await ProviderInteractionContext.$current.withValue(.userInitiated) {
-            await self.store.refreshProvider(.opencode, allowDisabled: true)
-        }
+        await self.refreshOpenCodeProvider()
+        return self.finishOpenCodeAccountAction(.success("\(displayLabel) added."))
     }
 
     func requestOpenCodeWorkspaceAccountRemoval(_ account: OpenCodeWorkspaceAccount) {
@@ -439,6 +455,56 @@ struct ProvidersPane: View {
                     }
                 }
             })
+    }
+
+    private func finishOpenCodeAccountAction(_ result: OpenCodeAccountSaveResult) -> OpenCodeAccountSaveResult {
+        self.openCodeAccountsNotice = result.notice
+        return result
+    }
+
+    private func discoverAndSaveOpenCodeWorkspaces(
+        tokenAccount: ProviderTokenAccount,
+        successAction: String,
+        selectsImportedWorkspace: Bool = false) async -> OpenCodeAccountSaveResult
+    {
+        do {
+            let discovered = try await self.openCodeWorkspaceFlow.discoverWorkspaces(cookieHeader: tokenAccount.token)
+            guard !discovered.isEmpty else {
+                return self.finishOpenCodeAccountAction(.failure(
+                    "No OpenCode workspaces were discovered for this login."))
+            }
+            guard let summary = self.settings.bulkSaveOpenCodeWorkspaceAccounts(
+                tokenAccountID: tokenAccount.id,
+                discoveredWorkspaces: discovered)
+            else {
+                return self.finishOpenCodeAccountAction(.failure(
+                    "CodexBar could not save the discovered OpenCode workspaces."))
+            }
+            if selectsImportedWorkspace,
+               let importedAccountID = summary.accountIDs.first
+            {
+                _ = self.settings.setActiveOpenCodeWorkspaceAccount(id: importedAccountID)
+            } else if let selectedAccountID = self.settings.selectedOpenCodeWorkspaceAccount?.id {
+                _ = self.settings.setActiveOpenCodeWorkspaceAccount(id: selectedAccountID)
+            } else if let firstAccountID = summary.accountIDs.first {
+                _ = self.settings.setActiveOpenCodeWorkspaceAccount(id: firstAccountID)
+            }
+            await self.refreshOpenCodeProvider()
+            if summary.addedCount == 0 {
+                return self.finishOpenCodeAccountAction(.noChange("All discovered workspaces are already saved."))
+            }
+            let importedCount = summary.accountIDs.count
+            let noun = importedCount == 1 ? "workspace" : "workspaces"
+            return self.finishOpenCodeAccountAction(.success("\(importedCount) \(noun) \(successAction)."))
+        } catch {
+            return self.finishOpenCodeAccountAction(.failure(error.localizedDescription))
+        }
+    }
+
+    private func refreshOpenCodeProvider() async {
+        await ProviderInteractionContext.$current.withValue(.userInitiated) {
+            await self.store.refreshProvider(.opencode, allowDisabled: true)
+        }
     }
 
     func providerErrorDisplay(_ provider: UsageProvider) -> ProviderErrorDisplay? {

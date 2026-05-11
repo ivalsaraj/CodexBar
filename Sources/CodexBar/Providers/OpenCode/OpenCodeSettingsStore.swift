@@ -1,6 +1,12 @@
 import CodexBarCore
 import Foundation
 
+struct OpenCodeWorkspaceBulkSaveSummary: Equatable {
+    let accountIDs: [UUID]
+    let addedCount: Int
+    let updatedCount: Int
+}
+
 extension SettingsStore {
     private static let openCodeWorkspaceAccountVersion = 1
 
@@ -32,6 +38,21 @@ extension SettingsStore {
     var selectedOpenCodeMenuTokenAccount: ProviderTokenAccount? {
         guard let selected = self.selectedOpenCodeWorkspaceAccount else { return nil }
         return self.openCodeMenuTokenAccount(for: selected)
+    }
+
+    @discardableResult
+    func saveOrReuseOpenCodeCredential(label: String, token: String) -> ProviderTokenAccount? {
+        self.saveOrReuseTokenAccount(provider: .opencode, label: label, token: token)
+    }
+
+    func reusableOpenCodeCredential() -> ProviderTokenAccount? {
+        if let linked = self.linkedOpenCodeTokenAccount(for: self.selectedOpenCodeWorkspaceAccount) {
+            return linked
+        }
+        if let selected = self.selectedTokenAccount(for: .opencode) {
+            return selected
+        }
+        return self.tokenAccounts(for: .opencode).first
     }
 
     var opencodeWorkspaceID: String {
@@ -141,6 +162,16 @@ extension SettingsStore {
         self.openCodeWorkspaceAccounts.first(where: { $0.id == menuAccountID })
     }
 
+    func openCodeWorkspaceAccount(
+        tokenAccountID: UUID,
+        workspaceID rawWorkspaceID: String) -> OpenCodeWorkspaceAccount?
+    {
+        guard let workspaceID = Self.normalizeOpenCodeWorkspaceID(rawWorkspaceID) else { return nil }
+        return self.openCodeWorkspaceAccounts.first { account in
+            account.tokenAccountID == tokenAccountID && account.workspaceID == workspaceID
+        }
+    }
+
     private func openCodeMenuTokenAccount(for account: OpenCodeWorkspaceAccount) -> ProviderTokenAccount? {
         guard let tokenAccount = self.linkedOpenCodeTokenAccount(for: account) else { return nil }
         return ProviderTokenAccount(
@@ -194,7 +225,9 @@ extension SettingsStore {
         let normalizedWorkspaceLabel = Self.normalizeOpenCodeWorkspaceLabel(rawWorkspaceLabel) ?? workspaceID
         let normalizedOwnerLabel = Self.normalizeOpenCodeWorkspaceLabel(rawOwnerLabel)
         let existing = self.configSnapshot.providerConfig(for: .opencode)?.openCodeWorkspaceAccounts
-        let accountID = existingAccountID ?? UUID()
+        let accountID = existingAccountID
+            ?? self.openCodeWorkspaceAccount(tokenAccountID: tokenAccountID, workspaceID: workspaceID)?.id
+            ?? UUID()
         let now = Date().timeIntervalSince1970
 
         var accounts = existing?.accounts ?? []
@@ -229,6 +262,86 @@ extension SettingsStore {
                 accounts: accounts)
         }
         return accountID
+    }
+
+    @discardableResult
+    func bulkSaveOpenCodeWorkspaceAccounts(
+        tokenAccountID: UUID,
+        discoveredWorkspaces: [OpenCodeDiscoveredWorkspace]) -> OpenCodeWorkspaceBulkSaveSummary?
+    {
+        guard self.tokenAccounts(for: .opencode).contains(where: { $0.id == tokenAccountID }) else { return nil }
+
+        let existing = self.configSnapshot.providerConfig(for: .opencode)?.openCodeWorkspaceAccounts
+        let existingAccounts = existing?.accounts ?? []
+        let normalizedWorkspaces = discoveredWorkspaces.compactMap { workspace -> OpenCodeDiscoveredWorkspace? in
+            guard let workspaceID = Self.normalizeOpenCodeWorkspaceID(workspace.workspaceID) else { return nil }
+            return OpenCodeDiscoveredWorkspace(
+                workspaceID: workspaceID,
+                workspaceLabel: workspace.workspaceLabel,
+                ownerLabel: workspace.ownerLabel)
+        }
+        guard !normalizedWorkspaces.isEmpty else { return nil }
+
+        var accounts = existingAccounts
+        var accountIDs: [UUID] = []
+        var addedCount = 0
+        var updatedCount = 0
+        let now = Date().timeIntervalSince1970
+
+        for workspace in normalizedWorkspaces {
+            if let index = accounts.firstIndex(where: {
+                $0.tokenAccountID == tokenAccountID && $0.workspaceID == workspace.workspaceID
+            }) {
+                let prior = accounts[index]
+                accounts[index] = OpenCodeWorkspaceAccount(
+                    id: prior.id,
+                    tokenAccountID: tokenAccountID,
+                    label: Self.normalizeOpenCodeWorkspaceLabel(prior.label)
+                        ?? Self.normalizeOpenCodeWorkspaceLabel(workspace.workspaceLabel)
+                        ?? workspace.workspaceID,
+                    workspaceID: workspace.workspaceID,
+                    workspaceLabel: Self.normalizeOpenCodeWorkspaceLabel(workspace.workspaceLabel)
+                        ?? workspace.workspaceID,
+                    discoveredOwnerLabel: Self.normalizeOpenCodeWorkspaceLabel(workspace.ownerLabel),
+                    addedAt: prior.addedAt,
+                    lastValidatedAt: now)
+                accountIDs.append(prior.id)
+                updatedCount += 1
+            } else {
+                let accountID = UUID()
+                accounts.append(OpenCodeWorkspaceAccount(
+                    id: accountID,
+                    tokenAccountID: tokenAccountID,
+                    label: Self.normalizeOpenCodeWorkspaceLabel(workspace.workspaceLabel) ?? workspace.workspaceID,
+                    workspaceID: workspace.workspaceID,
+                    workspaceLabel: Self.normalizeOpenCodeWorkspaceLabel(workspace.workspaceLabel)
+                        ?? workspace.workspaceID,
+                    discoveredOwnerLabel: Self.normalizeOpenCodeWorkspaceLabel(workspace.ownerLabel),
+                    addedAt: now,
+                    lastValidatedAt: now))
+                accountIDs.append(accountID)
+                addedCount += 1
+            }
+        }
+
+        let activeAccountID = if let existingActive = existing?.activeAccountID,
+                                 accounts.contains(where: { $0.id == existingActive })
+        {
+            existingActive
+        } else {
+            accountIDs.first
+        }
+
+        self.updateProviderConfig(provider: .opencode) { entry in
+            entry.openCodeWorkspaceAccounts = OpenCodeWorkspaceAccountData(
+                version: existing?.version ?? Self.openCodeWorkspaceAccountVersion,
+                activeAccountID: activeAccountID,
+                accounts: accounts)
+        }
+        return OpenCodeWorkspaceBulkSaveSummary(
+            accountIDs: accountIDs,
+            addedCount: addedCount,
+            updatedCount: updatedCount)
     }
 
     @discardableResult

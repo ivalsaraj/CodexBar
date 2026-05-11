@@ -130,8 +130,109 @@ struct ProvidersPaneCoverageTests {
         let accountsState = pane._test_openCodeAccountsSectionState()
 
         #expect(tokenAccounts?.isVisible?() == false)
-        #expect(accountsState?.unboundTokenAccounts.count == 1)
+        #expect(accountsState?.hasReusableCredential == true)
         #expect(accountsState?.accounts.isEmpty == true)
+    }
+
+    @Test
+    func `opencode import current login saves every discovered workspace`() async throws {
+        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-import-login")
+        let store = Self.makeUsageStore(settings: settings)
+        let cookie = try #require(Self.makeCookie(name: "auth", value: "import-cookie"))
+        let pane = ProvidersPane(
+            settings: settings,
+            store: store,
+            openCodeWorkspaceFlow: FakeOpenCodeWorkspaceFlow(
+                sessionInfo: OpenCodeCookieImporter.SessionInfo(
+                    cookies: [cookie],
+                    sourceLabel: "Chrome"),
+                discoveredWorkspaces: [
+                    OpenCodeDiscoveredWorkspace(
+                        workspaceID: "wrk_alpha",
+                        workspaceLabel: "Alpha Workspace",
+                        ownerLabel: "Team One"),
+                    OpenCodeDiscoveredWorkspace(
+                        workspaceID: "wrk_beta",
+                        workspaceLabel: "Beta Workspace",
+                        ownerLabel: "Team Two"),
+                ]))
+
+        let result = await pane._test_importOpenCodeCurrentLogin()
+
+        #expect(result == .success("2 workspaces imported."))
+        #expect(settings.openCodeWorkspaceAccounts.map(\.workspaceID) == ["wrk_alpha", "wrk_beta"])
+        #expect(settings.selectedOpenCodeWorkspaceAccount?.workspaceID == "wrk_alpha")
+        #expect(pane._test_openCodeAccountsSectionState()?.notice == "2 workspaces imported.")
+    }
+
+    @Test
+    func `opencode import current login switches active workspace to imported login`() async throws {
+        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-import-switches-login")
+        let store = Self.makeUsageStore(settings: settings)
+        let oldToken = try #require(settings.saveOrReuseOpenCodeCredential(
+            label: "OpenCode (Old)",
+            token: "auth=old-cookie"))
+        let oldAccountID = try #require(settings.saveOpenCodeWorkspaceAccount(
+            tokenAccountID: oldToken.id,
+            label: "Old Workspace",
+            workspaceID: "wrk_old",
+            workspaceLabel: "Old Workspace",
+            discoveredOwnerLabel: nil))
+        _ = settings.setActiveOpenCodeWorkspaceAccount(id: oldAccountID)
+
+        let cookie = try #require(Self.makeCookie(name: "auth", value: "new-cookie"))
+        let pane = ProvidersPane(
+            settings: settings,
+            store: store,
+            openCodeWorkspaceFlow: FakeOpenCodeWorkspaceFlow(
+                sessionInfo: OpenCodeCookieImporter.SessionInfo(
+                    cookies: [cookie],
+                    sourceLabel: "Chrome"),
+                discoveredWorkspaces: [
+                    OpenCodeDiscoveredWorkspace(
+                        workspaceID: "wrk_new",
+                        workspaceLabel: "New Workspace",
+                        ownerLabel: nil),
+                ]))
+
+        let result = await pane._test_importOpenCodeCurrentLogin()
+
+        #expect(result == .success("1 workspace imported."))
+        #expect(settings.selectedOpenCodeWorkspaceAccount?.workspaceID == "wrk_new")
+        #expect(settings.reusableOpenCodeCredential()?.token == "auth=new-cookie")
+    }
+
+    @Test
+    func `opencode manual add reuses saved credential and only needs workspace id`() async {
+        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-manual-add")
+        let store = Self.makeUsageStore(settings: settings)
+        _ = settings.saveOrReuseOpenCodeCredential(label: "OpenCode (Chrome)", token: "auth=saved-cookie")
+        let pane = ProvidersPane(settings: settings, store: store)
+
+        let result = await pane._test_saveOpenCodeAccount(OpenCodeAccountDraft(
+            workspaceID: "https://opencode.ai/workspace/wrk_manual/go",
+            workspaceLabel: "Manual Workspace"))
+
+        #expect(result == .success("Manual Workspace added."))
+        #expect(settings.openCodeWorkspaceAccounts.count == 1)
+        #expect(settings.openCodeWorkspaceAccounts.first?.workspaceID == "wrk_manual")
+        #expect(settings.openCodeWorkspaceAccounts.first?.workspaceLabel == "Manual Workspace")
+    }
+
+    @Test
+    func `opencode manual add without reusable credential returns visible failure`() async {
+        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-no-credential")
+        let store = Self.makeUsageStore(settings: settings)
+        let pane = ProvidersPane(settings: settings, store: store)
+
+        let result = await pane._test_saveOpenCodeAccount(OpenCodeAccountDraft(
+            workspaceID: "wrk_manual",
+            workspaceLabel: "Manual Workspace"))
+
+        #expect(result == .failure("Import your current OpenCode login first."))
+        #expect(result.shouldResetForm == false)
+        #expect(settings.openCodeWorkspaceAccounts.isEmpty)
+        #expect(pane._test_openCodeAccountsSectionState()?.notice == "Import your current OpenCode login first.")
     }
 
     @Test
@@ -240,5 +341,28 @@ struct ProvidersPaneCoverageTests {
         }
 
         return "\(base64URL(header)).\(base64URL(payload))."
+    }
+
+    private static func makeCookie(name: String, value: String) -> HTTPCookie? {
+        HTTPCookie(properties: [
+            .domain: "opencode.ai",
+            .path: "/",
+            .name: name,
+            .value: value,
+            .secure: "TRUE",
+        ])
+    }
+}
+
+private struct FakeOpenCodeWorkspaceFlow: OpenCodeWorkspaceFlowing {
+    let sessionInfo: OpenCodeCookieImporter.SessionInfo
+    let discoveredWorkspaces: [OpenCodeDiscoveredWorkspace]
+
+    func importSession(browserDetection _: BrowserDetection) async throws -> OpenCodeCookieImporter.SessionInfo {
+        self.sessionInfo
+    }
+
+    func discoverWorkspaces(cookieHeader _: String) async throws -> [OpenCodeDiscoveredWorkspace] {
+        self.discoveredWorkspaces
     }
 }
