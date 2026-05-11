@@ -1,6 +1,6 @@
 # CodexBar 🎚️ - May your tokens never run out.
 
-Tiny macOS 14+ menu bar app that keeps your Codex, Claude, Cursor, Gemini, Antigravity, Droid (Factory), Copilot, z.ai, Kiro, Vertex AI, Augment, Amp, JetBrains AI, OpenRouter, and Perplexity limits visible (session + weekly where available) and shows when each window resets. One status item per provider (or Merge Icons mode with a provider switcher and optional Overview tab); enable what you use from Settings. No Dock icon, minimal UI, dynamic bar icons in the menu bar.
+Tiny macOS 14+ menu bar app that keeps your Codex, Claude, Cursor, Gemini, OpenCode, Antigravity, Droid (Factory), Copilot, z.ai, Kiro, Vertex AI, Augment, Amp, JetBrains AI, OpenRouter, and Perplexity limits visible (session + weekly where available) and shows when each window resets. One status item per provider (or Merge Icons mode with a provider switcher and optional Overview tab); enable what you use from Settings. No Dock icon, minimal UI, dynamic bar icons in the menu bar.
 
 ## What Is Different In This Fork
 Compared to upstream [steipete/CodexBar](https://github.com/steipete/CodexBar), this repo currently adds:
@@ -13,6 +13,10 @@ Compared to upstream [steipete/CodexBar](https://github.com/steipete/CodexBar), 
   - event-driven refresh (`menu open`, `post-switch`, `manual refresh`)
   - process/source classification and targeted restart hints
   - auth-risk labeling (`May hold old token` vs `Current token likely in use`)
+- OpenCode workspace-account support:
+  - `Import current login` discovers every workspace available to the signed-in OpenCode session.
+  - each workspace is saved as its own switchable account while reusing the same underlying login.
+  - the menu and widget can switch between OpenCode workspaces and show each workspace's own usage snapshot.
 
 <img src="codexbar.png" alt="CodexBar menu screenshot" width="520" />
 
@@ -47,6 +51,7 @@ Linux support via Omarchy: community Waybar module and TUI, driven by the `codex
 - [Claude](docs/claude.md) — OAuth API or browser cookies (+ CLI PTY fallback); session + weekly usage.
 - [Cursor](docs/cursor.md) — Browser session cookies for plan + usage + billing resets.
 - [Gemini](docs/gemini.md) — OAuth-backed quota API using Gemini CLI credentials (no browser cookies).
+- [OpenCode](docs/opencode.md) — Browser session import with workspace discovery, per-workspace usage, menu switching, and widget snapshots.
 - [Antigravity](docs/antigravity.md) — Local language server probe (experimental); no external auth.
 - [Droid](docs/factory.md) — Browser cookies + WorkOS token flows for Factory usage + billing.
 - [Copilot](docs/copilot.md) — GitHub device flow + Copilot internal usage API.
