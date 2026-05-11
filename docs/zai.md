@@ -30,14 +30,27 @@ z.ai is API-token based. No browser cookies.
   - `data.limits[]` → each limit entry.
   - `data.planName` (or `plan`, `plan_type`, `packageName`) → plan label.
 - Limit types:
-  - `TOKENS_LIMIT` → primary (tokens window).
-  - `TIME_LIMIT` → secondary (MCP/time window) if tokens also present.
+  - `TOKENS_LIMIT` → token windows.
+  - `TIME_LIMIT` → MCP/time window.
+  - Multiple `TOKENS_LIMIT` entries → prefer the shortest known token window for the primary `Tokens`
+    row and keep the next token limit in the shared `Weekly` lane instead of overwriting it.
 - Window duration:
-  - Unit + number → minutes/hours/days.
+  - Unit + number → minutes/hours/days/weeks.
 - Reset:
   - `nextResetTime` (epoch ms) → date.
 - Usage details:
   - `usageDetails[]` per model (MCP usage list).
+
+## Menu display
+- The menu card shows the token window duration (for example, `5 hours window`) even when the API omits
+  `usage`, `currentValue`, or `remaining` from the token limit entry.
+- When quota counts are available, the menu card shows both the count detail and the window duration.
+- When z.ai returns both a short token window and a longer token window, the menu card renders them as
+  separate rows: `Tokens`, `Weekly`, and `MCP`.
+- Cached or reconstructed menu snapshots fall back to the rate-window description or stored window
+  length when the raw z.ai limit entry is not present.
+- Widgets receive the same token window duration as usage-row detail text, so the z.ai widget can show
+  the five-hour token window, the longer weekly token window, and the MCP window as separate rows.
 
 ## Key files
 - `Sources/CodexBarCore/Providers/Zai/ZaiUsageStats.swift`

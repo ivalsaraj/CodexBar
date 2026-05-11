@@ -15,6 +15,7 @@ public enum ZaiLimitUnit: Int, Sendable {
     case days = 1
     case hours = 3
     case minutes = 5
+    case weeks = 6
 }
 
 /// A single limit entry from the z.ai API
@@ -69,6 +70,8 @@ extension ZaiLimitEntry {
             return self.number * 60
         case .days:
             return self.number * 24 * 60
+        case .weeks:
+            return self.number * 7 * 24 * 60
         case .unknown:
             return nil
         }
@@ -80,6 +83,7 @@ extension ZaiLimitEntry {
         case .minutes: "minute"
         case .hours: "hour"
         case .days: "day"
+        case .weeks: "week"
         case .unknown: nil
         }
         guard let unitLabel else { return nil }
@@ -129,12 +133,29 @@ public struct ZaiUsageDetail: Sendable, Codable {
 /// Complete z.ai usage response
 public struct ZaiUsageSnapshot: Sendable {
     public let tokenLimit: ZaiLimitEntry?
+    public let secondaryTokenLimit: ZaiLimitEntry?
     public let timeLimit: ZaiLimitEntry?
     public let planName: String?
     public let updatedAt: Date
 
     public init(tokenLimit: ZaiLimitEntry?, timeLimit: ZaiLimitEntry?, planName: String?, updatedAt: Date) {
+        self.init(
+            tokenLimit: tokenLimit,
+            secondaryTokenLimit: nil,
+            timeLimit: timeLimit,
+            planName: planName,
+            updatedAt: updatedAt)
+    }
+
+    public init(
+        tokenLimit: ZaiLimitEntry?,
+        secondaryTokenLimit: ZaiLimitEntry?,
+        timeLimit: ZaiLimitEntry?,
+        planName: String?,
+        updatedAt: Date)
+    {
         self.tokenLimit = tokenLimit
+        self.secondaryTokenLimit = secondaryTokenLimit
         self.timeLimit = timeLimit
         self.planName = planName
         self.updatedAt = updatedAt
@@ -142,14 +163,16 @@ public struct ZaiUsageSnapshot: Sendable {
 
     /// Returns true if this snapshot contains valid z.ai data
     public var isValid: Bool {
-        self.tokenLimit != nil || self.timeLimit != nil
+        self.tokenLimit != nil || self.secondaryTokenLimit != nil || self.timeLimit != nil
     }
 }
 
 extension ZaiUsageSnapshot {
     public func toUsageSnapshot() -> UsageSnapshot {
-        let primaryLimit = self.tokenLimit ?? self.timeLimit
-        let secondaryLimit = (self.tokenLimit != nil && self.timeLimit != nil) ? self.timeLimit : nil
+        let orderedLimits = [self.tokenLimit, self.secondaryTokenLimit, self.timeLimit].compactMap(\.self)
+        let primaryLimit = orderedLimits.first
+        let secondaryLimit = orderedLimits.dropFirst().first
+        let tertiaryLimit = orderedLimits.dropFirst(2).first
 
         let primary = primaryLimit.map { Self.rateWindow(for: $0) } ?? RateWindow(
             usedPercent: 0,
@@ -157,6 +180,7 @@ extension ZaiUsageSnapshot {
             resetsAt: nil,
             resetDescription: nil)
         let secondary = secondaryLimit.map { Self.rateWindow(for: $0) }
+        let tertiary = tertiaryLimit.map { Self.rateWindow(for: $0) }
 
         let planName = self.planName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let loginMethod = (planName?.isEmpty ?? true) ? nil : planName
@@ -168,7 +192,7 @@ extension ZaiUsageSnapshot {
         return UsageSnapshot(
             primary: primary,
             secondary: secondary,
-            tertiary: nil,
+            tertiary: tertiary,
             providerCost: nil,
             zaiUsage: self,
             updatedAt: self.updatedAt,
@@ -364,25 +388,54 @@ public struct ZaiUsageFetcher: Sendable {
             throw ZaiUsageError.parseFailed("Missing data")
         }
 
-        var tokenLimit: ZaiLimitEntry?
+        var tokenLimits: [ZaiLimitEntry] = []
         var timeLimit: ZaiLimitEntry?
 
         for limit in responseData.limits {
             if let entry = limit.toLimitEntry() {
                 switch entry.type {
                 case .tokensLimit:
-                    tokenLimit = entry
+                    tokenLimits.append(entry)
                 case .timeLimit:
                     timeLimit = entry
                 }
             }
         }
 
+        let orderedTokenLimits = self.orderedTokenLimits(tokenLimits)
+
         return ZaiUsageSnapshot(
-            tokenLimit: tokenLimit,
+            tokenLimit: orderedTokenLimits.first,
+            secondaryTokenLimit: orderedTokenLimits.dropFirst().first,
             timeLimit: timeLimit,
             planName: responseData.planName,
             updatedAt: Date())
+    }
+
+    private static func orderedTokenLimits(_ limits: [ZaiLimitEntry]) -> [ZaiLimitEntry] {
+        limits.enumerated().sorted { lhs, rhs in
+            let left = lhs.element
+            let right = rhs.element
+            switch (left.windowMinutes, right.windowMinutes) {
+            case let (leftMinutes?, rightMinutes?):
+                if leftMinutes != rightMinutes {
+                    return leftMinutes < rightMinutes
+                }
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                break
+            }
+            if let leftReset = left.nextResetTime,
+               let rightReset = right.nextResetTime,
+               leftReset != rightReset
+            {
+                return leftReset < rightReset
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
 
     private static func quotaURL(baseURLString: String) -> URL? {

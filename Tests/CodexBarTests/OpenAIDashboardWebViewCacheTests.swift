@@ -14,8 +14,8 @@ import WebKit
 struct OpenAIDashboardWebViewCacheTests {
     // MARK: - Data Store Identity Tests
 
-    @Test("WKWebsiteDataStore should return same instance for same email")
-    func dataStoreReturnsSameInstance() {
+    @Test
+    func `WKWebsiteDataStore should return same instance for same email`() {
         OpenAIDashboardWebsiteDataStore.clearCacheForTesting()
 
         let store1 = OpenAIDashboardWebsiteDataStore.store(forAccountEmail: "test@example.com")
@@ -34,8 +34,8 @@ struct OpenAIDashboardWebViewCacheTests {
 
     // MARK: - WebView Reuse Tests
 
-    @Test("WebView should be cached after release, not destroyed")
-    func webViewCachedAfterRelease() async throws {
+    @Test
+    func `WebView should be cached after release, not destroyed`() async throws {
         let cache = OpenAIDashboardWebViewCache()
         let store = WKWebsiteDataStore.nonPersistent()
         let url = try #require(URL(string: "about:blank"))
@@ -67,8 +67,8 @@ struct OpenAIDashboardWebViewCacheTests {
         cache.clearAllForTesting()
     }
 
-    @Test("Different data stores should have separate cached WebViews")
-    func separateCachesPerDataStore() async throws {
+    @Test
+    func `Different data stores should have separate cached WebViews`() async throws {
         let cache = OpenAIDashboardWebViewCache()
         let store1 = WKWebsiteDataStore.nonPersistent()
         let store2 = WKWebsiteDataStore.nonPersistent()
@@ -98,18 +98,11 @@ struct OpenAIDashboardWebViewCacheTests {
 
     // MARK: - Idle Timeout / Pruning Tests
 
-    @Test("WebView should be pruned after idle timeout")
-    func webViewPrunedAfterIdleTimeout() async throws {
+    @Test
+    func `WebView should be pruned after idle timeout`() {
         let cache = OpenAIDashboardWebViewCache()
         let store = WKWebsiteDataStore.nonPersistent()
-        let url = try #require(URL(string: "about:blank"))
-
-        // Acquire and release
-        let lease = try await cache.acquire(
-            websiteDataStore: store,
-            usageURL: url,
-            logger: nil)
-        lease.release()
+        cache.cacheEntryForTesting(websiteDataStore: store)
 
         #expect(cache.hasCachedEntry(for: store), "Should be cached immediately after release")
 
@@ -121,30 +114,24 @@ struct OpenAIDashboardWebViewCacheTests {
         #expect(cache.entryCount == 0, "Should have no cached entries after prune")
     }
 
-    @Test("Recently used WebView should not be pruned")
-    func recentlyUsedWebViewNotPruned() async throws {
+    @Test
+    func `Recently used WebView should not be pruned`() {
         let cache = OpenAIDashboardWebViewCache()
         let store = WKWebsiteDataStore.nonPersistent()
-        let url = try #require(URL(string: "about:blank"))
-
-        // Acquire and release
-        let lease = try await cache.acquire(
-            websiteDataStore: store,
-            usageURL: url,
-            logger: nil)
-        lease.release()
+        cache.cacheEntryForTesting(websiteDataStore: store)
 
         // Simulate time passing within idle timeout (5 minutes)
         let nearFutureTime = Date().addingTimeInterval(5 * 60)
         cache.pruneForTesting(now: nearFutureTime)
 
         #expect(cache.hasCachedEntry(for: store), "Should still be cached within idle timeout")
+        cache.clearAllForTesting()
     }
 
     // MARK: - Eviction Tests
 
-    @Test("Evict should remove specific WebView from cache")
-    func evictRemovesSpecificWebView() async throws {
+    @Test
+    func `Evict should remove specific WebView from cache`() async throws {
         let cache = OpenAIDashboardWebViewCache()
         let store1 = WKWebsiteDataStore.nonPersistent()
         let store2 = WKWebsiteDataStore.nonPersistent()
@@ -168,10 +155,31 @@ struct OpenAIDashboardWebViewCacheTests {
         cache.clearAllForTesting()
     }
 
+    @Test
+    func `Evicted WebView should not be reused on next acquire`() async throws {
+        let cache = OpenAIDashboardWebViewCache()
+        let store = WKWebsiteDataStore.nonPersistent()
+        let url = try #require(URL(string: "about:blank"))
+
+        let lease1 = try await cache.acquire(websiteDataStore: store, usageURL: url, logger: nil)
+        let webView1 = lease1.webView
+        lease1.release()
+
+        cache.evict(websiteDataStore: store)
+
+        let lease2 = try await cache.acquire(websiteDataStore: store, usageURL: url, logger: nil)
+        let webView2 = lease2.webView
+
+        #expect(webView1 !== webView2, "Acquire after eviction should create a fresh WebView")
+
+        lease2.release()
+        cache.clearAllForTesting()
+    }
+
     // MARK: - Busy WebView Tests
 
-    @Test("Busy WebView should create temporary WebView for concurrent access")
-    func busyWebViewCreatesTemporary() async throws {
+    @Test
+    func `Busy WebView should create temporary WebView for concurrent access`() async throws {
         let cache = OpenAIDashboardWebViewCache()
         let store = WKWebsiteDataStore.nonPersistent()
         let url = try #require(URL(string: "about:blank"))
@@ -205,8 +213,8 @@ struct OpenAIDashboardWebViewCacheTests {
 
     // MARK: - Network Traffic Regression Prevention
 
-    @Test("Multiple sequential fetches should reuse same WebView (network optimization)")
-    func sequentialFetchesReuseWebView() async throws {
+    @Test
+    func `Multiple sequential fetches should reuse same WebView (network optimization)`() async throws {
         let cache = OpenAIDashboardWebViewCache()
         let store = WKWebsiteDataStore.nonPersistent()
         let url = try #require(URL(string: "about:blank"))
@@ -239,8 +247,8 @@ struct OpenAIDashboardWebViewCacheTests {
 
     // MARK: - Integration Test with Real Data Store Factory
 
-    @Test("Sequential fetches with OpenAIDashboardWebsiteDataStore should reuse WebView")
-    func sequentialFetchesWithRealDataStoreFactory() async throws {
+    @Test
+    func `Sequential fetches with OpenAIDashboardWebsiteDataStore should reuse WebView`() async throws {
         OpenAIDashboardWebsiteDataStore.clearCacheForTesting()
         let cache = OpenAIDashboardWebViewCache()
         let url = try #require(URL(string: "about:blank"))

@@ -8,10 +8,21 @@ import WebKit
 final class NavigationDelegate: NSObject, WKNavigationDelegate {
     private let completion: (Result<Void, Error>) -> Void
     private var hasCompleted: Bool = false
+    private var timeoutTask: Task<Void, Never>?
     static var associationKey: UInt8 = 0
 
     init(completion: @escaping (Result<Void, Error>) -> Void) {
         self.completion = completion
+    }
+
+    func armTimeout(seconds: TimeInterval) {
+        self.timeoutTask?.cancel()
+        self.timeoutTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let nanoseconds = UInt64(max(seconds, 0) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            self.completeOnce(.failure(URLError(.timedOut)))
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -30,12 +41,22 @@ final class NavigationDelegate: NSObject, WKNavigationDelegate {
 
     nonisolated static func shouldIgnoreNavigationError(_ error: Error) -> Bool {
         let nsError = error as NSError
-        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
+            return true
+        }
+
+        if nsError.domain == "WebKitErrorDomain", nsError.code == 102 {
+            return true
+        }
+
+        return false
     }
 
     private func completeOnce(_ result: Result<Void, Error>) {
         guard !self.hasCompleted else { return }
         self.hasCompleted = true
+        self.timeoutTask?.cancel()
+        self.timeoutTask = nil
         self.completion(result)
     }
 }

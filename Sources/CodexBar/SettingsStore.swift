@@ -42,6 +42,7 @@ enum MenuBarMetricPreference: String, CaseIterable, Identifiable {
     case automatic
     case primary
     case secondary
+    case tertiary
     case average
 
     var id: String {
@@ -53,6 +54,7 @@ enum MenuBarMetricPreference: String, CaseIterable, Identifiable {
         case .automatic: "Automatic"
         case .primary: "Primary"
         case .secondary: "Secondary"
+        case .tertiary: "Tertiary"
         case .average: "Average"
         }
     }
@@ -61,7 +63,7 @@ enum MenuBarMetricPreference: String, CaseIterable, Identifiable {
 @MainActor
 @Observable
 final class SettingsStore {
-    static let sharedDefaults = UserDefaults(suiteName: "group.com.steipete.codexbar")
+    static let sharedDefaults = AppGroupSupport.sharedDefaults()
     static let mergedOverviewProviderLimit = 3
     static let isRunningTests: Bool = {
         let env = ProcessInfo.processInfo.environment
@@ -81,6 +83,13 @@ final class SettingsStore {
     var configRevision: Int = 0
     var providerOrder: [UsageProvider] = []
     var providerEnablement: [UsageProvider: Bool] = [:]
+
+    static func shouldBridgeSharedDefaults(for userDefaults: UserDefaults) -> Bool {
+        if !self.isRunningTests { return true }
+        if userDefaults === UserDefaults.standard { return true }
+        if let shared = sharedDefaults, userDefaults === shared { return true }
+        return false
+    }
 
     init(
         userDefaults: UserDefaults = .standard,
@@ -115,6 +124,20 @@ final class SettingsStore {
         copilotTokenStore: any CopilotTokenStoring = KeychainCopilotTokenStore(),
         tokenAccountStore: any ProviderTokenAccountStoring = FileTokenAccountStore())
     {
+        let appGroupID = AppGroupSupport.currentGroupID()
+        let appGroupMigration = AppGroupSupport.migrateLegacyDataIfNeeded(standardDefaults: userDefaults)
+        let sharedDefaultsAvailable = Self.sharedDefaults != nil
+        if !Self.isRunningTests {
+            CodexBarLog.logger(LogCategories.settings).info(
+                "App group resolved",
+                metadata: [
+                    "groupID": appGroupID,
+                    "sharedDefaultsAvailable": sharedDefaultsAvailable ? "1" : "0",
+                    "migrationStatus": appGroupMigration.status.rawValue,
+                    "migratedSnapshot": appGroupMigration.copiedSnapshot ? "1" : "0",
+                ])
+        }
+
         let legacyStores = CodexBarConfigMigrator.LegacyStores(
             zaiTokenStore: zaiTokenStore,
             syntheticTokenStore: syntheticTokenStore,
@@ -147,25 +170,34 @@ final class SettingsStore {
         userDefaults.removeObject(forKey: "showClaudeUsage")
         LaunchAtLoginManager.setEnabled(self.launchAtLogin)
         self.runInitialProviderDetectionIfNeeded()
+        self.ensureAlibabaProviderAutoEnabledIfNeeded()
         self.applyTokenCostDefaultIfNeeded()
         if self.claudeUsageDataSource != .cli { self.claudeWebExtrasEnabled = false }
         self.openAIWebAccessEnabled = self.codexCookieSource.isEnabled
-        Self.sharedDefaults?.set(self.debugDisableKeychainAccess, forKey: "debugDisableKeychainAccess")
+        if Self.shouldBridgeSharedDefaults(for: userDefaults) {
+            Self.sharedDefaults?.set(self.debugDisableKeychainAccess, forKey: "debugDisableKeychainAccess")
+        }
         KeychainAccessGate.isDisabled = self.debugDisableKeychainAccess
     }
 }
 
 extension SettingsStore {
     private static func loadDefaultsState(userDefaults: UserDefaults) -> SettingsDefaultsState {
-        let refreshRaw = userDefaults.string(forKey: "refreshFrequency") ?? RefreshFrequency.fiveMinutes.rawValue
-        let refreshFrequency = RefreshFrequency(rawValue: refreshRaw) ?? .fiveMinutes
+        let refreshDefault = userDefaults.string(forKey: "refreshFrequency")
+            .flatMap(RefreshFrequency.init(rawValue:))
+        let refreshFrequency = refreshDefault ?? .fiveMinutes
+        if refreshDefault == nil {
+            userDefaults.set(refreshFrequency.rawValue, forKey: "refreshFrequency")
+        }
         let launchAtLogin = userDefaults.object(forKey: "launchAtLogin") as? Bool ?? false
         let debugMenuEnabled = userDefaults.object(forKey: "debugMenuEnabled") as? Bool ?? false
         let debugDisableKeychainAccess: Bool = {
             if let stored = userDefaults.object(forKey: "debugDisableKeychainAccess") as? Bool {
                 return stored
             }
-            if let shared = Self.sharedDefaults?.object(forKey: "debugDisableKeychainAccess") as? Bool {
+            if Self.shouldBridgeSharedDefaults(for: userDefaults),
+               let shared = Self.sharedDefaults?.object(forKey: "debugDisableKeychainAccess") as? Bool
+            {
                 userDefaults.set(shared, forKey: "debugDisableKeychainAccess")
                 return shared
             }
@@ -190,6 +222,7 @@ extension SettingsStore {
             forKey: "menuBarShowsBrandIconWithPercent") as? Bool ?? false
         let menuBarDisplayModeRaw = userDefaults.string(forKey: "menuBarDisplayMode")
             ?? MenuBarDisplayMode.percent.rawValue
+        let historicalTrackingEnabled = userDefaults.object(forKey: "historicalTrackingEnabled") as? Bool ?? false
         let showAllTokenAccountsInMenu = userDefaults.object(forKey: "showAllTokenAccountsInMenu") as? Bool ?? false
         let storedPreferences = userDefaults.dictionary(forKey: "menuBarMetricPreferences") as? [String: String] ?? [:]
         var resolvedPreferences = storedPreferences
@@ -238,6 +271,7 @@ extension SettingsStore {
             resetTimesShowAbsolute: resetTimesShowAbsolute,
             menuBarShowsBrandIconWithPercent: menuBarShowsBrandIconWithPercent,
             menuBarDisplayModeRaw: menuBarDisplayModeRaw,
+            historicalTrackingEnabled: historicalTrackingEnabled,
             showAllTokenAccountsInMenu: showAllTokenAccountsInMenu,
             menuBarMetricPreferencesRaw: resolvedPreferences,
             costUsageEnabled: costUsageEnabled,

@@ -16,6 +16,7 @@ extension SettingsStore {
         _ = self.menuBarShowsBrandIconWithPercent
         _ = self.menuBarShowsHighestUsage
         _ = self.menuBarDisplayMode
+        _ = self.historicalTrackingEnabled
         _ = self.showAllTokenAccountsInMenu
         _ = self.menuBarMetricPreferencesRaw
         _ = self.costUsageEnabled
@@ -27,6 +28,7 @@ extension SettingsStore {
         _ = self.showOptionalCreditsAndExtraUsage
         _ = self.openAIWebAccessEnabled
         _ = self.codexUsageDataSource
+        _ = self.codexActiveSource
         _ = self.claudeUsageDataSource
         _ = self.kiloUsageDataSource
         _ = self.kiloExtrasEnabled

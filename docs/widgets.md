@@ -11,10 +11,17 @@ read_when:
 ## Snapshot pipeline
 - `WidgetSnapshotStore` writes compact JSON snapshots to the app-group container.
 - Widgets read the snapshot and render usage/credits/history states.
+- Codex dashboard snapshots carry the OpenAI subscription renewal timestamp when the page exposes it; the menu renders
+  that date below Codex token-cost lines.
+- Provider extra-usage snapshots include their renewal metadata so medium, large, switcher, and history widgets can show
+  a muted line such as `Monthly · renews in 6 days` under the related cost value when a renewal date is known.
+- OpenCode snapshots can now contain multiple saved workspace entries for the same provider.
 
 ## Extension
 - `Sources/CodexBarWidget` contains timeline + views.
 - Keep data shape in sync with `WidgetSnapshot` in the main app.
+- When the selected provider is OpenCode and multiple saved workspaces exist, the switcher widget exposes a workspace
+  chip row so you can flip between workspace balances without reopening the app.
 
 ## Visibility troubleshooting (macOS 14+)
 When widgets do not appear in the gallery at all, the issue is almost always

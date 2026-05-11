@@ -10,7 +10,7 @@ struct KeychainCacheStoreTests {
     }
 
     @Test
-    func storesAndLoadsEntry() {
+    func `stores and loads entry`() {
         KeychainCacheStore.setTestStoreForTesting(true)
         defer { KeychainCacheStore.setTestStoreForTesting(false) }
 
@@ -30,7 +30,7 @@ struct KeychainCacheStoreTests {
     }
 
     @Test
-    func overwritesExistingEntry() {
+    func `overwrites existing entry`() {
         KeychainCacheStore.setTestStoreForTesting(true)
         defer { KeychainCacheStore.setTestStoreForTesting(false) }
 
@@ -51,7 +51,7 @@ struct KeychainCacheStoreTests {
     }
 
     @Test
-    func clearRemovesEntry() {
+    func `clear removes entry`() {
         KeychainCacheStore.setTestStoreForTesting(true)
         defer { KeychainCacheStore.setTestStoreForTesting(false) }
 
@@ -68,4 +68,21 @@ struct KeychainCacheStoreTests {
             #expect(Bool(false), "Expected keychain cache entry to be cleared")
         }
     }
+
+    #if os(macOS)
+    @Test
+    func `interaction not allowed is treated as temporarily missing`() {
+        let key = KeychainCacheStore.Key(category: "test", identifier: UUID().uuidString)
+        let result: KeychainCacheStore.LoadResult<TestEntry> = KeychainCacheStore.loadResultForKeychainReadFailure(
+            status: errSecInteractionNotAllowed,
+            key: key)
+
+        switch result {
+        case .missing:
+            #expect(true)
+        case .found, .invalid:
+            #expect(Bool(false), "Expected temporary keychain lock to preserve cache")
+        }
+    }
+    #endif
 }

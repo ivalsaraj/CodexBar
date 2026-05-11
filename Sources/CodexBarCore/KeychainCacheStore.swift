@@ -68,11 +68,8 @@ public enum KeychainCacheStore {
                 return .invalid
             }
             return .found(decoded)
-        case errSecItemNotFound:
-            return .missing
         default:
-            self.log.error("Keychain cache read failed (\(key.account)): \(status)")
-            return .invalid
+            return self.loadResultForKeychainReadFailure(status: status, key: key)
         }
         #else
         return .missing
@@ -141,7 +138,7 @@ public enum KeychainCacheStore {
         self.globalServiceOverride = service
     }
 
-    static func withServiceOverrideForTesting<T>(
+    public static func withServiceOverrideForTesting<T>(
         _ service: String?,
         operation: () throws -> T) rethrows -> T
     {
@@ -150,13 +147,26 @@ public enum KeychainCacheStore {
         }
     }
 
-    static func withServiceOverrideForTesting<T>(
+    public static func withServiceOverrideForTesting<T>(
         _ service: String?,
         operation: () async throws -> T) async rethrows -> T
     {
         try await self.$serviceOverride.withValue(service) {
             try await operation()
         }
+    }
+
+    public static func withCurrentServiceOverrideForTesting<T>(
+        operation: () async throws -> T) async rethrows -> T
+    {
+        let service = self.serviceOverride
+        return try await self.$serviceOverride.withValue(service) {
+            try await operation()
+        }
+    }
+
+    public static var currentServiceOverrideForTesting: String? {
+        self.serviceOverride
     }
 
     static func setTestStoreForTesting(_ enabled: Bool) {
@@ -190,6 +200,24 @@ public enum KeychainCacheStore {
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }
+
+    #if os(macOS)
+    static func loadResultForKeychainReadFailure<Entry>(
+        status: OSStatus,
+        key: Key) -> LoadResult<Entry>
+    {
+        switch status {
+        case errSecItemNotFound:
+            return .missing
+        case errSecInteractionNotAllowed:
+            self.log.info("Keychain cache temporarily locked (\(key.account)), will retry on next access")
+            return .missing
+        default:
+            self.log.error("Keychain cache read failed (\(key.account)): \(status)")
+            return .invalid
+        }
+    }
+    #endif
 
     private static func loadFromTestStore<Entry: Codable>(
         key: Key,
@@ -231,8 +259,13 @@ public enum KeychainCacheStore {
 }
 
 extension KeychainCacheStore.Key {
-    public static func cookie(provider: UsageProvider) -> Self {
-        Self(category: "cookie", identifier: provider.rawValue)
+    public static func cookie(provider: UsageProvider, scopeIdentifier: String? = nil) -> Self {
+        let identifier: String = if let scopeIdentifier, !scopeIdentifier.isEmpty {
+            "\(provider.rawValue).\(scopeIdentifier)"
+        } else {
+            provider.rawValue
+        }
+        return Self(category: "cookie", identifier: identifier)
     }
 
     public static func oauth(provider: UsageProvider) -> Self {

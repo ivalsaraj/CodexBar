@@ -15,9 +15,12 @@ struct OpenCodeProviderImplementation: ProviderImplementation {
 
     @MainActor
     func observeSettings(_ settings: SettingsStore) {
+        settings.ensureOpenCodeWorkspaceAccountMigrationIfNeeded()
         _ = settings.opencodeCookieSource
         _ = settings.opencodeCookieHeader
         _ = settings.opencodeWorkspaceID
+        _ = settings.openCodeWorkspaceAccounts
+        _ = settings.selectedOpenCodeWorkspaceAccount
     }
 
     @MainActor
@@ -26,10 +29,8 @@ struct OpenCodeProviderImplementation: ProviderImplementation {
     }
 
     @MainActor
-    func tokenAccountsVisibility(context: ProviderSettingsContext, support: TokenAccountSupport) -> Bool {
-        guard support.requiresManualCookieSource else { return true }
-        if !context.settings.tokenAccounts(for: context.provider).isEmpty { return true }
-        return context.settings.opencodeCookieSource == .manual
+    func tokenAccountsVisibility(context _: ProviderSettingsContext, support _: TokenAccountSupport) -> Bool {
+        false
     }
 
     @MainActor
@@ -55,7 +56,7 @@ struct OpenCodeProviderImplementation: ProviderImplementation {
                 source: context.settings.opencodeCookieSource,
                 keychainDisabled: context.settings.debugDisableKeychainAccess,
                 auto: "Automatic imports browser cookies from opencode.ai.",
-                manual: "Paste a Cookie header captured from the billing page.",
+                manual: "Paste a Cookie header captured from an OpenCode workspace or Go dashboard page.",
                 off: "OpenCode cookies are disabled.")
         }
 
@@ -70,9 +71,9 @@ struct OpenCodeProviderImplementation: ProviderImplementation {
                 isVisible: nil,
                 onChange: nil,
                 trailingText: {
-                    guard let entry = CookieHeaderCache.load(provider: .opencode) else { return nil }
-                    let when = entry.storedAt.relativeDescription()
-                    return "Cached: \(entry.sourceLabel) • \(when)"
+                    OpenCodeProviderUI.cachedCookieTrailingText(
+                        provider: .opencode,
+                        cookieSource: context.settings.opencodeCookieSource)
                 }),
         ]
     }

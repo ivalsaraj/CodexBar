@@ -102,6 +102,27 @@ extension SettingsStore {
             ])
     }
 
+    @discardableResult
+    func saveOrReuseTokenAccount(
+        provider: UsageProvider,
+        label: String,
+        token: String) -> ProviderTokenAccount?
+    {
+        guard TokenAccountSupportCatalog.support(for: provider) != nil else { return nil }
+        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedToken.isEmpty else { return nil }
+
+        if let data = self.tokenAccountsData(for: provider),
+           let existingIndex = data.accounts.firstIndex(where: { $0.token == trimmedToken })
+        {
+            self.setActiveTokenAccountIndex(existingIndex, for: provider)
+            return data.accounts[existingIndex]
+        }
+
+        self.addTokenAccount(provider: provider, label: label, token: trimmedToken)
+        return self.selectedTokenAccount(for: provider) ?? self.tokenAccounts(for: provider).last
+    }
+
     func removeTokenAccount(provider: UsageProvider, accountID: UUID) {
         guard let data = self.tokenAccountsData(for: provider), !data.accounts.isEmpty else { return }
         let filtered = data.accounts.filter { $0.id != accountID }
@@ -122,6 +143,9 @@ extension SettingsStore {
                 "provider": provider.rawValue,
                 "count": "\(filtered.count)",
             ])
+        if provider == .opencode {
+            self.pruneOpenCodeWorkspaceAccountsIfNeeded()
+        }
     }
 
     func ensureTokenAccountsLoaded() {
