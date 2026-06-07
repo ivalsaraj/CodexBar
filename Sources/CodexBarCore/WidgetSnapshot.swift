@@ -28,6 +28,8 @@ public struct WidgetSnapshot: Codable, Sendable {
         public let codeReviewRemainingPercent: Double?
         public let providerCost: ProviderCostSummary?
         public let tokenUsage: TokenUsageSummary?
+        public let cursorRequestRange: CursorRequestRange?
+        public let cursorRequestDetails: [CursorRequestDetail]?
         public let dailyUsage: [DailyUsagePoint]
 
         public init(
@@ -43,6 +45,8 @@ public struct WidgetSnapshot: Codable, Sendable {
             codeReviewRemainingPercent: Double?,
             providerCost: ProviderCostSummary? = nil,
             tokenUsage: TokenUsageSummary?,
+            cursorRequestRange: CursorRequestRange? = nil,
+            cursorRequestDetails: [CursorRequestDetail]? = nil,
             dailyUsage: [DailyUsagePoint])
         {
             self.provider = provider
@@ -57,6 +61,8 @@ public struct WidgetSnapshot: Codable, Sendable {
             self.codeReviewRemainingPercent = codeReviewRemainingPercent
             self.providerCost = providerCost
             self.tokenUsage = tokenUsage
+            self.cursorRequestRange = cursorRequestRange
+            self.cursorRequestDetails = cursorRequestDetails
             self.dailyUsage = dailyUsage
         }
     }
@@ -80,6 +86,43 @@ public struct WidgetSnapshot: Codable, Sendable {
             self.currencyCode = currencyCode
             self.period = period
             self.resetsAt = resetsAt
+        }
+    }
+
+    public struct CursorRequestDetail: Codable, Equatable, Sendable {
+        public let timestamp: Date
+        public let model: String
+        public let tokens: Int
+        public let requests: Int
+        /// Compact, normalized model label for display (e.g. `Opus 4.8 · xhigh`). `nil` for legacy payloads.
+        public let compactModel: String?
+        /// Optional short cost-estimate label (e.g. `Est. $12.34`). `nil` when no honest estimate exists.
+        public let estimateText: String?
+
+        public init(
+            timestamp: Date,
+            model: String,
+            tokens: Int,
+            requests: Int,
+            compactModel: String? = nil,
+            estimateText: String? = nil)
+        {
+            self.timestamp = timestamp
+            self.model = model
+            self.tokens = tokens
+            self.requests = requests
+            self.compactModel = compactModel
+            self.estimateText = estimateText
+        }
+    }
+
+    public struct CursorRequestRange: Codable, Equatable, Sendable {
+        public let start: Date
+        public let end: Date
+
+        public init(start: Date, end: Date) {
+            self.start = start
+            self.end = end
         }
     }
 

@@ -372,13 +372,21 @@ private struct SwitcherMediumUsageView: View {
             if let credits = entry.creditsRemaining {
                 ValueLine(title: "Credits", value: WidgetFormat.credits(credits))
             }
-            if let providerCost = entry.providerCost {
+            if let providerCost = entry.providerCost, !self.entry.showsCursorRequestDetails {
                 ProviderCostLines(cost: providerCost)
             }
             if let token = entry.tokenUsage, token.hasPrimaryValue {
                 ValueLine(
                     title: token.primaryLabel,
                     value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
+            }
+            if let presentation = CursorWidgetRequestPresentation.selection(
+                provider: self.entry.provider,
+                details: self.entry.cursorRequestDetails,
+                range: self.entry.cursorRequestRange,
+                size: .medium)
+            {
+                CursorRequestDetailsView(presentation: presentation)
             }
         }
     }
@@ -405,7 +413,7 @@ private struct SwitcherLargeUsageView: View {
             if let credits = entry.creditsRemaining {
                 ValueLine(title: "Credits", value: WidgetFormat.credits(credits))
             }
-            if let providerCost = entry.providerCost {
+            if let providerCost = entry.providerCost, !self.entry.showsCursorRequestDetails {
                 ProviderCostLines(cost: providerCost)
             }
             if let token = entry.tokenUsage {
@@ -424,8 +432,17 @@ private struct SwitcherLargeUsageView: View {
                     }
                 }
             }
-            UsageHistoryChart(points: self.entry.dailyUsage, color: WidgetColors.color(for: self.entry.provider))
-                .frame(height: 50)
+            if let presentation = CursorWidgetRequestPresentation.selection(
+                provider: self.entry.provider,
+                details: self.entry.cursorRequestDetails,
+                range: self.entry.cursorRequestRange,
+                size: .large)
+            {
+                CursorRequestDetailsView(presentation: presentation)
+            } else {
+                UsageHistoryChart(points: self.entry.dailyUsage, color: WidgetColors.color(for: self.entry.provider))
+                    .frame(height: 50)
+            }
         }
     }
 }
@@ -470,13 +487,21 @@ private struct MediumUsageView: View {
             if let credits = entry.creditsRemaining {
                 ValueLine(title: "Credits", value: WidgetFormat.credits(credits))
             }
-            if let providerCost = entry.providerCost {
+            if let providerCost = entry.providerCost, !self.entry.showsCursorRequestDetails {
                 ProviderCostLines(cost: providerCost)
             }
             if let token = entry.tokenUsage, token.hasPrimaryValue {
                 ValueLine(
                     title: token.primaryLabel,
                     value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
+            }
+            if let presentation = CursorWidgetRequestPresentation.selection(
+                provider: self.entry.provider,
+                details: self.entry.cursorRequestDetails,
+                range: self.entry.cursorRequestRange,
+                size: .medium)
+            {
+                CursorRequestDetailsView(presentation: presentation)
             }
         }
         .padding(12)
@@ -505,7 +530,7 @@ private struct LargeUsageView: View {
             if let credits = entry.creditsRemaining {
                 ValueLine(title: "Credits", value: WidgetFormat.credits(credits))
             }
-            if let providerCost = entry.providerCost {
+            if let providerCost = entry.providerCost, !self.entry.showsCursorRequestDetails {
                 ProviderCostLines(cost: providerCost)
             }
             if let token = entry.tokenUsage {
@@ -524,8 +549,17 @@ private struct LargeUsageView: View {
                     }
                 }
             }
-            UsageHistoryChart(points: self.entry.dailyUsage, color: WidgetColors.color(for: self.entry.provider))
-                .frame(height: 50)
+            if let presentation = CursorWidgetRequestPresentation.selection(
+                provider: self.entry.provider,
+                details: self.entry.cursorRequestDetails,
+                range: self.entry.cursorRequestRange,
+                size: .large)
+            {
+                CursorRequestDetailsView(presentation: presentation)
+            } else {
+                UsageHistoryChart(points: self.entry.dailyUsage, color: WidgetColors.color(for: self.entry.provider))
+                    .frame(height: 50)
+            }
         }
         .padding(12)
     }
@@ -798,6 +832,104 @@ enum WidgetColors {
     }
 }
 
+extension WidgetSnapshot.ProviderEntry {
+    fileprivate var showsCursorRequestDetails: Bool {
+        self.provider == .cursor && !(self.cursorRequestDetails?.isEmpty ?? true)
+    }
+}
+
+enum CursorWidgetRequestPresentation {
+    enum WidgetSize {
+        case medium
+        case large
+    }
+
+    /// Compact widget row. The widget has no hover, so only display-ready fields are kept; the raw
+    /// model and breakdown stay out of the visible row.
+    struct Row: Equatable, Identifiable {
+        let id: Int
+        let modelText: String
+        let metaText: String
+        let tokenText: String
+        let estimateText: String?
+    }
+
+    struct Selection: Equatable {
+        let visible: [WidgetSnapshot.CursorRequestDetail]
+        let rows: [Row]
+        let hiddenCount: Int
+        let range: WidgetSnapshot.CursorRequestRange?
+    }
+
+    static func selection(
+        provider: UsageProvider,
+        details: [WidgetSnapshot.CursorRequestDetail]?,
+        range: WidgetSnapshot.CursorRequestRange? = nil,
+        size: WidgetSize) -> Selection?
+    {
+        guard provider == .cursor,
+              let details,
+              !details.isEmpty
+        else {
+            return nil
+        }
+
+        let maxVisible = size == .medium ? 3 : 5
+        let visible = Array(details.prefix(maxVisible))
+        let hiddenCount = max(0, details.count - visible.count)
+        let rows = visible.enumerated().map { index, detail -> Row in
+            let time = WidgetFormat.requestTime(detail.timestamp)
+            let count = WidgetFormat.requestCountLabel(detail.requests)
+            return Row(
+                id: index,
+                modelText: detail.compactModel ?? detail.model,
+                metaText: "\(time) · \(count)",
+                tokenText: UsageFormatter.tokenCountString(detail.tokens),
+                estimateText: detail.estimateText)
+        }
+        return Selection(visible: visible, rows: rows, hiddenCount: hiddenCount, range: range)
+    }
+}
+
+private struct CursorRequestDetailsView: View {
+    let presentation: CursorWidgetRequestPresentation.Selection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let range = self.presentation.range {
+                Text(WidgetFormat.cursorRequestRange(range))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(self.presentation.rows) { row in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(row.modelText)
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(row.metaText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(row.tokenText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if let estimateText = row.estimateText {
+                        Text(estimateText)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if self.presentation.hiddenCount > 0 {
+                Text("+\(self.presentation.hiddenCount) more")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 enum WidgetFormat {
     static func percent(_ value: Double?) -> String {
         guard let value else { return "—" }
@@ -840,6 +972,23 @@ enum WidgetFormat {
         formatter.maximumFractionDigits = 0
         let raw = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
         return "\(raw) tokens"
+    }
+
+    static func requestTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    static func requestCountLabel(_ count: Int) -> String {
+        count == 1 ? "Req 1" : "Req \(count)"
+    }
+
+    static func cursorRequestRange(_ range: WidgetSnapshot.CursorRequestRange) -> String {
+        let start = range.start.formatted(.dateTime.month(.abbreviated).day())
+        let end = range.end.formatted(.dateTime.month(.abbreviated).day())
+        return "\(start) - \(end)"
     }
 
     static func providerCostValue(_ cost: WidgetSnapshot.ProviderCostSummary) -> String {

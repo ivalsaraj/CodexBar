@@ -189,8 +189,46 @@ struct MenuCardModelTests {
             hidePersonalInfo: false,
             now: now))
 
-        #expect(model.tokenUsage?.monthLine.contains("456") == true)
-        #expect(model.tokenUsage?.monthLine.contains("tokens") == true)
+        #expect(model.tokenUsage?.monthLine?.contains("456") == true)
+        #expect(model.tokenUsage?.monthLine?.contains("tokens") == true)
+    }
+
+    @Test
+    func `cursor model includes billing cycle token usage`() throws {
+        let now = Date()
+        let metadata = try #require(ProviderDefaults.metadata[.cursor])
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            secondary: nil,
+            tertiary: nil,
+            cursorRequests: CursorRequestUsage(used: 70, limit: 500),
+            cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 86_684_822),
+            updatedAt: now)
+
+        let model = UsageMenuCardView.Model.make(.init(
+            provider: .cursor,
+            metadata: metadata,
+            snapshot: snapshot,
+            credits: nil,
+            creditsError: nil,
+            dashboard: nil,
+            dashboardError: nil,
+            tokenSnapshot: nil,
+            tokenError: nil,
+            account: AccountInfo(email: nil, plan: nil),
+            isRefreshing: false,
+            lastError: nil,
+            usageBarsShowUsed: false,
+            resetTimeDisplayStyle: .countdown,
+            tokenCostUsageEnabled: false,
+            showOptionalCreditsAndExtraUsage: true,
+            hidePersonalInfo: false,
+            now: now))
+
+        #expect(model.tokenUsage?.title == "Tokens")
+        // Legacy request-backed plans keep request quota primary; cycle tokens move secondary.
+        #expect(model.tokenUsage?.sessionLine == "Requests: 70 / 500")
+        #expect(model.tokenUsage?.monthLine == "Cycle: 87M tokens")
     }
 
     @Test

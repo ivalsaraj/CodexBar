@@ -122,4 +122,96 @@ struct CostUsagePricingTests {
             outputTokens: 40)
         #expect(cost == nil)
     }
+
+    @Test
+    func `claude opus 4-8 normalizes and prices flat`() {
+        #expect(CostUsagePricing.normalizeClaudeModel("claude-opus-4-8") == "claude-opus-4-8")
+        let cost = CostUsagePricing.claudeCostUSD(
+            model: "claude-opus-4-8",
+            inputTokens: 1_000_000,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            outputTokens: 1_000_000)
+        let expected = Double(1_000_000) * 5e-6 + Double(1_000_000) * 2.5e-5
+        #expect(cost != nil)
+        #expect(abs((cost ?? 0) - expected) < 1e-9)
+    }
+
+    @Test
+    func `claude opus 4-7 normalizes and prices flat`() {
+        #expect(CostUsagePricing.normalizeClaudeModel("claude-opus-4-7") == "claude-opus-4-7")
+        let cost = CostUsagePricing.claudeCostUSD(
+            model: "claude-opus-4-7",
+            inputTokens: 500_000,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            outputTokens: 0)
+        let expected = Double(500_000) * 5e-6
+        #expect(abs((cost ?? 0) - expected) < 1e-9)
+    }
+
+    @Test
+    func `claude opus cache read uses discounted rate`() {
+        let cost = CostUsagePricing.claudeCostUSD(
+            model: "claude-opus-4-8",
+            inputTokens: 0,
+            cacheReadInputTokens: 1_000_000,
+            cacheCreationInputTokens: 0,
+            outputTokens: 0)
+        let expected = Double(1_000_000) * 5e-7
+        #expect(abs((cost ?? 0) - expected) < 1e-9)
+    }
+
+    @Test
+    func `claude opus stays flat above large context`() {
+        // Opus has no long-context surcharge: 2M input priced at the flat input rate.
+        let cost = CostUsagePricing.claudeCostUSD(
+            model: "claude-opus-4-8",
+            inputTokens: 2_000_000,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            outputTokens: 0)
+        let expected = Double(2_000_000) * 5e-6
+        #expect(abs((cost ?? 0) - expected) < 1e-9)
+    }
+
+    @Test
+    func `claude sonnet applies long context threshold surcharge`() {
+        let cost = CostUsagePricing.claudeCostUSD(
+            model: "claude-sonnet-4-6",
+            inputTokens: 300_000,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            outputTokens: 0)
+        let below = Double(200_000) * 3e-6
+        let above = Double(100_000) * 6e-6
+        #expect(abs((cost ?? 0) - (below + above)) < 1e-9)
+    }
+
+    @Test
+    func `shared pricing coverage helpers gate on catalog presence`() {
+        #expect(CostUsagePricing.supportedClaudePricingKey("claude-opus-4-8") == "claude-opus-4-8")
+        #expect(CostUsagePricing.supportedClaudePricingKey("claude-opus-4-7") == "claude-opus-4-7")
+        #expect(CostUsagePricing.supportedClaudePricingKey("glm-4.6") == nil)
+        #expect(CostUsagePricing.supportedCodexPricingKey("gpt-5.4") == "gpt-5.4")
+        #expect(CostUsagePricing.supportedCodexPricingKey("composer-2.5") == nil)
+    }
+
+    @Test
+    func `openai pricing key prices through shared codex catalog`() {
+        let cost = CostUsagePricing.codexCostUSD(
+            model: "gpt-5.4",
+            inputTokens: 1_000_000,
+            cachedInputTokens: 0,
+            outputTokens: 0)
+        let expected = Double(1_000_000) * 2.5e-6
+        #expect(abs((cost ?? 0) - expected) < 1e-9)
+    }
+
+    @Test
+    func `claude pricing capabilities report cache write tier ambiguity`() {
+        let capabilities = CostUsagePricing.claudePricingCapabilities(model: "claude-opus-4-8")
+        #expect(capabilities?.distinguishesCacheWriteTiers == true)
+        #expect(CostUsagePricing.claudePricingCapabilities(model: "glm-4.6") == nil)
+    }
 }

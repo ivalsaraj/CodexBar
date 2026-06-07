@@ -16,6 +16,17 @@ read_when:
 - Provider extra-usage snapshots include their renewal metadata so medium, large, switcher, and history widgets can show
   a muted line such as `Monthly · renews in 6 days` under the related cost value when a renewal date is known.
 - OpenCode snapshots can now contain multiple saved workspace entries for the same provider.
+- Cursor legacy-plan snapshots can include recent request details with the usage range, model, time, tokens, and numeric
+  request count. WidgetKit renders a bounded subset with `+N more` instead of a scrollable table.
+- `WidgetSnapshot.CursorRequestDetail` also carries optional `compactModel` (e.g. `Opus 4.8 · xhigh`) and `estimateText`
+  (e.g. `Est. $12.34` / `Partial $12.34`). Both are optional, so older snapshot JSON without them still decodes; non-Cursor
+  providers never gain these fields.
+- Cursor request rows survive into the snapshot when they have at least one request, even with zero tokens; rows with no
+  model or with neither tokens nor requests are dropped.
+- Cursor medium/large widgets can show billing-cycle token totals (`Cycle`) plus a bounded list of recent request rows
+  for legacy request-plan accounts. Each row renders the compact model label, local time, `Req N`, token spend, and the
+  optional estimate (only when available — unknown models never show a fabricated dollar value). Up to 30 rows are stored
+  in the snapshot; the widget renders the newest subset with a `+N more` line when additional rows exist.
 
 ## Extension
 - `Sources/CodexBarWidget` contains timeline + views.

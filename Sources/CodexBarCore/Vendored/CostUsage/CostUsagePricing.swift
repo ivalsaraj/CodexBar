@@ -175,6 +175,28 @@ enum CostUsagePricing {
             outputCostPerTokenAboveThreshold: nil,
             cacheCreationInputCostPerTokenAboveThreshold: nil,
             cacheReadInputCostPerTokenAboveThreshold: nil),
+        // Source: Anthropic pricing (Opus tier), verified 2026-06-06. Flat across the 1M context
+        // window at standard pricing; no long-context surcharge applies for these rows today.
+        "claude-opus-4-7": ClaudePricing(
+            inputCostPerToken: 5e-6,
+            outputCostPerToken: 2.5e-5,
+            cacheCreationInputCostPerToken: 6.25e-6,
+            cacheReadInputCostPerToken: 5e-7,
+            thresholdTokens: nil,
+            inputCostPerTokenAboveThreshold: nil,
+            outputCostPerTokenAboveThreshold: nil,
+            cacheCreationInputCostPerTokenAboveThreshold: nil,
+            cacheReadInputCostPerTokenAboveThreshold: nil),
+        "claude-opus-4-8": ClaudePricing(
+            inputCostPerToken: 5e-6,
+            outputCostPerToken: 2.5e-5,
+            cacheCreationInputCostPerToken: 6.25e-6,
+            cacheReadInputCostPerToken: 5e-7,
+            thresholdTokens: nil,
+            inputCostPerTokenAboveThreshold: nil,
+            outputCostPerTokenAboveThreshold: nil,
+            cacheCreationInputCostPerTokenAboveThreshold: nil,
+            cacheReadInputCostPerTokenAboveThreshold: nil),
         "claude-sonnet-4-5": ClaudePricing(
             inputCostPerToken: 3e-6,
             outputCostPerToken: 1.5e-5,
@@ -288,6 +310,37 @@ enum CostUsagePricing {
         }
 
         return trimmed
+    }
+
+    /// Returns the supported Codex/OpenAI pricing key for `candidate`, or `nil` when the shared
+    /// catalog has no rule. Callers use this so display normalization cannot claim coverage the
+    /// pricing catalog does not actually have.
+    static func supportedCodexPricingKey(_ candidate: String) -> String? {
+        let key = self.normalizeCodexModel(candidate)
+        return self.codex[key] != nil ? key : nil
+    }
+
+    /// Returns the supported Claude pricing key for `candidate`, or `nil` when the shared catalog
+    /// has no rule.
+    static func supportedClaudePricingKey(_ candidate: String) -> String? {
+        let key = self.normalizeClaudeModel(candidate)
+        return self.claude[key] != nil ? key : nil
+    }
+
+    /// Provider pricing shape for a Claude model, with no knowledge of any caller (Cursor or
+    /// otherwise). Callers use this to decide estimate confidence safely.
+    struct ClaudePricingCapabilities: Equatable, Sendable {
+        /// Anthropic publishes separate 5-minute and 1-hour cache-write rates, but this catalog
+        /// stores a single cache-creation rate. When `true`, an event that reports cache-write
+        /// tokens without a tier cannot be priced as exact.
+        let distinguishesCacheWriteTiers: Bool
+    }
+
+    /// Exposes pricing shape for a covered Claude model, or `nil` when the model is unknown.
+    static func claudePricingCapabilities(model: String) -> ClaudePricingCapabilities? {
+        let key = self.normalizeClaudeModel(model)
+        guard self.claude[key] != nil else { return nil }
+        return ClaudePricingCapabilities(distinguishesCacheWriteTiers: true)
     }
 
     static func codexCostUSD(model: String, inputTokens: Int, cachedInputTokens: Int, outputTokens: Int) -> Double? {

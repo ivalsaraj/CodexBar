@@ -42,6 +42,33 @@ Manual option:
   - Legacy quota usage.
   - Request-backed plans expose request counts + limits.
   - Some legacy plans expose token counts via `numTokens` + `maxTokenUsage`; CodexBar falls back to those fields when request quotas are absent.
+  - If `numTokens` is present but `maxTokenUsage` is missing, CodexBar still records billing-cycle token usage for widget display.
+- `POST https://cursor.com/api/dashboard/get-filtered-usage-events`
+  - Per-request usage rows for the current billing cycle (`usageEventsDisplay`).
+  - Requires `Origin: https://cursor.com` with session cookies.
+- CodexBar maps rows to menu/widget request details (model, timestamp, token spend, numeric request count from
+    `requestsCosts`). Dashboard `kind` is not shown. Fetch failures are non-fatal.
+  - When the event includes a token breakdown (`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`,
+    `totalTokens`), CodexBar preserves it on the request and records a confidence (`exactBreakdown`, `partialBreakdown`,
+    `totalOnly`, or `empty`). Missing fields stay unknown and are never coerced to zero.
+
+## Legacy quota stays request-based
+- For legacy request-backed plans, the request count (`Requests: used / limit`) remains the primary quota line in the
+  menu and the source of truth for the quota. Billing-cycle tokens move to a secondary `Cycle: N tokens` line.
+- Request-count rows survive even when an event reports zero tokens, as long as it represents at least one request.
+
+## Model-cost estimates (diagnostic only)
+- Recent request rows can show an optional local model-cost estimate, labelled `Est.` (exact) or `Partial`.
+- Estimates are computed locally from the shared `CostUsagePricing` catalog (source-versioned in-repo); CodexBar never
+  calls pricing docs at runtime. The estimate is diagnostic and never implies Cursor bills the legacy plan by dollars —
+  hover/help always states the quota is request-based.
+- Raw Cursor model strings are normalized for compact display (e.g. `claude-opus-4-8-thinking-xhigh` → `Opus 4.8 · xhigh`).
+  Thinking effort never changes the pricing key.
+- Unknown/proprietary models (e.g. `composer-2.5`) and models without shared pricing coverage render cleanly with cost
+  unavailable rather than a fabricated value.
+- A request can have an exact token breakdown yet still report a partial/unavailable cost. In particular, Claude
+  `cacheWriteTokens > 0` is treated as `Partial` because Cursor does not expose the Anthropic cache-write tier, so cache
+  writes are excluded from the estimate.
 
 ## Cookie file paths
 - Safari: `~/Library/Cookies/Cookies.binarycookies`
@@ -53,6 +80,13 @@ Manual option:
 - Legacy quota fallback: if `/api/usage` reports request or token quotas, primary uses that quota percent for legacy plans.
 - Secondary: on-demand usage percent (individual usage).
 - Provider cost: on-demand usage USD (limit when known).
+- Widget token row: uses `/api/usage` `numTokens` as a billing-cycle token total and labels it `Cycle`.
+- Menu request rows: uses filtered usage events (newest first, capped at 30) when available. Each row is a compact
+  two-line layout (compact model + token spend, then time + `Req N` + optional estimate); the full raw model, token
+  breakdown, estimate, and request-based disclaimer appear in hover/help. The Cursor menu card keeps the range visible
+  and puts overflowing request rows in a fixed-height scroll region.
+- Widget request rows: uses filtered usage events (newest first, capped at 30) when available, rendered with the
+  compact model label and optional estimate (WidgetKit has no hover, so breakdown detail stays out of the row).
 - Reset: billing cycle end date.
 
 ## Key files
