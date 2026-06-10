@@ -115,6 +115,110 @@ public enum UsageFormatter {
         value.formatted(.currency(code: currencyCode).locale(Locale(identifier: "en_US")))
     }
 
+    public static func cursorRecentRequestRangeLine(_ range: CursorRecentRequestRange) -> String {
+        let start = range.start.formatted(.dateTime.month(.abbreviated).day())
+        let end = range.end.formatted(.dateTime.month(.abbreviated).day())
+        return "Range: \(start) - \(end)"
+    }
+
+    /// Compact model label for a request row, e.g. `Opus 4.8 · xhigh`.
+    public static func cursorCompactModelLabel(_ model: CursorNormalizedModel) -> String {
+        guard let effort = model.effort, !effort.isEmpty else { return model.displayName }
+        return "\(model.displayName) · \(effort)"
+    }
+
+    /// Short estimate label for the secondary row, or `nil` when no honest estimate exists.
+    ///
+    /// Returns `Est. $X` for exact estimates, `Approx. $low-$high` for total-only ranges, and
+    /// `Partial $X` for incomplete lower bounds. Anything without a displayable value renders no text.
+    public static func cursorEstimateText(_ estimate: CursorRequestCostEstimate) -> String? {
+        switch estimate.confidence {
+        case .exactBreakdown:
+            guard let usd = estimate.usd else { return nil }
+            return "Est. \(self.usdString(NSDecimalNumber(decimal: usd).doubleValue))"
+        case .approximateTotalOnly:
+            guard let lower = estimate.lowerBoundUSD, let upper = estimate.upperBoundUSD else { return nil }
+            let lowerText = self.usdString(NSDecimalNumber(decimal: lower).doubleValue)
+            let upperText = self.usdString(NSDecimalNumber(decimal: upper).doubleValue)
+            return "Approx. \(lowerText)-\(upperText)"
+        case .partialMissingCacheWriteTier:
+            guard let usd = estimate.usd else { return nil }
+            return "Partial \(self.usdString(NSDecimalNumber(decimal: usd).doubleValue))"
+        default:
+            return nil
+        }
+    }
+
+    public static func cursorEstimatedTotalText(_ usd: Decimal?) -> String? {
+        guard let usd else { return nil }
+        return "Est. \(self.usdString(NSDecimalNumber(decimal: usd).doubleValue))"
+    }
+
+    public static func cursorEstimatedTotalText(_ summary: CursorRequestCostSummary?) -> String? {
+        guard let summary else { return nil }
+        if summary.containsApproximation {
+            guard let lower = summary.lowerBoundUSD, let upper = summary.upperBoundUSD else { return nil }
+            let lowerText = self.usdString(NSDecimalNumber(decimal: lower).doubleValue)
+            let upperText = self.usdString(NSDecimalNumber(decimal: upper).doubleValue)
+            return "Approx. \(lowerText)-\(upperText)"
+        }
+        return self.cursorEstimatedTotalText(summary.exactUSD)
+    }
+
+    /// Expanded detail lines for a Cursor request row: raw model, exact time, request count, token
+    /// breakdown, estimate text, pricing assumption/source note, and the legacy request-plan disclaimer.
+    public static func cursorRequestDetailLines(
+        request: CursorRecentRequest,
+        estimate: CursorRequestCostEstimate?,
+        now: Date) -> [String]
+    {
+        let resolvedEstimate = estimate ?? CursorRequestCostEstimator.estimate(for: request)
+        var lines: [String] = []
+        lines.append("Model: \(request.model)")
+        lines.append(request.timestamp.formatted(date: .abbreviated, time: .standard))
+        lines.append(request.requests == 1 ? "Req 1" : "Req \(request.requests)")
+        lines.append(self.cursorBreakdownText(request: request))
+        lines.append(self.cursorEstimateText(resolvedEstimate) ?? "Cost estimate unavailable")
+        lines.append(resolvedEstimate.explanation)
+        if let breakdown = request.tokenBreakdown,
+           (breakdown.cacheReadTokens ?? 0) > 0 || (breakdown.cacheWriteTokens ?? 0) > 0,
+           CursorModelNormalizer.normalize(request.model).provider == .cursor
+        {
+            lines.append(CursorRequestCostEstimator.composerCacheCaveat)
+        }
+        _ = now
+        return lines
+    }
+
+    /// Full hover/help text for a Cursor request row. Prefer `cursorRequestDetailLines` for click-to-expand UI.
+    public static func cursorRequestHelpText(
+        request: CursorRecentRequest,
+        estimate: CursorRequestCostEstimate,
+        now: Date = Date()) -> String
+    {
+        self.cursorRequestDetailLines(request: request, estimate: estimate, now: now).joined(separator: "\n")
+    }
+
+    private static func cursorBreakdownText(request: CursorRecentRequest) -> String {
+        guard let breakdown = request.tokenBreakdown else {
+            return "Tokens: \(self.tokenCountString(request.tokens))"
+        }
+        switch breakdown.confidence {
+        case .empty:
+            return "Tokens unavailable"
+        case .totalOnly:
+            return "Tokens: \(self.tokenCountString(breakdown.totalTokens)) (total only)"
+        case .exactBreakdown, .partialBreakdown:
+            var parts: [String] = []
+            if let value = breakdown.inputTokens { parts.append("\(self.tokenCountString(value)) in") }
+            if let value = breakdown.outputTokens { parts.append("\(self.tokenCountString(value)) out") }
+            if let value = breakdown.cacheReadTokens { parts.append("\(self.tokenCountString(value)) cache read") }
+            if let value = breakdown.cacheWriteTokens { parts.append("\(self.tokenCountString(value)) cache write") }
+            guard !parts.isEmpty else { return "Tokens: \(self.tokenCountString(breakdown.totalTokens))" }
+            return parts.joined(separator: " · ")
+        }
+    }
+
     public static func tokenCountString(_ value: Int) -> String {
         let absValue = abs(value)
         let sign = value < 0 ? "-" : ""

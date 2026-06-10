@@ -75,17 +75,50 @@ struct UsageMenuCardView: View {
         }
 
         struct TokenUsageSection {
+            let title: String
             let sessionLine: String
-            let monthLine: String
+            let monthLine: String?
+            let detailLines: [String]
+            let cursorRequestRange: CursorRecentRequestRange?
+            let cursorRequestDetails: [CursorRecentRequest]
+            let cursorRequestNow: Date?
+            let renewalLine: String?
             let hintLine: String?
             let errorLine: String?
             let errorCopyText: String?
+
+            init(
+                title: String,
+                sessionLine: String,
+                monthLine: String?,
+                detailLines: [String] = [],
+                cursorRequestRange: CursorRecentRequestRange? = nil,
+                cursorRequestDetails: [CursorRecentRequest] = [],
+                cursorRequestNow: Date? = nil,
+                renewalLine: String?,
+                hintLine: String?,
+                errorLine: String?,
+                errorCopyText: String?)
+            {
+                self.title = title
+                self.sessionLine = sessionLine
+                self.monthLine = monthLine
+                self.detailLines = detailLines
+                self.cursorRequestRange = cursorRequestRange
+                self.cursorRequestDetails = cursorRequestDetails
+                self.cursorRequestNow = cursorRequestNow
+                self.renewalLine = renewalLine
+                self.hintLine = hintLine
+                self.errorLine = errorLine
+                self.errorCopyText = errorCopyText
+            }
         }
 
         struct ProviderCostSection {
             let title: String
             let percentUsed: Double
             let spendLine: String
+            let renewalLine: String?
         }
 
         let provider: UsageProvider
@@ -177,13 +210,24 @@ struct UsageMenuCardView: View {
                     }
                     if let tokenUsage = self.model.tokenUsage {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Cost")
+                            Text(tokenUsage.title)
                                 .font(.body)
                                 .fontWeight(.medium)
                             Text(tokenUsage.sessionLine)
                                 .font(.footnote)
-                            Text(tokenUsage.monthLine)
-                                .font(.footnote)
+                            if let monthLine = tokenUsage.monthLine {
+                                Text(monthLine)
+                                    .font(.footnote)
+                            }
+                            TokenUsageDetailLinesView(
+                                provider: self.model.provider,
+                                tokenUsage: tokenUsage,
+                                font: .caption)
+                            if let renewalLine = tokenUsage.renewalLine {
+                                Text(renewalLine)
+                                    .font(.footnote)
+                                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
+                            }
                             if let hint = tokenUsage.hintLine, !hint.isEmpty {
                                 Text(hint)
                                     .font(.footnote)
@@ -339,6 +383,11 @@ private struct ProviderCostContent: View {
                     .font(.footnote)
                 Spacer()
                 Text(String(format: "%.0f%% used", min(100, max(0, self.section.percentUsed))))
+                    .font(.footnote)
+                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
+            }
+            if let renewalLine = self.section.renewalLine {
+                Text(renewalLine)
                     .font(.footnote)
                     .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
             }
@@ -589,13 +638,27 @@ struct UsageMenuCardCostSectionView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if let tokenUsage = self.model.tokenUsage {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Cost")
+                            Text(tokenUsage.title)
                                 .font(.body)
                                 .fontWeight(.medium)
                             Text(tokenUsage.sessionLine)
                                 .font(.caption)
-                            Text(tokenUsage.monthLine)
-                                .font(.caption)
+                            if let monthLine = tokenUsage.monthLine {
+                                Text(monthLine)
+                                    .font(.caption)
+                            }
+                            ForEach(tokenUsage.detailLines, id: \.self) { line in
+                                Text(line)
+                                    .font(.caption2)
+                                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            if let renewalLine = tokenUsage.renewalLine {
+                                Text(renewalLine)
+                                    .font(.footnote)
+                                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
+                            }
                             if let hint = tokenUsage.hintLine, !hint.isEmpty {
                                 Text(hint)
                                     .font(.footnote)
@@ -743,13 +806,9 @@ extension UsageMenuCardView.Model {
         let providerCost: ProviderCostSection? = if input.provider == .claude, !input.showOptionalCreditsAndExtraUsage {
             nil
         } else {
-            Self.providerCostSection(provider: input.provider, cost: input.snapshot?.providerCost)
+            Self.providerCostSection(provider: input.provider, cost: input.snapshot?.providerCost, now: input.now)
         }
-        let tokenUsage = Self.tokenUsageSection(
-            provider: input.provider,
-            enabled: input.tokenCostUsageEnabled,
-            snapshot: input.tokenSnapshot,
-            error: input.tokenError)
+        let tokenUsage = Self.tokenUsageSection(input: input)
         let subtitle = Self.subtitle(
             snapshot: input.snapshot,
             isRefreshing: input.isRefreshing,
@@ -1368,15 +1427,64 @@ extension UsageMenuCardView.Model {
         return error
     }
 
-    private static func tokenUsageSection(
-        provider: UsageProvider,
-        enabled: Bool,
-        snapshot: CostUsageTokenSnapshot?,
-        error: String?) -> TokenUsageSection?
-    {
-        guard provider == .codex || provider == .claude || provider == .vertexai else { return nil }
-        guard enabled else { return nil }
-        guard let snapshot else { return nil }
+    private static func tokenUsageSection(input: Input) -> TokenUsageSection? {
+        if input.provider == .cursor {
+            let cycleFromAPI = input.snapshot?.cursorTokenUsage?.billingCycleTokensUsed
+            let cycleFromEvents = input.snapshot?.cursorRecentRequests?.reduce(0) { $0 + $1.tokens }
+            let cycleTokens: Int? = if let cycleFromAPI, cycleFromAPI > 0 {
+                cycleFromAPI
+            } else if let cycleFromEvents, cycleFromEvents > 0 {
+                cycleFromEvents
+            } else {
+                cycleFromAPI
+            }
+            let quotaSummary = input.snapshot?.cursorRequests?.summaryText
+            let recentRequests = Array(input.snapshot?.cursorRecentRequests?.prefix(30) ?? [])
+            let estimatedCycleCost = input.snapshot?.cursorRecentRequests
+                .flatMap(CursorRequestCostEstimator.summarizedEstimate(for:))
+            guard cycleTokens != nil || quotaSummary != nil || !recentRequests.isEmpty else { return nil }
+
+            let hasCycle = (cycleTokens ?? 0) > 0
+            let cycleLine: String? = hasCycle
+                ? cycleTokens.map { tokens in
+                    let tokensText = "Cycle: \(UsageFormatter.tokenCountString(tokens)) tokens"
+                    return UsageFormatter.cursorEstimatedTotalText(estimatedCycleCost)
+                        .map { "\(tokensText) · \($0)" }
+                        ?? tokensText
+                }
+                : nil
+
+            // Legacy Cursor quota (request- or token-backed) stays visually primary; cycle tokens move secondary.
+            let sessionLine: String
+            let monthLine: String?
+            if let quotaSummary {
+                sessionLine = quotaSummary
+                monthLine = cycleLine
+            } else if let cycleLine {
+                sessionLine = cycleLine
+                monthLine = nil
+            } else {
+                sessionLine = "Recent requests"
+                monthLine = nil
+            }
+
+            return TokenUsageSection(
+                title: "Tokens",
+                sessionLine: sessionLine,
+                monthLine: monthLine,
+                detailLines: [],
+                cursorRequestRange: input.snapshot?.cursorRecentRequestRange,
+                cursorRequestDetails: recentRequests,
+                cursorRequestNow: input.now,
+                renewalLine: nil,
+                hintLine: nil,
+                errorLine: nil,
+                errorCopyText: nil)
+        }
+
+        guard input.provider == .codex || input.provider == .claude || input.provider == .vertexai else { return nil }
+        guard input.tokenCostUsageEnabled else { return nil }
+        guard let snapshot = input.tokenSnapshot else { return nil }
 
         let sessionCost = snapshot.sessionCostUSD.map { UsageFormatter.usdString($0) } ?? "—"
         let sessionTokens = snapshot.sessionTokens.map { UsageFormatter.tokenCountString($0) }
@@ -1397,18 +1505,28 @@ extension UsageMenuCardView.Model {
             }
             return "Last 30 days: \(monthCost)"
         }()
-        let err = (error?.isEmpty ?? true) ? nil : error
+        let err = (input.tokenError?.isEmpty ?? true) ? nil : input.tokenError
         return TokenUsageSection(
+            title: "Cost",
             sessionLine: sessionLine,
             monthLine: monthLine,
+            renewalLine: Self.tokenUsageRenewalLine(provider: input.provider, snapshot: input.snapshot, now: input.now),
             hintLine: nil,
             errorLine: err,
-            errorCopyText: (error?.isEmpty ?? true) ? nil : error)
+            errorCopyText: (input.tokenError?.isEmpty ?? true) ? nil : input.tokenError)
+    }
+
+    private static func tokenUsageRenewalLine(provider: UsageProvider, snapshot: UsageSnapshot?, now: Date) -> String? {
+        guard provider == .codex,
+              let renewal = snapshot?.codexUsage?.subscriptionRenewalAt
+        else { return nil }
+        return "Monthly renews \(UsageFormatter.resetDescription(from: renewal, now: now))"
     }
 
     private static func providerCostSection(
         provider: UsageProvider,
-        cost: ProviderCostSnapshot?) -> ProviderCostSection?
+        cost: ProviderCostSnapshot?,
+        now: Date) -> ProviderCostSection?
     {
         guard let cost else { return nil }
         guard cost.limit > 0 else { return nil }
@@ -1433,7 +1551,19 @@ extension UsageMenuCardView.Model {
         return ProviderCostSection(
             title: title,
             percentUsed: percentUsed,
-            spendLine: "\(periodLabel): \(used) / \(limit)")
+            spendLine: "\(periodLabel): \(used) / \(limit)",
+            renewalLine: Self.providerCostRenewalLine(period: cost.period, renewal: cost.resetsAt, now: now))
+    }
+
+    private static func providerCostRenewalLine(period: String?, renewal: Date?, now: Date) -> String? {
+        guard let renewal else { return nil }
+        let periodText = period?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = if let periodText, !periodText.isEmpty {
+            "\(periodText) renews"
+        } else {
+            "Renews"
+        }
+        return "\(prefix) \(UsageFormatter.resetDescription(from: renewal, now: now))"
     }
 
     private static func clamped(_ value: Double) -> Double {

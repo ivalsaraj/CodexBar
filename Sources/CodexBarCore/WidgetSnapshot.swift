@@ -85,6 +85,7 @@ public struct WidgetSnapshot: Codable, Sendable {
 
     public struct TokenUsageSummary: Codable, Sendable {
         public let sessionCostUSD: Double?
+        public let sessionCostText: String?
         public let sessionTokens: Int?
         public let last30DaysCostUSD: Double?
         public let last30DaysTokens: Int?
@@ -93,6 +94,7 @@ public struct WidgetSnapshot: Codable, Sendable {
 
         public init(
             sessionCostUSD: Double?,
+            sessionCostText: String? = nil,
             sessionTokens: Int?,
             last30DaysCostUSD: Double?,
             last30DaysTokens: Int?,
@@ -100,6 +102,7 @@ public struct WidgetSnapshot: Codable, Sendable {
             last30DaysLabel: String? = nil)
         {
             self.sessionCostUSD = sessionCostUSD
+            self.sessionCostText = sessionCostText
             self.sessionTokens = sessionTokens
             self.last30DaysCostUSD = last30DaysCostUSD
             self.last30DaysTokens = last30DaysTokens

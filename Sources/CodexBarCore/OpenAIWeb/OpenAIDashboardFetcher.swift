@@ -159,6 +159,9 @@ public struct OpenAIDashboardFetcher {
             let codeReviewLimit = OpenAIDashboardParser.parseCodeReviewLimit(bodyText: bodyText)
             let creditsRemaining = OpenAIDashboardParser.parseCreditsRemaining(bodyText: bodyText)
             let accountPlan = scrape.bodyHTML.flatMap(OpenAIDashboardParser.parsePlanFromHTML)
+            let subscriptionRenewalAt = OpenAIDashboardParser.parseSubscriptionRenewalDate(
+                bodyText: bodyText,
+                html: scrape.bodyHTML)
             let hasUsageLimits = rateLimits.primary != nil || rateLimits.secondary != nil
 
             if codeReview != nil, codeReviewFirstSeenAt == nil { codeReviewFirstSeenAt = Date() }
@@ -234,6 +237,7 @@ public struct OpenAIDashboardFetcher {
                     secondaryLimit: rateLimits.secondary,
                     creditsRemaining: creditsRemaining,
                     accountPlan: accountPlan,
+                    subscriptionRenewalAt: subscriptionRenewalAt,
                     updatedAt: Date())
             }
 

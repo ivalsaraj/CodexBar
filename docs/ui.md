@@ -24,6 +24,9 @@ read_when:
 - Session + weekly rows with resets (countdown by default; optional absolute clock display).
 - Codex-only: Credits + “Buy Credits…” in-card action.
 - Web-only rows (when OpenAI cookies are enabled): code review remaining, usage breakdown submenu.
+- Codex token-cost blocks show the monthly subscription renewal date when the OpenAI web dashboard exposes it.
+- Provider extra-usage blocks show a renewal line such as `Monthly renews Apr 28, 2026 at 11:49 PM` when the provider
+  exposes the monthly renewal timestamp.
 - Token accounts: optional account switcher bar or stacked account cards (up to 6) when multiple manual tokens exist.
 
 ## Pace tracking
@@ -49,5 +52,7 @@ Pace is calculated for Codex and Claude weekly windows only and is hidden when l
 
 ## Widgets (high level)
 - Widget entries mirror the menu card; detailed pipeline in `docs/widgets.md`.
+- Medium and larger usage widgets show provider extra-usage monthly renewal metadata as a muted line below the cost
+  value when that provider exposes it.
 
 See also: `docs/widgets.md`.

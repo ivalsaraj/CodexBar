@@ -167,8 +167,8 @@ struct ProviderDetailView<SupplementaryContent: View>: View {
         if let providerCost = self.model.providerCost {
             metricLabels.append(providerCost.title)
         }
-        if self.model.tokenUsage != nil {
-            metricLabels.append("Cost")
+        if let tokenUsage = self.model.tokenUsage {
+            metricLabels.append(tokenUsage.title)
         }
 
         let infoWidth = ProviderSettingsMetrics.labelWidth(
@@ -388,13 +388,15 @@ struct ProviderMetricsInlineView: View {
 
                 if let tokenUsage = self.model.tokenUsage {
                     ProviderMetricInlineTextRow(
-                        title: "Cost",
+                        title: tokenUsage.title,
                         value: tokenUsage.sessionLine,
                         labelWidth: self.labelWidth)
-                    ProviderMetricInlineTextRow(
-                        title: "",
-                        value: tokenUsage.monthLine,
-                        labelWidth: self.labelWidth)
+                    if let monthLine = tokenUsage.monthLine {
+                        ProviderMetricInlineTextRow(
+                            title: "",
+                            value: monthLine,
+                            labelWidth: self.labelWidth)
+                    }
                 }
             }
         }

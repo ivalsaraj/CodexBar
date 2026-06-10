@@ -43,6 +43,14 @@ extension StatusItemController {
         if provider == .alibaba {
             return self.settings.alibabaCodingPlanAPIRegion.dashboardURL
         }
+        if provider == .opencode,
+           let overrideURL = self.settings.opencodeDashboardURLOverride
+        {
+            return overrideURL
+        }
+        if provider == .opencodego {
+            return self.settings.opencodegoDashboardURL
+        }
 
         let meta = self.store.metadata(for: provider)
         let urlString: String? = if provider == .claude, self.store.isClaudeSubscription() {

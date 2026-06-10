@@ -222,6 +222,10 @@ private struct CompactMetricView: View {
             return (value, "Credits left", nil)
         case .todayCost:
             guard let tokenUsage = self.entry.tokenUsage else { return ("—", "Today cost", nil) }
+            if let sessionCostText = tokenUsage.sessionCostText {
+                let detail = tokenUsage.sessionTokens.map(WidgetFormat.tokenCount)
+                return (sessionCostText, tokenUsage.primaryLabel, detail)
+            }
             if let sessionCostUSD = tokenUsage.sessionCostUSD {
                 let detail = tokenUsage.sessionTokens.map(WidgetFormat.tokenCount)
                 return (WidgetFormat.usd(sessionCostUSD), tokenUsage.primaryLabel, detail)
@@ -378,7 +382,7 @@ private struct SwitcherMediumUsageView: View {
             if let token = entry.tokenUsage, token.hasPrimaryValue {
                 ValueLine(
                     title: token.primaryLabel,
-                    value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
+                    value: token.primaryCostAndTokensValue())
             }
         }
     }
@@ -413,7 +417,7 @@ private struct SwitcherLargeUsageView: View {
                     if token.hasPrimaryValue {
                         ValueLine(
                             title: token.primaryLabel,
-                            value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
+                            value: token.primaryCostAndTokensValue())
                     }
                     if token.hasSecondaryValue {
                         ValueLine(
@@ -476,7 +480,7 @@ private struct MediumUsageView: View {
             if let token = entry.tokenUsage, token.hasPrimaryValue {
                 ValueLine(
                     title: token.primaryLabel,
-                    value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
+                    value: token.primaryCostAndTokensValue())
             }
         }
         .padding(12)
@@ -513,7 +517,7 @@ private struct LargeUsageView: View {
                     if token.hasPrimaryValue {
                         ValueLine(
                             title: token.primaryLabel,
-                            value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
+                            value: token.primaryCostAndTokensValue())
                     }
                     if token.hasSecondaryValue {
                         ValueLine(
@@ -588,7 +592,7 @@ private struct HistoryView: View {
                 if token.hasPrimaryValue {
                     ValueLine(
                         title: token.primaryLabel,
-                        value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
+                        value: token.primaryCostAndTokensValue())
                 }
                 if token.hasSecondaryValue {
                     ValueLine(
@@ -630,7 +634,14 @@ extension WidgetSnapshot.TokenUsageSummary {
     }
 
     fileprivate var hasPrimaryValue: Bool {
-        self.sessionCostUSD != nil || self.sessionTokens != nil
+        self.sessionCostUSD != nil || self.sessionCostText != nil || self.sessionTokens != nil
+    }
+
+    fileprivate func primaryCostAndTokensValue() -> String {
+        WidgetFormat.costAndTokens(
+            costText: self.sessionCostText,
+            cost: self.sessionCostUSD,
+            tokens: self.sessionTokens)
     }
 
     fileprivate var hasSecondaryValue: Bool {
@@ -812,12 +823,13 @@ enum WidgetFormat {
         return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
     }
 
-    static func costAndTokens(cost: Double?, tokens: Int?) -> String {
-        if let cost, let tokens {
-            return "\(self.usd(cost)) · \(self.tokenCount(tokens))"
+    static func costAndTokens(costText: String? = nil, cost: Double?, tokens: Int?) -> String {
+        let costLabel = costText ?? cost.map { self.usd($0) }
+        if let costLabel, let tokens {
+            return "\(costLabel) · \(self.tokenCount(tokens))"
         }
-        if let cost {
-            return self.usd(cost)
+        if let costLabel {
+            return costLabel
         }
         if let tokens {
             return self.tokenCount(tokens)

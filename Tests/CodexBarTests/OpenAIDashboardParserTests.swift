@@ -99,6 +99,33 @@ struct OpenAIDashboardParserTests {
     }
 
     @Test
+    func `parses subscription renewal date from dashboard text`() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = try #require(calendar.date(from: DateComponents(
+            calendar: calendar,
+            timeZone: TimeZone.current,
+            year: 2026,
+            month: 4,
+            day: 24,
+            hour: 12)))
+        let body = """
+        Plan
+        ChatGPT Pro
+        Renews Apr 28, 2026 at 11:49 PM
+        Usage limits
+        Weekly limit
+        68% remaining
+        Resets Apr 28, 2026 at 11:49 PM
+        """
+
+        let renewal = try #require(OpenAIDashboardParser.parseSubscriptionRenewalDate(bodyText: body, now: now))
+
+        #expect(calendar.component(.year, from: renewal) == 2026)
+        #expect(calendar.component(.month, from: renewal) == 4)
+        #expect(calendar.component(.day, from: renewal) == 28)
+    }
+
+    @Test
     func `parses credit events from table rows`() {
         let rows: [[String]] = [
             ["Dec 18, 2025", "CLI", "397.205 credits"],
