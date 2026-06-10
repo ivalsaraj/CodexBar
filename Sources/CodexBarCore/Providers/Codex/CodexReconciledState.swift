@@ -66,7 +66,7 @@ public struct CodexReconciledState: Sendable {
         return self.make(
             primary: snapshot.primaryLimit,
             secondary: snapshot.secondaryLimit,
-            codexUsage: nil,
+            codexUsage: CodexUsageSnapshot(subscriptionRenewalAt: snapshot.subscriptionRenewalAt),
             identity: identity,
             updatedAt: snapshot.updatedAt)
     }

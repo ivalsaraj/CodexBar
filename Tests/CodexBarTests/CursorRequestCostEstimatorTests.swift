@@ -38,15 +38,19 @@ struct CursorRequestCostEstimatorTests {
     }
 
     @Test
-    func `claude cache writes drop confidence to partial missing tier and exclude write cost`() {
+    func `claude cache writes default to five minute cache pricing`() {
         let bd = self.breakdown(
             (input: 100, output: 200, cacheRead: 300, cacheWrite: 400),
             total: 1000,
             confidence: .exactBreakdown)
         let estimate = CursorRequestCostEstimator.estimate(model: "claude-opus-4-8-thinking-xhigh", breakdown: bd)
-        #expect(estimate.confidence == .partialMissingCacheWriteTier)
-        #expect(estimate.usd == self.usd(Double(100) * 5e-6 + Double(300) * 5e-7 + Double(200) * 2.5e-5))
-        #expect(estimate.explanation.lowercased().contains("cache-write"))
+        #expect(estimate.confidence == .exactBreakdown)
+        #expect(estimate.usd == self.usd(
+            Double(100) * 5e-6
+                + Double(300) * 5e-7
+                + Double(400) * 6.25e-6
+                + Double(200) * 2.5e-5))
+        #expect(estimate.explanation.lowercased().contains("5-minute"))
         #expect(estimate.explanation.contains("request-based"))
     }
 
@@ -80,11 +84,64 @@ struct CursorRequestCostEstimatorTests {
             (input: 100, output: 200, cacheRead: 0, cacheWrite: 0),
             total: 300,
             confidence: .exactBreakdown)
-        let estimate = CursorRequestCostEstimator.estimate(model: "composer-2.5", breakdown: bd)
+        let estimate = CursorRequestCostEstimator.estimate(model: "some-internal-model-x1", breakdown: bd)
         #expect(estimate.confidence == .unknownModel)
         #expect(estimate.usd == nil)
         #expect(estimate.pricingKey == nil)
         #expect(estimate.explanation.contains("request-based"))
+    }
+
+    @Test
+    func `composer fast estimate prices exact input and output breakdown`() {
+        let bd = self.breakdown(
+            (input: 1_000_000, output: 1_000_000, cacheRead: 0, cacheWrite: 0),
+            total: 2_000_000,
+            confidence: .exactBreakdown)
+        let estimate = CursorRequestCostEstimator.estimate(model: "composer-2.5", breakdown: bd)
+        #expect(estimate.confidence == .exactBreakdown)
+        #expect(estimate.pricingKey == "composer-2.5-fast")
+        #expect(estimate.usd == self.usd(18))
+        #expect(estimate.explanation.contains("Fast"))
+        #expect(estimate.explanation.contains("request-based"))
+    }
+
+    @Test
+    func `composer standard estimate prices exact input and output breakdown`() {
+        let bd = self.breakdown(
+            (input: 1_000_000, output: 1_000_000, cacheRead: 0, cacheWrite: 0),
+            total: 2_000_000,
+            confidence: .exactBreakdown)
+        let estimate = CursorRequestCostEstimator.estimate(model: "composer-2.5-standard", breakdown: bd)
+        #expect(estimate.confidence == .exactBreakdown)
+        #expect(estimate.pricingKey == "composer-2.5-standard")
+        #expect(estimate.usd == self.usd(3))
+    }
+
+    @Test
+    func `composer partial breakdown with input output and cache read prices estimate`() {
+        let bd = self.breakdown(
+            (input: 393_000, output: 26000, cacheRead: 4_500_000, cacheWrite: nil),
+            total: 4_919_000,
+            confidence: .partialBreakdown)
+        let estimate = CursorRequestCostEstimator.estimate(model: "composer-2.5-fast", breakdown: bd)
+        #expect(estimate.confidence == .exactBreakdown)
+        #expect(estimate.pricingKey == "composer-2.5-fast")
+        #expect(estimate.usd == self.usd(
+            Double(393_000 + 4_500_000) * 3.0 / 1_000_000 + Double(26000) * 15.0 / 1_000_000))
+        #expect(estimate.explanation.contains(CursorRequestCostEstimator.composerCacheCaveat))
+    }
+
+    @Test
+    func `composer total only estimate returns approximate range`() {
+        let bd = self.breakdown(
+            (input: nil, output: nil, cacheRead: nil, cacheWrite: nil),
+            total: 2_000_000,
+            confidence: .totalOnly)
+        let estimate = CursorRequestCostEstimator.estimate(model: "composer-2.5", breakdown: bd)
+        #expect(estimate.confidence == .approximateTotalOnly)
+        #expect(estimate.lowerBoundUSD != nil)
+        #expect(estimate.upperBoundUSD != nil)
+        #expect(estimate.explanation.lowercased().contains("approx"))
     }
 
     @Test

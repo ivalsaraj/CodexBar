@@ -84,7 +84,10 @@ public enum CursorModelNormalizer {
         if head == "gemini" {
             return self.normalizeGeneric(rawName: raw, tokens: tokens, provider: .google)
         }
-        if head == "composer" || head == "cursor" || working == "auto" {
+        if head == "composer" {
+            return self.normalizeComposer(rawName: raw, tokens: tokens)
+        }
+        if head == "cursor" || working == "auto" {
             return self.normalizeGeneric(rawName: raw, tokens: tokens, provider: .cursor)
         }
         return self.normalizeGeneric(rawName: raw, tokens: tokens, provider: .unknown)
@@ -163,6 +166,40 @@ public enum CursorModelNormalizer {
             mode: nil,
             effort: nil,
             pricingKey: CostUsagePricing.supportedCodexPricingKey(candidate))
+    }
+
+    private static func normalizeComposer(rawName: String, tokens: [String]) -> CursorNormalizedModel {
+        let versionTokens = tokens.dropFirst().filter { token in
+            token != "fast" && token != "standard"
+        }
+        let version = versionTokens.isEmpty ? nil : versionTokens.joined(separator: ".")
+
+        var mode: String?
+        var pricingKey: String?
+        if version == "2.5" {
+            mode = "fast"
+            pricingKey = "composer-2.5-fast"
+            if tokens.contains("standard") {
+                mode = "standard"
+                pricingKey = "composer-2.5-standard"
+            } else if tokens.contains("fast") {
+                mode = "fast"
+                pricingKey = "composer-2.5-fast"
+            }
+        }
+
+        let displaySuffix = version ?? tokens.dropFirst().joined(separator: ".")
+        let displayName = displaySuffix.isEmpty ? rawName : "Composer \(displaySuffix)"
+
+        return CursorNormalizedModel(
+            rawName: rawName,
+            displayName: displayName,
+            provider: .cursor,
+            family: "composer",
+            version: version,
+            mode: mode,
+            effort: nil,
+            pricingKey: pricingKey)
     }
 
     private static func normalizeGeneric(

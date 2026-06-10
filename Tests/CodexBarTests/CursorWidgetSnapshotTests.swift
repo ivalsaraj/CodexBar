@@ -56,6 +56,51 @@ struct CursorWidgetSnapshotTests {
     }
 
     @Test
+    func `widget snapshot includes cursor summed request estimate next to cycle tokens`() async throws {
+        let settings = self.makeSettings()
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 70, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 2_000_000),
+                cursorRecentRequests: [
+                    CursorRecentRequest(
+                        timestamp: now,
+                        model: "claude-opus-4-8-thinking-xhigh",
+                        tokens: 2_000_000,
+                        requests: 1,
+                        tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                            inputTokens: 1_000_000,
+                            outputTokens: 1_000_000,
+                            cacheReadTokens: 0,
+                            cacheWriteTokens: 0,
+                            totalTokens: 2_000_000,
+                            confidence: .exactBreakdown)),
+                ],
+                updatedAt: now),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-token-cost-usage")
+        await store.widgetSnapshotPersistTask?.value
+
+        let cursorEntry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        #expect(cursorEntry.tokenUsage?.sessionCostUSD == 30)
+        #expect(cursorEntry.tokenUsage?.sessionTokens == 2_000_000)
+        #expect(cursorEntry.tokenUsage?.sessionLabel == "Cycle")
+    }
+
+    @Test
     func `widget snapshot caps cursor recent request details at thirty newest rows`() async throws {
         let settings = self.makeSettings()
         let fetcher = UsageFetcher()
@@ -172,6 +217,105 @@ struct CursorWidgetSnapshotTests {
         #expect(zeroTokenRow.tokens == 0)
         #expect(zeroTokenRow.requests == 1)
         #expect(zeroTokenRow.compactModel == "Opus 4.8 · xhigh")
+    }
+
+    @Test
+    func `widget snapshot populates composer exact row estimate`() async throws {
+        let settings = self.makeSettings()
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let recent = [
+            CursorRecentRequest(
+                timestamp: baseDate,
+                model: "composer-2.5",
+                tokens: 2_000_000,
+                requests: 1,
+                tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                    inputTokens: 1_000_000,
+                    outputTokens: 1_000_000,
+                    cacheReadTokens: 0,
+                    cacheWriteTokens: 0,
+                    totalTokens: 2_000_000,
+                    confidence: .exactBreakdown)),
+        ]
+
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 70, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 2_000_000),
+                cursorRecentRequests: recent,
+                updatedAt: Date()),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-composer-exact")
+        await store.widgetSnapshotPersistTask?.value
+
+        let entry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        let detail = try #require(entry.cursorRequestDetails?.first)
+        #expect(detail.compactModel == "Composer 2.5")
+        #expect(detail.estimateText?.hasPrefix("Est.") == true)
+        #expect(entry.tokenUsage?.sessionCostUSD == 18)
+        #expect(entry.tokenUsage?.sessionCostText == nil)
+    }
+
+    @Test
+    func `widget snapshot populates composer total only approximate row and cycle text`() async throws {
+        let settings = self.makeSettings()
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let recent = [
+            CursorRecentRequest(
+                timestamp: baseDate,
+                model: "composer-2.5",
+                tokens: 2_000_000,
+                requests: 1,
+                tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    cacheReadTokens: nil,
+                    cacheWriteTokens: nil,
+                    totalTokens: 2_000_000,
+                    confidence: .totalOnly)),
+        ]
+
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 70, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 2_000_000),
+                cursorRecentRequests: recent,
+                updatedAt: Date()),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-composer-approx")
+        await store.widgetSnapshotPersistTask?.value
+
+        let entry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        let detail = try #require(entry.cursorRequestDetails?.first)
+        #expect(detail.estimateText?.hasPrefix("Approx.") == true)
+        #expect(entry.tokenUsage?.sessionCostUSD == nil)
+        #expect(entry.tokenUsage?.sessionCostText?.hasPrefix("Approx.") == true)
     }
 
     @Test

@@ -19,14 +19,20 @@ read_when:
 - Cursor legacy-plan snapshots can include recent request details with the usage range, model, time, tokens, and numeric
   request count. WidgetKit renders a bounded subset with `+N more` instead of a scrollable table.
 - `WidgetSnapshot.CursorRequestDetail` also carries optional `compactModel` (e.g. `Opus 4.8 · xhigh`) and `estimateText`
-  (e.g. `Est. $12.34` / `Partial $12.34`). Both are optional, so older snapshot JSON without them still decodes; non-Cursor
+  (e.g. `Est. $12.34`). Both are optional, so older snapshot JSON without them still decodes; non-Cursor
   providers never gain these fields.
 - Cursor request rows survive into the snapshot when they have at least one request, even with zero tokens; rows with no
   model or with neither tokens nor requests are dropped.
 - Cursor medium/large widgets can show billing-cycle token totals (`Cycle`) plus a bounded list of recent request rows
-  for legacy request-plan accounts. Each row renders the compact model label, local time, `Req N`, token spend, and the
-  optional estimate (only when available — unknown models never show a fabricated dollar value). Up to 30 rows are stored
-  in the snapshot; the widget renders the newest subset with a `+N more` line when additional rows exist.
+  for legacy request-plan accounts. The cycle row includes a summed local request estimate when priced breakdowns are
+  available (`Est. $X` via `sessionCostUSD`) or an approximate range (`Approx. $low-$high` via `sessionCostText`) when
+  any stored row is total-only (e.g. Composer 2.5 without input/output split). WidgetKit never shows approximate ranges as
+  exact numeric costs. Each request row renders the compact model label, local time, `Req N`, token spend, and the
+  optional estimate (`Est.` or `Approx.` — only when available; unknown models never show a fabricated dollar value).
+  WidgetKit has no hover or row expansion; expanded per-request detail is available in the macOS menu only. Up to 30 rows
+  are stored in the snapshot; the widget renders the newest subset with a `+N more` line when additional rows exist.
+- `WidgetSnapshot.TokenUsageSummary.sessionCostText` is an optional display override for approximate cycle totals.
+  Older snapshots without the field still decode and render from `sessionCostUSD` alone.
 
 ## Extension
 - `Sources/CodexBarWidget` contains timeline + views.

@@ -35,11 +35,32 @@ struct CursorModelNormalizerTests {
     }
 
     @Test
-    func `normalizes cursor composer model with no pricing key`() {
+    func `normalizes cursor composer model with fast pricing key by default`() {
         let model = CursorModelNormalizer.normalize("composer-2.5")
         #expect(model.displayName == "Composer 2.5")
         #expect(model.provider == .cursor)
+        #expect(model.family == "composer")
+        #expect(model.version == "2.5")
+        #expect(model.mode == "fast")
+        #expect(model.pricingKey == "composer-2.5-fast")
+    }
+
+    @Test
+    func `normalizes cursor composer standard pricing key`() {
+        let model = CursorModelNormalizer.normalize("composer-2.5-standard")
+        #expect(model.displayName == "Composer 2.5")
+        #expect(model.provider == .cursor)
+        #expect(model.mode == "standard")
+        #expect(model.pricingKey == "composer-2.5-standard")
+    }
+
+    @Test
+    func `normalizes non 2 5 composer without pricing key`() {
+        let model = CursorModelNormalizer.normalize("composer-2.4")
+        #expect(model.displayName == "Composer 2.4")
+        #expect(model.provider == .cursor)
         #expect(model.pricingKey == nil)
+        #expect(model.mode == nil)
     }
 
     @Test

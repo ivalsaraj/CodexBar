@@ -2,14 +2,15 @@ import AppKit
 import CodexBarCore
 import SwiftUI
 
-/// One compact two-line request row for the menu. The raw model and full breakdown live in `help`
-/// so long model strings never break the row layout.
+/// One compact two-line request row for the menu. Expanded detail lines are click-accessible; `help`
+/// remains a best-effort duplicate for hover.
 struct CursorMenuRequestRowPresentation: Equatable, Identifiable {
     let id: String
     let primaryLeft: String
     let primaryRight: String
     let secondaryLeft: String
     let secondaryRight: String?
+    let detailLines: [String]
     let help: String
 
     static func make(request: CursorRecentRequest, index: Int, now: Date) -> Self {
@@ -17,13 +18,18 @@ struct CursorMenuRequestRowPresentation: Equatable, Identifiable {
         let estimate = CursorRequestCostEstimator.estimate(for: request)
         let time = request.timestamp.formatted(date: .omitted, time: .shortened)
         let requestLabel = request.requests == 1 ? "Req 1" : "Req \(request.requests)"
+        let detailLines = UsageFormatter.cursorRequestDetailLines(
+            request: request,
+            estimate: estimate,
+            now: now)
         return CursorMenuRequestRowPresentation(
             id: "\(index)-\(request.timestamp.timeIntervalSince1970)-\(request.model)",
             primaryLeft: UsageFormatter.cursorCompactModelLabel(normalized),
             primaryRight: UsageFormatter.tokenCountString(request.tokens),
             secondaryLeft: "\(time) · \(requestLabel)",
             secondaryRight: UsageFormatter.cursorEstimateText(estimate),
-            help: UsageFormatter.cursorRequestHelpText(request: request, estimate: estimate))
+            detailLines: detailLines,
+            help: detailLines.joined(separator: "\n"))
     }
 }
 
@@ -52,6 +58,7 @@ struct TokenUsageDetailLinesView: View {
     let tokenUsage: UsageMenuCardView.Model.TokenUsageSection
     let font: Font
     @Environment(\.menuItemHighlighted) private var isHighlighted
+    @State private var expandedRequestID: String?
 
     var body: some View {
         if self.provider == .cursor, !self.tokenUsage.cursorRequestDetails.isEmpty {
@@ -93,28 +100,46 @@ struct TokenUsageDetailLinesView: View {
     private func requestRows(_ rows: [CursorMenuRequestRowPresentation]) -> some View {
         ForEach(rows) { row in
             VStack(alignment: .leading, spacing: 1) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(row.primaryLeft)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer(minLength: 6)
-                    Text(row.primaryRight)
-                        .monospacedDigit()
-                        .layoutPriority(1)
-                }
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(row.secondaryLeft)
-                        .lineLimit(1)
-                    Spacer(minLength: 6)
-                    if let secondaryRight = row.secondaryRight {
-                        Text(secondaryRight)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(row.primaryLeft)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 6)
+                        Text(row.primaryRight)
                             .monospacedDigit()
                             .layoutPriority(1)
                     }
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(row.secondaryLeft)
+                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                        if let secondaryRight = row.secondaryRight {
+                            Text(secondaryRight)
+                                .monospacedDigit()
+                                .layoutPriority(1)
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    self.expandedRequestID = self.expandedRequestID == row.id ? nil : row.id
+                }
+
+                if self.expandedRequestID == row.id {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(row.detailLines, id: \.self) { detail in
+                            Text(detail)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.top, 4)
                 }
             }
             .font(self.font)
             .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
+            .frame(maxWidth: .infinity, alignment: .leading)
             .help(row.help)
         }
     }

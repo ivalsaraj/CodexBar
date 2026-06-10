@@ -1440,11 +1440,18 @@ extension UsageMenuCardView.Model {
             }
             let quotaSummary = input.snapshot?.cursorRequests?.summaryText
             let recentRequests = Array(input.snapshot?.cursorRecentRequests?.prefix(30) ?? [])
+            let estimatedCycleCost = input.snapshot?.cursorRecentRequests
+                .flatMap(CursorRequestCostEstimator.summarizedEstimate(for:))
             guard cycleTokens != nil || quotaSummary != nil || !recentRequests.isEmpty else { return nil }
 
             let hasCycle = (cycleTokens ?? 0) > 0
             let cycleLine: String? = hasCycle
-                ? cycleTokens.map { "Cycle: \(UsageFormatter.tokenCountString($0)) tokens" }
+                ? cycleTokens.map { tokens in
+                    let tokensText = "Cycle: \(UsageFormatter.tokenCountString(tokens)) tokens"
+                    return UsageFormatter.cursorEstimatedTotalText(estimatedCycleCost)
+                        .map { "\(tokensText) · \($0)" }
+                        ?? tokensText
+                }
                 : nil
 
             // Legacy Cursor quota (request- or token-backed) stays visually primary; cycle tokens move secondary.

@@ -186,8 +186,16 @@ extension UsageStore {
         if provider == .cursor,
            let cursorTokenUsage = usageSnapshot.cursorTokenUsage
         {
+            let costSummary = usageSnapshot.cursorRecentRequests
+                .flatMap(CursorRequestCostEstimator.summarizedEstimate(for:))
+            let estimatedCycleCost = costSummary?.exactUSD
+                .map { NSDecimalNumber(decimal: $0).doubleValue }
+            let sessionCostText = costSummary?.containsApproximation == true
+                ? UsageFormatter.cursorEstimatedTotalText(costSummary)
+                : nil
             return WidgetSnapshot.TokenUsageSummary(
-                sessionCostUSD: nil,
+                sessionCostUSD: estimatedCycleCost,
+                sessionCostText: sessionCostText,
                 sessionTokens: cursorTokenUsage.billingCycleTokensUsed,
                 last30DaysCostUSD: nil,
                 last30DaysTokens: nil,

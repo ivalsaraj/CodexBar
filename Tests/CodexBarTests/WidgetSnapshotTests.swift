@@ -257,6 +257,77 @@ struct WidgetSnapshotTests {
     }
 
     @Test
+    func `widget snapshot round trip preserves session cost text override`() throws {
+        let entry = WidgetSnapshot.ProviderEntry(
+            provider: .cursor,
+            updatedAt: Date(),
+            primary: nil,
+            secondary: nil,
+            tertiary: nil,
+            creditsRemaining: nil,
+            codeReviewRemainingPercent: nil,
+            tokenUsage: WidgetSnapshot.TokenUsageSummary(
+                sessionCostUSD: nil,
+                sessionCostText: "Approx. $6.00-$30.00",
+                sessionTokens: 2_000_000,
+                last30DaysCostUSD: nil,
+                last30DaysTokens: nil,
+                sessionLabel: "Cycle",
+                last30DaysLabel: nil),
+            dailyUsage: [])
+
+        let snapshot = WidgetSnapshot(
+            entries: [entry],
+            enabledProviders: [.cursor],
+            generatedAt: Date())
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(snapshot)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(WidgetSnapshot.self, from: data)
+
+        #expect(decoded.entries.first?.tokenUsage?.sessionCostText == "Approx. $6.00-$30.00")
+        #expect(decoded.entries.first?.tokenUsage?.sessionCostUSD == nil)
+    }
+
+    @Test
+    func `widget snapshot decodes legacy payload without session cost text`() throws {
+        let json = """
+        {
+          "entries": [
+            {
+              "provider": "cursor",
+              "updatedAt": "2026-04-04T06:30:00Z",
+              "primary": null,
+              "secondary": null,
+              "tertiary": null,
+              "creditsRemaining": null,
+              "codeReviewRemainingPercent": null,
+              "tokenUsage": {
+                "sessionCostUSD": 18,
+                "sessionTokens": 2000000,
+                "sessionLabel": "Cycle"
+              },
+              "dailyUsage": []
+            }
+          ],
+          "enabledProviders": ["cursor"],
+          "generatedAt": "2026-04-04T06:30:00Z"
+        }
+        """
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(WidgetSnapshot.self, from: Data(json.utf8))
+
+        #expect(decoded.entries.first?.tokenUsage?.sessionCostUSD == 18)
+        #expect(decoded.entries.first?.tokenUsage?.sessionCostText == nil)
+    }
+
+    @Test
     func `widget snapshot decodes legacy payload without cursor request details`() throws {
         let json = """
         {
@@ -343,7 +414,7 @@ struct WidgetSnapshotTests {
                     tokens: 34_972_000,
                     requests: 1,
                     compactModel: "Opus 4.8 · xhigh",
-                    estimateText: "Partial $18.95"),
+                    estimateText: "Est. $18.95"),
             ],
             dailyUsage: [])
 
@@ -362,7 +433,7 @@ struct WidgetSnapshotTests {
         #expect(detail.tokens == 34_972_000)
         #expect(detail.requests == 1)
         #expect(detail.compactModel == "Opus 4.8 · xhigh")
-        #expect(detail.estimateText == "Partial $18.95")
+        #expect(detail.estimateText == "Est. $18.95")
     }
 
     @Test

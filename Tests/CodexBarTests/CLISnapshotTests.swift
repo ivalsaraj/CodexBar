@@ -245,6 +245,42 @@ struct CLISnapshotTests {
     }
 
     @Test
+    func `does not render pace line for opencode`() {
+        let now = Date()
+        let snap = UsageSnapshot(
+            primary: .init(
+                usedPercent: 54,
+                windowMinutes: 300,
+                resetsAt: now.addingTimeInterval(90 * 60),
+                resetDescription: nil),
+            secondary: .init(
+                usedPercent: 69,
+                windowMinutes: 10080,
+                resetsAt: now.addingTimeInterval(2 * 24 * 60 * 60 + 11 * 60 * 60),
+                resetDescription: nil),
+            tertiary: .init(
+                usedPercent: 34,
+                windowMinutes: 30 * 24 * 60,
+                resetsAt: now.addingTimeInterval(29 * 24 * 60 * 60),
+                resetDescription: nil),
+            updatedAt: now)
+
+        let output = CLIRenderer.renderText(
+            provider: .opencode,
+            snapshot: snap,
+            credits: nil,
+            context: RenderContext(
+                header: "CodexBar 0.0.0",
+                status: nil,
+                useColor: false,
+                resetStyle: .countdown))
+
+        #expect(!output.contains("Pace:"))
+        #expect(!output.contains("reserve"))
+        #expect(!output.contains("deficit"))
+    }
+
+    @Test
     func `renders JSON payload`() throws {
         let snap = UsageSnapshot(
             primary: .init(usedPercent: 50, windowMinutes: 300, resetsAt: nil, resetDescription: nil),

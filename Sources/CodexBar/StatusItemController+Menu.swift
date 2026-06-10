@@ -11,6 +11,7 @@ extension StatusItemController {
     private static let maxOverviewProviders = SettingsStore.mergedOverviewProviderLimit
     private static let overviewRowIdentifierPrefix = "overviewRow-"
     private static let menuOpenRefreshDelay: Duration = .seconds(1.2)
+
     func menuCardWidth(for providers: [UsageProvider], menu: NSMenu? = nil) -> CGFloat {
         _ = menu
         return Self.menuCardBaseWidth
@@ -403,14 +404,16 @@ extension StatusItemController {
                 menu.addItem(self.makeMenuCardItem(
                     UsageMenuCardView(model: model, width: context.menuWidth),
                     id: "menuCard",
-                    width: context.menuWidth))
+                    width: context.menuWidth,
+                    interactionPolicy: Self.menuCardInteractionPolicy(for: model)))
                 menu.addItem(.separator())
             } else {
                 for (index, model) in cards.enumerated() {
                     menu.addItem(self.makeMenuCardItem(
                         UsageMenuCardView(model: model, width: context.menuWidth),
                         id: "menuCard-\(index)",
-                        width: context.menuWidth))
+                        width: context.menuWidth,
+                        interactionPolicy: Self.menuCardInteractionPolicy(for: model)))
                     if index < cards.count - 1 {
                         menu.addItem(.separator())
                     }
@@ -441,7 +444,8 @@ extension StatusItemController {
         menu.addItem(self.makeMenuCardItem(
             UsageMenuCardView(model: model, width: context.menuWidth),
             id: "menuCard",
-            width: context.menuWidth))
+            width: context.menuWidth,
+            interactionPolicy: Self.menuCardInteractionPolicy(for: model)))
         if context.openAIContext.canShowBuyCredits {
             menu.addItem(self.makeBuyCreditsItem())
         }
@@ -878,6 +882,7 @@ extension StatusItemController {
         submenu: NSMenu? = nil,
         submenuIndicatorAlignment: Alignment = .topTrailing,
         submenuIndicatorTopPadding: CGFloat = 8,
+        interactionPolicy: MenuCardInteractionPolicy = .default,
         onClick: (() -> Void)? = nil) -> NSMenuItem
     {
         if !Self.menuCardRenderingEnabled {
@@ -902,6 +907,7 @@ extension StatusItemController {
             view
         }
         let hosting = MenuCardItemHostingView(rootView: wrapped, highlightState: highlightState, onClick: onClick)
+        hosting.interactionPolicy = interactionPolicy
         // Set frame with target width immediately
         let height = self.menuCardHeight(for: hosting, width: width)
         hosting.frame = NSRect(origin: .zero, size: NSSize(width: width, height: height))
@@ -1143,6 +1149,7 @@ extension StatusItemController {
     MenuCardMeasuring {
         private let highlightState: MenuCardHighlightState
         private let onClick: (() -> Void)?
+        var interactionPolicy: MenuCardInteractionPolicy = .default
         override var allowsVibrancy: Bool {
             true
         }
@@ -1191,8 +1198,38 @@ extension StatusItemController {
         }
 
         func setHighlighted(_ highlighted: Bool) {
+            guard self.interactionPolicy.allowsHighlight else {
+                self.highlightState.isHighlighted = false
+                return
+            }
             guard self.highlightState.isHighlighted != highlighted else { return }
             self.highlightState.isHighlighted = highlighted
+        }
+
+        override func scrollWheel(with event: NSEvent) {
+            guard self.interactionPolicy.forwardsScrollToEmbeddedScrollView,
+                  let scrollView = self.scrollView(at: event.locationInWindow)
+            else {
+                super.scrollWheel(with: event)
+                return
+            }
+            scrollView.scrollWheel(with: event)
+        }
+
+        private func scrollView(at windowPoint: NSPoint) -> NSScrollView? {
+            let localPoint = self.convert(windowPoint, from: nil)
+            return self.deepestScrollView(in: self, containing: localPoint)
+        }
+
+        private func deepestScrollView(in view: NSView, containing point: NSPoint) -> NSScrollView? {
+            guard view.bounds.contains(point) else { return nil }
+            for subview in view.subviews.reversed() {
+                let subviewPoint = subview.convert(point, from: view)
+                if let scrollView = self.deepestScrollView(in: subview, containing: subviewPoint) {
+                    return scrollView
+                }
+            }
+            return view as? NSScrollView
         }
     }
 

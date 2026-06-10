@@ -315,6 +315,11 @@ if [[ "$SIGNING_MODE" == "adhoc" ]]; then
 elif [[ "$ALLOW_LLDB" == "1" ]]; then
   CODESIGN_ID="-"
   CODESIGN_ARGS=(--force --sign "$CODESIGN_ID")
+elif [[ "$SIGNING_MODE" == "selfsigned" ]]; then
+  # Self-signed local cert: no --timestamp or --options runtime (requires Apple cert)
+  # Both binary and frameworks get the same cert => no Team ID mismatch
+  CODESIGN_ID="${APP_IDENTITY}"
+  CODESIGN_ARGS=(--force --sign "$CODESIGN_ID")
 else
   CODESIGN_ID="${APP_IDENTITY:-Developer ID Application: Peter Steinberger (Y5PE65HELJ)}"
   CODESIGN_ARGS=(--force --timestamp --options runtime --sign "$CODESIGN_ID")
