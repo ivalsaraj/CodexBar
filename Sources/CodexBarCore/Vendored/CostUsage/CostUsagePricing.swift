@@ -175,8 +175,10 @@ enum CostUsagePricing {
             outputCostPerTokenAboveThreshold: nil,
             cacheCreationInputCostPerTokenAboveThreshold: nil,
             cacheReadInputCostPerTokenAboveThreshold: nil),
-        // Source: Anthropic pricing (Opus tier), verified 2026-06-06. Flat across the 1M context
-        // window at standard pricing; no long-context surcharge applies for these rows today.
+        // Source: Anthropic pricing docs, checked 2026-06-11.
+        // Opus 4.7/4.8: $5 input, $6.25 5m cache write, $10 1h cache write, $0.50 cache hit, $25 output per MTok.
+        // Fable 5: $10 input, $12.50 5m cache write, $20 1h cache write, $1 cache hit, $50 output per MTok.
+        // This catalog stores the 5-minute cache-write rate used by CodexBar's default cache-write assumption.
         "claude-opus-4-7": ClaudePricing(
             inputCostPerToken: 5e-6,
             outputCostPerToken: 2.5e-5,
@@ -192,6 +194,16 @@ enum CostUsagePricing {
             outputCostPerToken: 2.5e-5,
             cacheCreationInputCostPerToken: 6.25e-6,
             cacheReadInputCostPerToken: 5e-7,
+            thresholdTokens: nil,
+            inputCostPerTokenAboveThreshold: nil,
+            outputCostPerTokenAboveThreshold: nil,
+            cacheCreationInputCostPerTokenAboveThreshold: nil,
+            cacheReadInputCostPerTokenAboveThreshold: nil),
+        "claude-fable-5": ClaudePricing(
+            inputCostPerToken: 1.0e-5,
+            outputCostPerToken: 5.0e-5,
+            cacheCreationInputCostPerToken: 1.25e-5,
+            cacheReadInputCostPerToken: 1.0e-6,
             thresholdTokens: nil,
             inputCostPerTokenAboveThreshold: nil,
             outputCostPerTokenAboveThreshold: nil,
@@ -334,13 +346,32 @@ enum CostUsagePricing {
         /// stores a single cache-creation rate. When `true`, an event that reports cache-write
         /// tokens without a tier cannot be priced as exact.
         let distinguishesCacheWriteTiers: Bool
+        let inputCostPerToken: Double
+        let outputCostPerToken: Double
+        let cacheCreationInputCostPerToken: Double
+        let cacheReadInputCostPerToken: Double
+        let thresholdTokens: Int?
+        let inputCostPerTokenAboveThreshold: Double?
+        let outputCostPerTokenAboveThreshold: Double?
+        let cacheCreationInputCostPerTokenAboveThreshold: Double?
+        let cacheReadInputCostPerTokenAboveThreshold: Double?
     }
 
     /// Exposes pricing shape for a covered Claude model, or `nil` when the model is unknown.
     static func claudePricingCapabilities(model: String) -> ClaudePricingCapabilities? {
         let key = self.normalizeClaudeModel(model)
-        guard self.claude[key] != nil else { return nil }
-        return ClaudePricingCapabilities(distinguishesCacheWriteTiers: true)
+        guard let pricing = self.claude[key] else { return nil }
+        return ClaudePricingCapabilities(
+            distinguishesCacheWriteTiers: true,
+            inputCostPerToken: pricing.inputCostPerToken,
+            outputCostPerToken: pricing.outputCostPerToken,
+            cacheCreationInputCostPerToken: pricing.cacheCreationInputCostPerToken,
+            cacheReadInputCostPerToken: pricing.cacheReadInputCostPerToken,
+            thresholdTokens: pricing.thresholdTokens,
+            inputCostPerTokenAboveThreshold: pricing.inputCostPerTokenAboveThreshold,
+            outputCostPerTokenAboveThreshold: pricing.outputCostPerTokenAboveThreshold,
+            cacheCreationInputCostPerTokenAboveThreshold: pricing.cacheCreationInputCostPerTokenAboveThreshold,
+            cacheReadInputCostPerTokenAboveThreshold: pricing.cacheReadInputCostPerTokenAboveThreshold)
     }
 
     static func codexCostUSD(model: String, inputTokens: Int, cachedInputTokens: Int, outputTokens: Int) -> Double? {
@@ -364,32 +395,37 @@ enum CostUsagePricing {
         let key = self.normalizeClaudeModel(model)
         guard let pricing = self.claude[key] else { return nil }
 
-        func tiered(_ tokens: Int, base: Double, above: Double?, threshold: Int?) -> Double {
-            guard let threshold, let above else { return Double(tokens) * base }
-            let below = min(tokens, threshold)
-            let over = max(tokens - threshold, 0)
-            return Double(below) * base + Double(over) * above
-        }
-
-        return tiered(
+        return self.tiered(
             max(0, inputTokens),
             base: pricing.inputCostPerToken,
             above: pricing.inputCostPerTokenAboveThreshold,
             threshold: pricing.thresholdTokens)
-            + tiered(
+            + self.tiered(
                 max(0, cacheReadInputTokens),
                 base: pricing.cacheReadInputCostPerToken,
                 above: pricing.cacheReadInputCostPerTokenAboveThreshold,
                 threshold: pricing.thresholdTokens)
-            + tiered(
+            + self.tiered(
                 max(0, cacheCreationInputTokens),
                 base: pricing.cacheCreationInputCostPerToken,
                 above: pricing.cacheCreationInputCostPerTokenAboveThreshold,
                 threshold: pricing.thresholdTokens)
-            + tiered(
+            + self.tiered(
                 max(0, outputTokens),
                 base: pricing.outputCostPerToken,
                 above: pricing.outputCostPerTokenAboveThreshold,
                 threshold: pricing.thresholdTokens)
+    }
+
+    private static func tiered(
+        _ tokens: Int,
+        base: Double,
+        above: Double?,
+        threshold: Int?) -> Double
+    {
+        guard let threshold, let above else { return Double(tokens) * base }
+        let below = min(tokens, threshold)
+        let over = max(tokens - threshold, 0)
+        return Double(below) * base + Double(over) * above
     }
 }

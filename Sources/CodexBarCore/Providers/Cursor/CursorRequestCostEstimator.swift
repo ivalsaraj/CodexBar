@@ -69,7 +69,7 @@ public enum CursorRequestCostEstimator {
     public static let claudeCacheAssumption = "Assumes Anthropic 5-minute cache-write pricing."
     public static let composerCacheCaveat =
         "Composer cache tokens count as input-equivalent; no separate Composer cache billing published."
-    private static let pricingSourceLabel = "CostUsagePricing local catalog (verified 2026-06-06)"
+    private static let pricingSourceLabel = "CostUsagePricing local catalog (verified 2026-06-11)"
 
     private struct CursorModelPricing: Equatable, Sendable {
         let inputUSDPerToken: Double
@@ -164,6 +164,11 @@ public enum CursorRequestCostEstimator {
             if normalized.provider == .cursor, self.cursorPricing[pricingKey] != nil {
                 return self.pricedCursorTotalOnly(pricingKey: pricingKey, breakdown: breakdown)
             }
+            if normalized.provider == .anthropic,
+               CostUsagePricing.claudePricingCapabilities(model: pricingKey) != nil
+            {
+                return self.pricedAnthropicTotalOnly(pricingKey: pricingKey, breakdown: breakdown)
+            }
             return self.unavailable(
                 .totalOnlyUnavailable,
                 pricingKey: pricingKey,
@@ -210,7 +215,12 @@ public enum CursorRequestCostEstimator {
                 confidence: .exactBreakdown,
                 pricingKey: pricingKey,
                 pricingSource: self.pricingSourceLabel,
-                explanation: [self.legacyDisclaimer, self.claudeCacheAssumption].joined(separator: " "))
+                explanation: [
+                    self.legacyDisclaimer,
+                    "\(CursorModelNormalizer.normalize(pricingKey).displayName) pricing.",
+                    self.pricingSourceLabel,
+                    self.claudeCacheAssumption,
+                ].joined(separator: " "))
 
         case .openai:
             // OpenAI prices cache writes at zero and discounts cache reads as cached input.
@@ -308,6 +318,75 @@ public enum CursorRequestCostEstimator {
                 "\(pricing.label) pricing.",
                 pricing.source,
             ].joined(separator: " "))
+    }
+
+    private static func pricedAnthropicTotalOnly(
+        pricingKey: String,
+        breakdown: CursorRecentRequestTokenBreakdown) -> CursorRequestCostEstimate
+    {
+        guard let pricing = CostUsagePricing.claudePricingCapabilities(model: pricingKey) else {
+            return self.missingPricing(pricingKey: pricingKey)
+        }
+
+        let total = max(0, breakdown.totalTokens)
+        let scenarioCosts = [
+            self.claudeTotalOnlyCost(
+                tokens: total,
+                base: pricing.cacheReadInputCostPerToken,
+                above: pricing.cacheReadInputCostPerTokenAboveThreshold,
+                threshold: pricing.thresholdTokens),
+            self.claudeTotalOnlyCost(
+                tokens: total,
+                base: pricing.inputCostPerToken,
+                above: pricing.inputCostPerTokenAboveThreshold,
+                threshold: pricing.thresholdTokens),
+            self.claudeTotalOnlyCost(
+                tokens: total,
+                base: pricing.cacheCreationInputCostPerToken,
+                above: pricing.cacheCreationInputCostPerTokenAboveThreshold,
+                threshold: pricing.thresholdTokens),
+            self.claudeTotalOnlyCost(
+                tokens: total,
+                base: pricing.outputCostPerToken,
+                above: pricing.outputCostPerTokenAboveThreshold,
+                threshold: pricing.thresholdTokens),
+        ]
+        let lower = scenarioCosts.min()
+        let upper = scenarioCosts.max()
+
+        guard let lower, let upper else {
+            return self.missingPricing(pricingKey: pricingKey)
+        }
+
+        return CursorRequestCostEstimate(
+            usd: nil,
+            lowerBoundUSD: self.decimalUSD(lower),
+            upperBoundUSD: self.decimalUSD(upper),
+            confidence: .approximateTotalOnly,
+            pricingKey: pricingKey,
+            pricingSource: self.pricingSourceLabel,
+            explanation: [
+                self.legacyDisclaimer,
+                "Approximate range from total tokens only.",
+                "\(CursorModelNormalizer.normalize(pricingKey).displayName) pricing.",
+                self.pricingSourceLabel,
+                "Unknown input/output/cache split; Cursor exposed only a total token count here.",
+                self.claudeCacheAssumption,
+            ].joined(separator: " "))
+    }
+
+    private static func claudeTotalOnlyCost(
+        tokens: Int,
+        base: Double,
+        above: Double?,
+        threshold: Int?) -> Double
+    {
+        guard let threshold, let above else {
+            return Double(tokens) * base
+        }
+        let below = min(tokens, threshold)
+        let over = max(tokens - threshold, 0)
+        return Double(below) * base + Double(over) * above
     }
 
     private static func missingPricing(pricingKey: String) -> CursorRequestCostEstimate {

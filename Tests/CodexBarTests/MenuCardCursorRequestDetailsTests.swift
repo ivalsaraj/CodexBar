@@ -250,6 +250,35 @@ struct MenuCardCursorRequestDetailsTests {
     }
 
     @Test
+    func `cursor request row shows approximate help for anthropic total only row`() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let request = CursorRecentRequest(
+            timestamp: now,
+            model: "claude-opus-4-8-thinking-max",
+            tokens: 252_000,
+            requests: 1,
+            tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                inputTokens: nil,
+                outputTokens: nil,
+                cacheReadTokens: nil,
+                cacheWriteTokens: nil,
+                totalTokens: 252_000,
+                confidence: .totalOnly))
+
+        let presentation = CursorMenuRequestDetailPresentation(
+            range: nil,
+            requests: [request],
+            now: now)
+        let row = try #require(presentation.requestRows.first)
+
+        #expect(row.primaryLeft == "Opus 4.8 · max")
+        #expect(row.secondaryRight?.hasPrefix("Approx.") == true)
+        #expect(row.help.contains("Tokens: 252K (total only)"))
+        #expect(row.help.contains("request-based"))
+        #expect(row.help.lowercased().contains("unknown input/output/cache split"))
+    }
+
+    @Test
     func `cursor request row estimates cache writes with five minute default`() throws {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let request = CursorRecentRequest(

@@ -67,14 +67,59 @@ struct CursorRequestCostEstimatorTests {
     }
 
     @Test
-    func `total only breakdown returns no estimate`() {
+    func `anthropic total only estimate returns approximate range`() {
         let bd = self.breakdown(
             (input: nil, output: nil, cacheRead: nil, cacheWrite: nil),
-            total: 35_000_000,
+            total: 252_000,
             confidence: .totalOnly)
-        let estimate = CursorRequestCostEstimator.estimate(model: "claude-opus-4-8-thinking-xhigh", breakdown: bd)
-        #expect(estimate.confidence == .totalOnlyUnavailable)
-        #expect(estimate.usd == nil)
+        let estimate = CursorRequestCostEstimator.estimate(model: "claude-opus-4-8-thinking-max", breakdown: bd)
+        #expect(estimate.confidence == .approximateTotalOnly)
+        #expect(estimate.pricingKey == "claude-opus-4-8")
+        #expect(estimate.lowerBoundUSD == self.usd(0.126))
+        #expect(estimate.upperBoundUSD == self.usd(6.30))
+        #expect(estimate.explanation.lowercased().contains("total tokens only"))
+        #expect(estimate.explanation.lowercased().contains("unknown input/output/cache split"))
+        #expect(estimate.explanation.contains("request-based"))
+    }
+
+    @Test
+    func `fable exact estimate prices official rates`() {
+        let bd = self.breakdown(
+            (input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000),
+            total: 4_000_000,
+            confidence: .exactBreakdown)
+        let estimate = CursorRequestCostEstimator.estimate(model: "claude-fable-5-thinking-max", breakdown: bd)
+        #expect(estimate.confidence == .exactBreakdown)
+        #expect(estimate.pricingKey == "claude-fable-5")
+        #expect(estimate.usd == self.usd(73.5))
+        #expect(estimate.explanation.lowercased().contains("5-minute"))
+    }
+
+    @Test
+    func `fable total only estimate returns approximate range`() {
+        let bd = self.breakdown(
+            (input: nil, output: nil, cacheRead: nil, cacheWrite: nil),
+            total: 252_000,
+            confidence: .totalOnly)
+        let estimate = CursorRequestCostEstimator.estimate(model: "claude-fable-5-thinking-max", breakdown: bd)
+        #expect(estimate.confidence == .approximateTotalOnly)
+        #expect(estimate.pricingKey == "claude-fable-5")
+        #expect(estimate.lowerBoundUSD == self.usd(0.252))
+        #expect(estimate.upperBoundUSD == self.usd(12.60))
+        #expect(estimate.explanation.lowercased().contains("unknown input/output/cache split"))
+    }
+
+    @Test
+    func `anthropic total only estimate applies tiered pricing above threshold`() {
+        let bd = self.breakdown(
+            (input: nil, output: nil, cacheRead: nil, cacheWrite: nil),
+            total: 250_000,
+            confidence: .totalOnly)
+        let estimate = CursorRequestCostEstimator.estimate(model: "claude-sonnet-4-6-thinking-max", breakdown: bd)
+        #expect(estimate.confidence == .approximateTotalOnly)
+        #expect(estimate.pricingKey == "claude-sonnet-4-6")
+        #expect(estimate.lowerBoundUSD == self.usd(0.09))
+        #expect(estimate.upperBoundUSD == self.usd(4.125))
         #expect(estimate.explanation.contains("request-based"))
     }
 

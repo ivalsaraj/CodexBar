@@ -319,6 +319,56 @@ struct CursorWidgetSnapshotTests {
     }
 
     @Test
+    func `widget snapshot populates anthropic total only approximate row and cycle text`() async throws {
+        let settings = self.makeSettings()
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let recent = [
+            CursorRecentRequest(
+                timestamp: baseDate,
+                model: "claude-opus-4-8-thinking-max",
+                tokens: 252_000,
+                requests: 1,
+                tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    cacheReadTokens: nil,
+                    cacheWriteTokens: nil,
+                    totalTokens: 252_000,
+                    confidence: .totalOnly)),
+        ]
+
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 70, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 252_000),
+                cursorRecentRequests: recent,
+                updatedAt: Date()),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-anthropic-approx")
+        await store.widgetSnapshotPersistTask?.value
+
+        let entry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        let detail = try #require(entry.cursorRequestDetails?.first)
+        #expect(detail.compactModel == "Opus 4.8 · max")
+        #expect(detail.estimateText?.hasPrefix("Approx.") == true)
+        #expect(entry.tokenUsage?.sessionCostUSD == nil)
+        #expect(entry.tokenUsage?.sessionCostText?.hasPrefix("Approx.") == true)
+    }
+
+    @Test
     func `widget snapshot populates compact model and estimate for priced cursor row`() async throws {
         let settings = self.makeSettings()
         let store = UsageStore(

@@ -35,6 +35,19 @@ struct CursorModelNormalizerTests {
     }
 
     @Test
+    func `normalizes claude fable 5 with pricing key`() {
+        let model = CursorModelNormalizer.normalize("claude-fable-5-thinking-max")
+        #expect(model.rawName == "claude-fable-5-thinking-max")
+        #expect(model.displayName == "Fable 5")
+        #expect(model.provider == .anthropic)
+        #expect(model.family == "fable")
+        #expect(model.version == "5")
+        #expect(model.mode == "thinking")
+        #expect(model.effort == "max")
+        #expect(model.pricingKey == "claude-fable-5")
+    }
+
+    @Test
     func `normalizes cursor composer model with fast pricing key by default`() {
         let model = CursorModelNormalizer.normalize("composer-2.5")
         #expect(model.displayName == "Composer 2.5")
@@ -93,8 +106,10 @@ struct CursorModelNormalizerTests {
         let xhigh = CursorModelNormalizer.normalize("claude-opus-4-8-thinking-xhigh")
         let max = CursorModelNormalizer.normalize("claude-opus-4-8-thinking-max")
         let plain = CursorModelNormalizer.normalize("claude-opus-4-8")
+        let fable = CursorModelNormalizer.normalize("claude-fable-5-thinking-xhigh")
         #expect(xhigh.pricingKey == "claude-opus-4-8")
         #expect(max.pricingKey == "claude-opus-4-8")
         #expect(plain.pricingKey == "claude-opus-4-8")
+        #expect(fable.pricingKey == "claude-fable-5")
     }
 }

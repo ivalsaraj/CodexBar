@@ -151,6 +151,19 @@ struct CostUsagePricingTests {
     }
 
     @Test
+    func `claude fable 5 normalizes and prices official rates`() {
+        #expect(CostUsagePricing.normalizeClaudeModel("claude-fable-5") == "claude-fable-5")
+        let cost = CostUsagePricing.claudeCostUSD(
+            model: "claude-fable-5",
+            inputTokens: 1_000_000,
+            cacheReadInputTokens: 1_000_000,
+            cacheCreationInputTokens: 1_000_000,
+            outputTokens: 1_000_000)
+        let expected = 10 + 1 + 12.5 + 50
+        #expect(abs((cost ?? 0) - expected) < 1e-9)
+    }
+
+    @Test
     func `claude opus cache read uses discounted rate`() {
         let cost = CostUsagePricing.claudeCostUSD(
             model: "claude-opus-4-8",
@@ -209,9 +222,24 @@ struct CostUsagePricingTests {
     }
 
     @Test
-    func `claude pricing capabilities report cache write tier ambiguity`() {
-        let capabilities = CostUsagePricing.claudePricingCapabilities(model: "claude-opus-4-8")
-        #expect(capabilities?.distinguishesCacheWriteTiers == true)
+    func `claude pricing capabilities expose official rates`() throws {
+        let fable = try #require(CostUsagePricing.claudePricingCapabilities(model: "claude-fable-5"))
+        #expect(fable.distinguishesCacheWriteTiers == true)
+        #expect(fable.inputCostPerToken == 1.0e-5)
+        #expect(fable.outputCostPerToken == 5.0e-5)
+        #expect(fable.cacheCreationInputCostPerToken == 1.25e-5)
+        #expect(fable.cacheReadInputCostPerToken == 1.0e-6)
+        #expect(fable.thresholdTokens == nil)
+        #expect(fable.inputCostPerTokenAboveThreshold == nil)
+
+        let opus = try #require(CostUsagePricing.claudePricingCapabilities(model: "claude-opus-4-8"))
+        #expect(opus.distinguishesCacheWriteTiers == true)
+        #expect(opus.inputCostPerToken == 5.0e-6)
+        #expect(opus.outputCostPerToken == 2.5e-5)
+        #expect(opus.cacheCreationInputCostPerToken == 6.25e-6)
+        #expect(opus.cacheReadInputCostPerToken == 5.0e-7)
+        #expect(opus.thresholdTokens == nil)
+
         #expect(CostUsagePricing.claudePricingCapabilities(model: "glm-4.6") == nil)
     }
 }

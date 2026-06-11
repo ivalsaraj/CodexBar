@@ -59,18 +59,24 @@ Manual option:
 
 ## Model-cost estimates (diagnostic only)
 - Recent request rows can show an optional local model-cost estimate, labelled `Est.` when a breakdown-based estimate is
-  available, `Approx. $low-$high` when only a total token count is available (Composer 2.5), or `Partial` only when
-  CodexBar has an incomplete lower-bound estimate.
+  available, `Approx. $low-$high` when only a total token count is available for a priced Composer or Anthropic model,
+  or `Partial` only when CodexBar has an incomplete lower-bound estimate.
 - Estimates are computed locally from the shared `CostUsagePricing` catalog for Anthropic/OpenAI models and from Cursor's
   published Composer 2.5 changelog rates for Cursor-owned models (source-versioned in-repo); CodexBar never calls pricing
   docs at runtime. The estimate is diagnostic and never implies Cursor bills the legacy plan by dollars — expanded details
   and hover/help always state the quota is request-based.
+- Anthropic Fable 5 is priced from Anthropic's published rates checked 2026-06-11: `$10/M` input, `$12.50/M`
+  5-minute cache write, `$20/M` 1-hour cache write, `$1/M` cache hit, `$50/M` output. CodexBar stores the 5-minute
+  cache-write rate because that is the default assumption used for exact breakdowns.
 - Raw Cursor model strings are normalized for compact display (e.g. `claude-opus-4-8-thinking-xhigh` → `Opus 4.8 · xhigh`).
   Thinking effort never changes the pricing key.
 - **Composer 2.5 pricing** (from [Cursor Composer 2.5 changelog](https://cursor.com/changelog/composer-2-5), checked
   2026-06-08): Fast `$3/M` input + `$15/M` output; Standard `$0.50/M` input + `$2.50/M` output. Raw `composer-2.5`
   defaults to Fast unless the model string explicitly includes `standard`. Total-only Composer rows show an approximate
   range (`Approx. $low-$high`) instead of a single exact dollar amount.
+- Anthropic total-only rows now also show approximate ranges when the model is locally priced. CodexBar computes the
+  range from the unknown input/output/cache split instead of inventing an exact midpoint, so Opus and Fable rows stay
+  honest even when Cursor only exposes total tokens.
 - Unknown models without local pricing coverage render cleanly with cost unavailable rather than a fabricated value.
 - Claude `cacheWriteTokens` default to Anthropic's 5-minute cache-write rate. Composer cache tokens are counted as
   input-equivalent when input/output fields exist; Cursor does not publish separate Composer cache billing, so expanded
