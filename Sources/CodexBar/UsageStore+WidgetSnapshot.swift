@@ -99,6 +99,9 @@ extension UsageStore {
             codeReviewRemaining = nil
         }
 
+        let cursorRequestDetails = Self.widgetCursorRequestDetails(provider: provider, snapshot: snapshot)
+        let cursorRequestRange = Self.widgetCursorRequestRange(provider: provider, snapshot: snapshot)
+
         return WidgetSnapshot.ProviderEntry(
             provider: provider,
             accountID: accountID,
@@ -112,7 +115,55 @@ extension UsageStore {
             codeReviewRemainingPercent: codeReviewRemaining,
             providerCost: Self.widgetProviderCostSummary(from: snapshot.providerCost),
             tokenUsage: tokenUsage,
+            cursorRequestRange: cursorRequestRange,
+            cursorRequestDetails: cursorRequestDetails,
             dailyUsage: dailyUsage)
+    }
+
+    private nonisolated static func widgetCursorRequestRange(
+        provider: UsageProvider,
+        snapshot: UsageSnapshot) -> WidgetSnapshot.CursorRequestRange?
+    {
+        guard provider == .cursor,
+              let range = snapshot.cursorRecentRequestRange
+        else {
+            return nil
+        }
+        return WidgetSnapshot.CursorRequestRange(start: range.start, end: range.end)
+    }
+
+    private nonisolated static func widgetCursorRequestDetails(
+        provider: UsageProvider,
+        snapshot: UsageSnapshot) -> [WidgetSnapshot.CursorRequestDetail]?
+    {
+        guard provider == .cursor,
+              let recent = snapshot.cursorRecentRequests,
+              !recent.isEmpty
+        else {
+            return nil
+        }
+
+        return recent
+            .filter { row in
+                let model = row.model.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !model.isEmpty else { return false }
+                // Legacy request-plan rows must survive even with zero tokens, as long as they
+                // represent at least one request. Only drop rows that carry neither tokens nor requests.
+                return row.tokens > 0 || row.requests > 0
+            }
+            .sorted { $0.timestamp > $1.timestamp }
+            .prefix(30)
+            .map { row in
+                let normalized = CursorModelNormalizer.normalize(row.model)
+                let estimate = CursorRequestCostEstimator.estimate(for: row)
+                return WidgetSnapshot.CursorRequestDetail(
+                    timestamp: row.timestamp,
+                    model: row.model,
+                    tokens: row.tokens,
+                    requests: row.requests,
+                    compactModel: UsageFormatter.cursorCompactModelLabel(normalized),
+                    estimateText: UsageFormatter.cursorEstimateText(estimate))
+            }
     }
 
     private nonisolated static func widgetProviderCostSummary(

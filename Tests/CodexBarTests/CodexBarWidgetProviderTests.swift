@@ -123,6 +123,130 @@ struct CodexBarWidgetProviderTests {
     }
 
     @Test
+    func `cursor request presentation limits medium widget rows`() {
+        let details = (0..<10).map { index in
+            WidgetSnapshot.CursorRequestDetail(
+                timestamp: Date(timeIntervalSince1970: Double(index)),
+                model: "model-\(index)",
+                tokens: 100,
+                requests: 1)
+        }
+
+        let selection = CursorWidgetRequestPresentation.selection(
+            provider: .cursor,
+            details: details,
+            range: WidgetSnapshot.CursorRequestRange(
+                start: Date(timeIntervalSince1970: 0),
+                end: Date(timeIntervalSince1970: 60)),
+            size: .medium)
+
+        #expect(selection?.visible.count == 3)
+        #expect(selection?.visible.map(\.model) == ["model-0", "model-1", "model-2"])
+        #expect(selection?.hiddenCount == 7)
+        #expect(selection?.range?.start == Date(timeIntervalSince1970: 0))
+    }
+
+    @Test
+    func `cursor request presentation limits large widget rows`() {
+        let details = (0..<10).map { index in
+            WidgetSnapshot.CursorRequestDetail(
+                timestamp: Date(timeIntervalSince1970: Double(index)),
+                model: "model-\(index)",
+                tokens: 100,
+                requests: 1)
+        }
+
+        let selection = CursorWidgetRequestPresentation.selection(
+            provider: .cursor,
+            details: details,
+            size: .large)
+
+        #expect(selection?.visible.count == 5)
+        #expect(selection?.hiddenCount == 5)
+    }
+
+    @Test
+    func `cursor request presentation returns nil for non cursor providers`() {
+        let details = [
+            WidgetSnapshot.CursorRequestDetail(
+                timestamp: Date(),
+                model: "composer-2",
+                tokens: 100,
+                requests: 1),
+        ]
+
+        #expect(
+            CursorWidgetRequestPresentation.selection(
+                provider: .codex,
+                details: details,
+                size: .large) == nil)
+    }
+
+    @Test
+    func `cursor request rows use compact model text not raw model`() throws {
+        let details = [
+            WidgetSnapshot.CursorRequestDetail(
+                timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+                model: "claude-opus-4-8-thinking-xhigh",
+                tokens: 35_000_000,
+                requests: 1,
+                compactModel: "Opus 4.8 · xhigh",
+                estimateText: "Est. $12.34"),
+        ]
+
+        let selection = try #require(CursorWidgetRequestPresentation.selection(
+            provider: .cursor,
+            details: details,
+            size: .medium))
+        let row = try #require(selection.rows.first)
+        #expect(row.modelText == "Opus 4.8 · xhigh")
+        #expect(!row.modelText.contains("claude-opus"))
+        #expect(row.tokenText == "35M")
+        #expect(row.metaText.contains("Req 1"))
+        #expect(row.estimateText == "Est. $12.34")
+    }
+
+    @Test
+    func `cursor request rows keep request count for zero token rows`() throws {
+        let details = [
+            WidgetSnapshot.CursorRequestDetail(
+                timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+                model: "claude-opus-4-8-thinking-xhigh",
+                tokens: 0,
+                requests: 1,
+                compactModel: "Opus 4.8 · xhigh",
+                estimateText: nil),
+        ]
+
+        let selection = try #require(CursorWidgetRequestPresentation.selection(
+            provider: .cursor,
+            details: details,
+            size: .medium))
+        let row = try #require(selection.rows.first)
+        #expect(row.metaText.contains("Req 1"))
+        #expect(row.estimateText == nil)
+    }
+
+    @Test
+    func `cursor request rows fall back to raw model for legacy snapshots`() throws {
+        let details = [
+            WidgetSnapshot.CursorRequestDetail(
+                timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+                model: "composer-2.5",
+                tokens: 100,
+                requests: 1),
+        ]
+
+        let selection = try #require(CursorWidgetRequestPresentation.selection(
+            provider: .cursor,
+            details: details,
+            size: .large))
+        let row = try #require(selection.rows.first)
+        #expect(row.modelText == "composer-2.5")
+        #expect(row.estimateText == nil)
+    }
+
+    @Test
     func `widget selection store preserves opencode workspace account selection`() {
         let bundleID = "com.steipete.codexbar.tests.widget-selection-\(UUID().uuidString)"
         let accountID = UUID()

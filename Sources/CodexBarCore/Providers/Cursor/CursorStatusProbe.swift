@@ -255,6 +255,55 @@ public struct CursorModelUsage: Codable, Sendable {
     public let maxTokenUsage: Int?
 }
 
+/// Row from `POST /api/dashboard/get-filtered-usage-events` (`usageEventsDisplay`).
+public struct CursorUsageEvent: Codable, Sendable {
+    public let timestamp: String?
+    public let model: String?
+    public let kind: String?
+    public let requestsCosts: Double?
+    public let tokenUsage: CursorUsageEventTokenUsage?
+
+    public init(
+        timestamp: String?,
+        model: String?,
+        kind: String? = nil,
+        requestsCosts: Double? = nil,
+        tokenUsage: CursorUsageEventTokenUsage? = nil)
+    {
+        self.timestamp = timestamp
+        self.model = model
+        self.kind = kind
+        self.requestsCosts = requestsCosts
+        self.tokenUsage = tokenUsage
+    }
+}
+
+public struct CursorUsageEventTokenUsage: Codable, Sendable {
+    public let inputTokens: Int?
+    public let outputTokens: Int?
+    public let cacheReadTokens: Int?
+    public let cacheWriteTokens: Int?
+    public let totalTokens: Int?
+
+    public init(
+        inputTokens: Int? = nil,
+        outputTokens: Int? = nil,
+        cacheReadTokens: Int? = nil,
+        cacheWriteTokens: Int? = nil,
+        totalTokens: Int? = nil)
+    {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheWriteTokens = cacheWriteTokens
+        self.totalTokens = totalTokens
+    }
+}
+
+struct CursorFilteredUsageEventsResponse: Codable, Sendable {
+    let usageEventsDisplay: [CursorUsageEvent]?
+}
+
 public struct CursorUserInfo: Codable, Sendable {
     public let email: String?
     public let emailVerified: Bool?
@@ -315,10 +364,16 @@ public struct CursorStatusSnapshot: Sendable {
     public let requestsLimit: Int?
     /// Legacy quota metric kind.
     public let legacyUsageMetric: CursorRequestUsage.Metric?
+    /// Billing-cycle token usage reported by Cursor's legacy usage endpoint.
+    public let billingCycleTokensUsed: Int?
+    /// Recent per-request usage rows for legacy request-plan widgets.
+    public let recentRequests: [CursorRecentRequest]?
+    /// Date range used when fetching recent per-request usage rows.
+    public let recentRequestRange: CursorRecentRequestRange?
 
     /// Whether this plan uses the legacy request/token quota endpoint.
     public var isLegacyRequestPlan: Bool {
-        self.legacyUsageMetric != nil
+        self.legacyUsageMetric != nil || (self.requestsUsed != nil && self.requestsLimit != nil)
     }
 
     public init(
@@ -338,7 +393,10 @@ public struct CursorStatusSnapshot: Sendable {
         rawJSON: String?,
         requestsUsed: Int? = nil,
         requestsLimit: Int? = nil,
-        legacyUsageMetric: CursorRequestUsage.Metric? = nil)
+        legacyUsageMetric: CursorRequestUsage.Metric? = nil,
+        billingCycleTokensUsed: Int? = nil,
+        recentRequests: [CursorRecentRequest]? = nil,
+        recentRequestRange: CursorRecentRequestRange? = nil)
     {
         self.planPercentUsed = planPercentUsed
         self.autoPercentUsed = autoPercentUsed
@@ -357,6 +415,9 @@ public struct CursorStatusSnapshot: Sendable {
         self.requestsUsed = requestsUsed
         self.requestsLimit = requestsLimit
         self.legacyUsageMetric = legacyUsageMetric
+        self.billingCycleTokensUsed = billingCycleTokensUsed
+        self.recentRequests = recentRequests
+        self.recentRequestRange = recentRequestRange
     }
 
     /// Convert to UsageSnapshot for the common provider interface
@@ -417,10 +478,12 @@ public struct CursorStatusSnapshot: Sendable {
 
         // Legacy plan quota usage.
         let cursorRequests: CursorRequestUsage? = if let used = self.requestsUsed,
-                                                     let limit = self.requestsLimit,
-                                                     let metric = self.legacyUsageMetric
+                                                     let limit = self.requestsLimit
         {
-            CursorRequestUsage(used: used, limit: limit, metric: metric)
+            CursorRequestUsage(
+                used: used,
+                limit: limit,
+                metric: self.legacyUsageMetric ?? .requests)
         } else {
             nil
         }
@@ -436,6 +499,11 @@ public struct CursorStatusSnapshot: Sendable {
             tertiary: tertiary,
             providerCost: providerCost,
             cursorRequests: cursorRequests,
+            cursorTokenUsage: self.billingCycleTokensUsed.map {
+                CursorTokenUsage(billingCycleTokensUsed: $0)
+            },
+            cursorRecentRequests: self.recentRequests,
+            cursorRecentRequestRange: self.recentRequestRange,
             updatedAt: Date(),
             identity: identity)
     }
@@ -831,17 +899,37 @@ public struct CursorStatusProbe: Sendable {
             }
         }
 
+        var usageEvents: [CursorUsageEvent] = []
+        var usageEventsRange: CursorRecentRequestRange?
+        var usageEventsRawJSON: String?
+        do {
+            let (events, range, eventsRawJSON) = try await self.fetchUsageEvents(
+                cookieHeader: cookieHeader,
+                billingCycleStart: usageSummary.billingCycleStart)
+            usageEvents = events
+            usageEventsRange = range
+            usageEventsRawJSON = eventsRawJSON
+        } catch {
+            // Non-fatal: keep quota + cycle token summary when detail rows are unavailable.
+        }
+
         // Combine raw JSON for debugging
         var combinedRawJSON: String? = rawJSON
         if let usageJSON = requestUsageRawJSON {
             combinedRawJSON = (combinedRawJSON ?? "") + "\n\n--- /api/usage response ---\n" + usageJSON
+        }
+        if let eventsJSON = usageEventsRawJSON {
+            combinedRawJSON = (combinedRawJSON ?? "") + "\n\n--- /api/dashboard/get-filtered-usage-events ---\n"
+                + eventsJSON
         }
 
         return self.parseUsageSummary(
             usageSummary,
             userInfo: userInfo,
             rawJSON: combinedRawJSON,
-            requestUsage: requestUsage)
+            requestUsage: requestUsage,
+            usageEvents: usageEvents,
+            usageEventsRange: usageEventsRange)
     }
 
     private func fetchUsageSummary(cookieHeader: String) async throws -> (CursorUsageSummary, String) {
@@ -917,11 +1005,179 @@ public struct CursorStatusProbe: Sendable {
         return (usage, rawJSON)
     }
 
+    private func fetchUsageEvents(
+        cookieHeader: String,
+        billingCycleStart: String?) async throws -> ([CursorUsageEvent], CursorRecentRequestRange, String)
+    {
+        let url = self.baseURL.appendingPathComponent("/api/dashboard/get-filtered-usage-events")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = self.timeout
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://cursor.com", forHTTPHeaderField: "Origin")
+        request.setValue("https://cursor.com/dashboard/usage", forHTTPHeaderField: "Referer")
+        request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+
+        let endDate = Date()
+        let nowMs = Int64(endDate.timeIntervalSince1970 * 1000)
+        let startMs: Int64 = if let billingCycleStart,
+                                let startDate = Self.parseBillingCycleDate(billingCycleStart)
+        {
+            Int64(startDate.timeIntervalSince1970 * 1000)
+        } else {
+            nowMs - (30 * 24 * 60 * 60 * 1000)
+        }
+        let range = CursorRecentRequestRange(
+            start: Date(timeIntervalSince1970: TimeInterval(startMs) / 1000),
+            end: endDate)
+        let body: [String: Any] = [
+            "startDate": String(startMs),
+            "endDate": String(nowMs),
+            "page": 1,
+            "pageSize": 200,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw CursorStatusProbeError.networkError("Failed to fetch usage events (HTTP \(status))")
+        }
+
+        let rawJSON = String(data: data, encoding: .utf8) ?? "<binary>"
+        let events = try Self.decodeUsageEventsResponse(from: data)
+        return (events, range, rawJSON)
+    }
+
+    static func decodeUsageEventsResponse(from data: Data) throws -> [CursorUsageEvent] {
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(CursorFilteredUsageEventsResponse.self, from: data)
+        return response.usageEventsDisplay ?? []
+    }
+
+    static func recentRequests(from events: [CursorUsageEvent], limit: Int = 30) -> [CursorRecentRequest] {
+        events.compactMap { self.recentRequest(from: $0) }
+            .sorted { $0.timestamp > $1.timestamp }
+            .prefix(limit)
+            .map(\.self)
+    }
+
+    private static func recentRequest(from event: CursorUsageEvent) -> CursorRecentRequest? {
+        let model = event.model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !model.isEmpty else { return nil }
+        guard let timestamp = Self.parseUsageEventTimestamp(event.timestamp) else { return nil }
+        let hasRequestCost = (event.requestsCosts ?? 0) > 0
+        guard event.tokenUsage != nil || hasRequestCost else { return nil }
+        let breakdown = Self.requestTokenBreakdown(for: event.tokenUsage)
+        let tokens = breakdown?.totalTokens ?? Self.tokenSpend(for: event.tokenUsage) ?? 0
+        let requests = Self.requestCount(for: event)
+        return CursorRecentRequest(
+            timestamp: timestamp,
+            model: model,
+            tokens: tokens,
+            requests: requests,
+            tokenBreakdown: breakdown)
+    }
+
+    static func parseUsageEventTimestamp(_ raw: String?) -> Date? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let numeric = Double(trimmed) {
+            let seconds: TimeInterval = numeric > 1_000_000_000_000 ? numeric / 1000 : numeric
+            return Date(timeIntervalSince1970: seconds)
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: trimmed) {
+            return date
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: trimmed)
+    }
+
+    private static func tokenSpend(for usage: CursorUsageEventTokenUsage?) -> Int? {
+        guard let usage else { return nil }
+        if let total = usage.totalTokens {
+            return max(0, total)
+        }
+        let parts = [
+            usage.inputTokens,
+            usage.outputTokens,
+            usage.cacheReadTokens,
+            usage.cacheWriteTokens,
+        ].compactMap(\.self)
+        guard !parts.isEmpty else { return 0 }
+        return max(0, parts.reduce(0, +))
+    }
+
+    /// Preserves the decoded Cursor token parts and records how complete they are.
+    ///
+    /// Missing fields stay `nil` (never coerced to zero) so the cost estimator can refuse to
+    /// fabricate precision; explicit zero values are treated as present.
+    static func requestTokenBreakdown(
+        for usage: CursorUsageEventTokenUsage?) -> CursorRecentRequestTokenBreakdown?
+    {
+        guard let usage else { return nil }
+
+        func clamp(_ value: Int?) -> Int? {
+            value.map { max(0, $0) }
+        }
+        let input = clamp(usage.inputTokens)
+        let output = clamp(usage.outputTokens)
+        let cacheRead = clamp(usage.cacheReadTokens)
+        let cacheWrite = clamp(usage.cacheWriteTokens)
+        let explicitTotal = clamp(usage.totalTokens)
+
+        let presentParts = [input, output, cacheRead, cacheWrite].compactMap(\.self)
+        let allPartsPresent = input != nil && output != nil && cacheRead != nil && cacheWrite != nil
+        let anyPartPresent = !presentParts.isEmpty
+        let summedParts = presentParts.reduce(0, +)
+        let total = explicitTotal ?? (anyPartPresent ? summedParts : 0)
+
+        let confidence: CursorRecentRequestTokenBreakdown.Confidence = if allPartsPresent {
+            .exactBreakdown
+        } else if anyPartPresent {
+            .partialBreakdown
+        } else if explicitTotal != nil {
+            .totalOnly
+        } else {
+            .empty
+        }
+
+        return CursorRecentRequestTokenBreakdown(
+            inputTokens: input,
+            outputTokens: output,
+            cacheReadTokens: cacheRead,
+            cacheWriteTokens: cacheWrite,
+            totalTokens: total,
+            confidence: confidence)
+    }
+
+    private static func requestCount(for event: CursorUsageEvent) -> Int {
+        if let costs = event.requestsCosts, costs > 0 {
+            return max(1, Int(costs.rounded()))
+        }
+        return 1
+    }
+
+    private static func parseBillingCycleDate(_ dateString: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: dateString) ?? ISO8601DateFormatter().date(from: dateString)
+    }
+
     func parseUsageSummary(
         _ summary: CursorUsageSummary,
         userInfo: CursorUserInfo?,
         rawJSON: String?,
-        requestUsage: CursorUsageResponse? = nil) -> CursorStatusSnapshot
+        requestUsage: CursorUsageResponse? = nil,
+        usageEvents: [CursorUsageEvent] = [],
+        usageEventsRange: CursorRecentRequestRange? = nil) -> CursorStatusSnapshot
     {
         // Parse billing cycle end date
         let billingCycleEnd: Date? = summary.billingCycleEnd.flatMap { dateString in
@@ -989,6 +1245,18 @@ public struct CursorStatusProbe: Sendable {
             return nil
         }()
 
+        let recentRequests = Self.recentRequests(from: usageEvents)
+        let resolvedEventsRange = usageEventsRange ?? Self.cursorRequestRange(
+            billingCycleStart: summary.billingCycleStart,
+            billingCycleEnd: summary.billingCycleEnd)
+        var billingCycleTokensUsed = requestUsage?.gpt4?.numTokens
+        if billingCycleTokensUsed == nil || billingCycleTokensUsed == 0 {
+            let summed = recentRequests.reduce(0) { $0 + $1.tokens }
+            if summed > 0 {
+                billingCycleTokensUsed = summed
+            }
+        }
+
         return CursorStatusSnapshot(
             planPercentUsed: planPercentUsed,
             autoPercentUsed: autoPercent,
@@ -1006,7 +1274,23 @@ public struct CursorStatusProbe: Sendable {
             rawJSON: rawJSON,
             requestsUsed: legacyQuotaUsage?.used,
             requestsLimit: legacyQuotaUsage?.limit,
-            legacyUsageMetric: legacyQuotaUsage?.metric)
+            legacyUsageMetric: legacyQuotaUsage?.metric,
+            billingCycleTokensUsed: billingCycleTokensUsed,
+            recentRequests: recentRequests.isEmpty ? nil : recentRequests,
+            recentRequestRange: recentRequests.isEmpty ? nil : resolvedEventsRange)
+    }
+
+    private static func cursorRequestRange(
+        billingCycleStart: String?,
+        billingCycleEnd: String?) -> CursorRecentRequestRange?
+    {
+        guard let startString = billingCycleStart,
+              let start = self.parseBillingCycleDate(startString)
+        else {
+            return nil
+        }
+        let end = billingCycleEnd.flatMap(self.parseBillingCycleDate) ?? Date()
+        return CursorRecentRequestRange(start: start, end: end)
     }
 }
 
