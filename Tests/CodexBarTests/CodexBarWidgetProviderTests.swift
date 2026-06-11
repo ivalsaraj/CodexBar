@@ -203,6 +203,7 @@ struct CodexBarWidgetProviderTests {
         #expect(!row.modelText.contains("claude-opus"))
         #expect(row.tokenText == "35M")
         #expect(row.metaText.contains("Req 1"))
+        #expect(row.metaText.contains(WidgetFormat.requestDateTime(details[0].timestamp)))
         #expect(row.estimateText == "Est. $12.34")
     }
 

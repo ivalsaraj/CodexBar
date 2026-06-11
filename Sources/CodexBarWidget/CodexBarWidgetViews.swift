@@ -889,7 +889,7 @@ enum CursorWidgetRequestPresentation {
         let visible = Array(details.prefix(maxVisible))
         let hiddenCount = max(0, details.count - visible.count)
         let rows = visible.enumerated().map { index, detail -> Row in
-            let time = WidgetFormat.requestTime(detail.timestamp)
+            let time = WidgetFormat.requestDateTime(detail.timestamp)
             let count = WidgetFormat.requestCountLabel(detail.requests)
             return Row(
                 id: index,
@@ -991,6 +991,10 @@ enum WidgetFormat {
         formatter.dateStyle = .none
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    static func requestDateTime(_ date: Date) -> String {
+        "\(date.formatted(.dateTime.month(.abbreviated).day())) · \(self.requestTime(date))"
     }
 
     static func requestCountLabel(_ count: Int) -> String {

@@ -93,7 +93,7 @@ public enum CursorRequestCostEstimator {
 
     public static func estimate(for request: CursorRecentRequest) -> CursorRequestCostEstimate {
         if let breakdown = request.tokenBreakdown {
-            if breakdown.confidence == .empty,
+            if self.shouldUseAnthropicTotalOnlyFallback(breakdown),
                let estimate = self.anthropicTotalOnlyFallbackEstimate(model: request.model, tokens: request.tokens)
             {
                 return estimate
@@ -106,6 +106,15 @@ public enum CursorRequestCostEstimator {
         }
 
         return self.estimate(model: request.model, breakdown: nil)
+    }
+
+    private static func shouldUseAnthropicTotalOnlyFallback(_ breakdown: CursorRecentRequestTokenBreakdown) -> Bool {
+        switch breakdown.confidence {
+        case .empty, .partialBreakdown:
+            true
+        case .exactBreakdown, .totalOnly:
+            false
+        }
     }
 
     private static func anthropicTotalOnlyFallbackEstimate(model: String, tokens: Int) -> CursorRequestCostEstimate? {

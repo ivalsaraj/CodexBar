@@ -124,6 +124,29 @@ struct CursorRequestCostEstimatorTests {
     }
 
     @Test
+    func `anthropic request with partial breakdown uses total tokens as approximate range`() {
+        let request = CursorRecentRequest(
+            timestamp: Date(timeIntervalSince1970: 1_770_201_720),
+            model: "claude-opus-4-8-thinking-max",
+            tokens: 251_566,
+            requests: 1,
+            tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                inputTokens: nil,
+                outputTokens: nil,
+                cacheReadTokens: 251_566,
+                cacheWriteTokens: nil,
+                totalTokens: 251_566,
+                confidence: .partialBreakdown))
+
+        let estimate = CursorRequestCostEstimator.estimate(for: request)
+
+        #expect(estimate.confidence == .approximateTotalOnly)
+        #expect(estimate.pricingKey == "claude-opus-4-8")
+        #expect(estimate.lowerBoundUSD == self.usd(0.125783))
+        #expect(estimate.upperBoundUSD == self.usd(6.28915))
+    }
+
+    @Test
     func `fable exact estimate prices official rates`() {
         let bd = self.breakdown(
             (input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000),
