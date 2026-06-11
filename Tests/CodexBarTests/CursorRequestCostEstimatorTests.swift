@@ -83,6 +83,47 @@ struct CursorRequestCostEstimatorTests {
     }
 
     @Test
+    func `anthropic request without breakdown uses total tokens as approximate range`() {
+        let request = CursorRecentRequest(
+            timestamp: Date(timeIntervalSince1970: 1_770_201_720),
+            model: "claude-opus-4-8-thinking-max",
+            tokens: 252_000,
+            requests: 1)
+
+        let estimate = CursorRequestCostEstimator.estimate(for: request)
+
+        #expect(estimate.confidence == .approximateTotalOnly)
+        #expect(estimate.pricingKey == "claude-opus-4-8")
+        #expect(estimate.lowerBoundUSD == self.usd(0.126))
+        #expect(estimate.upperBoundUSD == self.usd(6.30))
+        #expect(estimate.explanation.lowercased().contains("total tokens only"))
+        #expect(estimate.explanation.contains("request-based"))
+    }
+
+    @Test
+    func `anthropic request with empty breakdown uses total tokens as approximate range`() {
+        let request = CursorRecentRequest(
+            timestamp: Date(timeIntervalSince1970: 1_770_201_720),
+            model: "claude-opus-4-8-thinking-max",
+            tokens: 252_000,
+            requests: 1,
+            tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                inputTokens: nil,
+                outputTokens: nil,
+                cacheReadTokens: nil,
+                cacheWriteTokens: nil,
+                totalTokens: 0,
+                confidence: .empty))
+
+        let estimate = CursorRequestCostEstimator.estimate(for: request)
+
+        #expect(estimate.confidence == .approximateTotalOnly)
+        #expect(estimate.pricingKey == "claude-opus-4-8")
+        #expect(estimate.lowerBoundUSD == self.usd(0.126))
+        #expect(estimate.upperBoundUSD == self.usd(6.30))
+    }
+
+    @Test
     func `fable exact estimate prices official rates`() {
         let bd = self.breakdown(
             (input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000),

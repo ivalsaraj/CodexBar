@@ -92,7 +92,41 @@ public enum CursorRequestCostEstimator {
     ]
 
     public static func estimate(for request: CursorRecentRequest) -> CursorRequestCostEstimate {
-        self.estimate(model: request.model, breakdown: request.tokenBreakdown)
+        if let breakdown = request.tokenBreakdown {
+            if breakdown.confidence == .empty,
+               let estimate = self.anthropicTotalOnlyFallbackEstimate(model: request.model, tokens: request.tokens)
+            {
+                return estimate
+            }
+            return self.estimate(model: request.model, breakdown: breakdown)
+        }
+
+        if let estimate = self.anthropicTotalOnlyFallbackEstimate(model: request.model, tokens: request.tokens) {
+            return estimate
+        }
+
+        return self.estimate(model: request.model, breakdown: nil)
+    }
+
+    private static func anthropicTotalOnlyFallbackEstimate(model: String, tokens: Int) -> CursorRequestCostEstimate? {
+        let normalized = CursorModelNormalizer.normalize(model)
+        guard normalized.provider == .anthropic,
+              let pricingKey = normalized.pricingKey,
+              CostUsagePricing.claudePricingCapabilities(model: pricingKey) != nil,
+              tokens > 0
+        else {
+            return nil
+        }
+
+        return self.estimate(
+            model: model,
+            breakdown: CursorRecentRequestTokenBreakdown(
+                inputTokens: nil,
+                outputTokens: nil,
+                cacheReadTokens: nil,
+                cacheWriteTokens: nil,
+                totalTokens: tokens,
+                confidence: .totalOnly))
     }
 
     public static func summedUSD(for requests: [CursorRecentRequest]) -> Decimal? {

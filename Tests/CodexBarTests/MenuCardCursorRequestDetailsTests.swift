@@ -211,6 +211,7 @@ struct MenuCardCursorRequestDetailsTests {
 
         #expect(row.primaryLeft == "Composer 2.5")
         #expect(row.primaryRight == "2.5M")
+        #expect(row.secondaryLeft.contains(UsageFormatter.cursorRequestRowTimestamp(now)))
         #expect(row.secondaryLeft.contains("Req 1"))
         // total-only composer rows without breakdown show no compact estimate.
         #expect(row.secondaryRight == nil)
@@ -218,6 +219,50 @@ struct MenuCardCursorRequestDetailsTests {
         #expect(!row.help.contains("Included"))
         #expect(!row.help.lowercased().contains("kind"))
         #expect(row.help.contains("request-based"))
+    }
+
+    @Test
+    func `cursor request row shows approximate estimate for anthropic total without breakdown`() {
+        let now = Date(timeIntervalSince1970: 1_770_201_720)
+        let request = CursorRecentRequest(
+            timestamp: now,
+            model: "claude-opus-4-8-thinking-max",
+            tokens: 252_000,
+            requests: 1)
+
+        let row = CursorMenuRequestRowPresentation.make(request: request, index: 0, now: now)
+
+        #expect(row.primaryLeft == "Opus 4.8 · max")
+        #expect(row.primaryRight == "252K")
+        #expect(row.secondaryLeft.contains(UsageFormatter.cursorRequestRowTimestamp(now)))
+        #expect(row.secondaryLeft.contains("Req 1"))
+        #expect(row.secondaryRight == "Approx. $0.13-$6.30")
+        #expect(row.detailLines.contains { $0.contains("Approx.") })
+        #expect(row.help.contains("total tokens only"))
+    }
+
+    @Test
+    func `cursor request row shows approximate estimate for anthropic empty breakdown`() {
+        let now = Date(timeIntervalSince1970: 1_770_201_720)
+        let request = CursorRecentRequest(
+            timestamp: now,
+            model: "claude-opus-4-8-thinking-max",
+            tokens: 252_000,
+            requests: 1,
+            tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                inputTokens: nil,
+                outputTokens: nil,
+                cacheReadTokens: nil,
+                cacheWriteTokens: nil,
+                totalTokens: 0,
+                confidence: .empty))
+
+        let row = CursorMenuRequestRowPresentation.make(request: request, index: 0, now: now)
+
+        #expect(row.primaryLeft == "Opus 4.8 · max")
+        #expect(row.primaryRight == "252K")
+        #expect(row.secondaryRight == "Approx. $0.13-$6.30")
+        #expect(row.detailLines.contains { $0.contains("Approx.") })
     }
 
     @Test
@@ -370,7 +415,7 @@ struct MenuCardCursorRequestDetailsTests {
             now: now))
 
         #expect(model.tokenUsage?.sessionLine == "Requests: 70 / 500")
-        #expect(model.tokenUsage?.monthLine == "Cycle: 87M tokens")
+        #expect(model.tokenUsage?.monthLine == "Cycle: 87M tokens · Approx. $0.50-$25.00")
         #expect(model.tokenUsage?.cursorRequestDetails.count == 1)
     }
 

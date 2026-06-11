@@ -16,7 +16,7 @@ struct CursorMenuRequestRowPresentation: Equatable, Identifiable {
     static func make(request: CursorRecentRequest, index: Int, now: Date) -> Self {
         let normalized = CursorModelNormalizer.normalize(request.model)
         let estimate = CursorRequestCostEstimator.estimate(for: request)
-        let time = request.timestamp.formatted(date: .omitted, time: .shortened)
+        let timestamp = UsageFormatter.cursorRequestRowTimestamp(request.timestamp)
         let requestLabel = request.requests == 1 ? "Req 1" : "Req \(request.requests)"
         let detailLines = UsageFormatter.cursorRequestDetailLines(
             request: request,
@@ -26,7 +26,7 @@ struct CursorMenuRequestRowPresentation: Equatable, Identifiable {
             id: "\(index)-\(request.timestamp.timeIntervalSince1970)-\(request.model)",
             primaryLeft: UsageFormatter.cursorCompactModelLabel(normalized),
             primaryRight: UsageFormatter.tokenCountString(request.tokens),
-            secondaryLeft: "\(time) · \(requestLabel)",
+            secondaryLeft: "\(timestamp) · \(requestLabel)",
             secondaryRight: UsageFormatter.cursorEstimateText(estimate),
             detailLines: detailLines,
             help: detailLines.joined(separator: "\n"))

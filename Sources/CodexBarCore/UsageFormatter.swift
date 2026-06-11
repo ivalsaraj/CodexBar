@@ -127,6 +127,12 @@ public enum UsageFormatter {
         return "\(model.displayName) · \(effort)"
     }
 
+    public static func cursorRequestRowTimestamp(_ date: Date) -> String {
+        let day = date.formatted(.dateTime.month(.abbreviated).day())
+        let time = date.formatted(date: .omitted, time: .shortened)
+        return "\(day) · \(time)"
+    }
+
     /// Short estimate label for the secondary row, or `nil` when no honest estimate exists.
     ///
     /// Returns `Est. $X` for exact estimates, `Approx. $low-$high` for total-only ranges, and
