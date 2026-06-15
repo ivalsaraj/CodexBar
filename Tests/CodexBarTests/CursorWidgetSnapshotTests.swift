@@ -101,6 +101,58 @@ struct CursorWidgetSnapshotTests {
     }
 
     @Test
+    func `widget snapshot uses cursor cycle cost summary before visible request rows`() async throws {
+        let settings = self.makeSettings()
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let cycleCostSummary = CursorRequestCostSummary(
+            exactUSD: nil,
+            lowerBoundUSD: 10,
+            upperBoundUSD: 20,
+            containsApproximation: true)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 182, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(
+                    billingCycleTokensUsed: 1_400_000_000,
+                    requestCostSummary: cycleCostSummary),
+                cursorRecentRequests: [
+                    CursorRecentRequest(
+                        timestamp: now,
+                        model: "claude-opus-4-8-thinking-max",
+                        tokens: 194_000_000,
+                        requests: 1,
+                        tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                            inputTokens: nil,
+                            outputTokens: nil,
+                            cacheReadTokens: nil,
+                            cacheWriteTokens: nil,
+                            totalTokens: 194_000_000,
+                            confidence: .totalOnly)),
+                ],
+                updatedAt: now),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-cycle-cost-summary")
+        await store.widgetSnapshotPersistTask?.value
+
+        let cursorEntry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        #expect(cursorEntry.tokenUsage?.sessionTokens == 1_400_000_000)
+        #expect(cursorEntry.tokenUsage?.sessionCostUSD == nil)
+        #expect(cursorEntry.tokenUsage?.sessionCostText == "Approx. $10.00-$20.00")
+    }
+
+    @Test
     func `widget snapshot caps cursor recent request details at thirty newest rows`() async throws {
         let settings = self.makeSettings()
         let fetcher = UsageFetcher()

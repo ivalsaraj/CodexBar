@@ -88,6 +88,56 @@ struct CursorStatusProbeUsageSummaryTests {
         #expect(usageSnapshot.cursorRecentRequestRange?.end == Date(timeIntervalSince1970: 1_780_272_000))
     }
 
+    @Test
+    func `parse usage summary totals all fetched usage events while capping recent request rows`() {
+        let summary = CursorUsageSummary(
+            billingCycleStart: "2026-05-17T00:00:00.000Z",
+            billingCycleEnd: "2026-06-17T00:00:00.000Z",
+            membershipType: "pro",
+            limitType: "user",
+            isUnlimited: false,
+            autoModelSelectedDisplayMessage: nil,
+            namedModelSelectedDisplayMessage: nil,
+            individualUsage: nil,
+            teamUsage: nil)
+        let baseMilliseconds = 1_781_497_560_000
+        let visibleEvents = (0..<30).map { index in
+            CursorUsageEvent(
+                timestamp: "\(baseMilliseconds - (index * 60000))",
+                model: "claude-opus-4-8-thinking-max",
+                requestsCosts: 1,
+                tokenUsage: CursorUsageEventTokenUsage(
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    cacheReadTokens: nil,
+                    cacheWriteTokens: nil,
+                    totalTokens: 1000))
+        }
+        let olderEvent = CursorUsageEvent(
+            timestamp: "\(baseMilliseconds - (31 * 60000))",
+            model: "claude-opus-4-8-thinking-max",
+            requestsCosts: 1,
+            tokenUsage: CursorUsageEventTokenUsage(
+                inputTokens: nil,
+                outputTokens: nil,
+                cacheReadTokens: nil,
+                cacheWriteTokens: nil,
+                totalTokens: 1_370_000))
+
+        let snapshot = CursorStatusProbe(browserDetection: BrowserDetection(cacheTTL: 0)).parseUsageSummary(
+            summary,
+            userInfo: nil,
+            rawJSON: nil,
+            usageEvents: visibleEvents + [olderEvent])
+        let usageSnapshot = snapshot.toUsageSnapshot()
+
+        #expect(snapshot.billingCycleTokensUsed == 1_400_000)
+        #expect(usageSnapshot.cursorTokenUsage?.billingCycleTokensUsed == 1_400_000)
+        #expect(usageSnapshot.cursorRecentRequests?.count == 30)
+        #expect(usageSnapshot.cursorRecentRequests?.reduce(0) { $0 + $1.tokens } == 30000)
+        #expect(usageSnapshot.cursorTokenUsage?.requestCostSummary != nil)
+    }
+
     /// Event rows from POST /api/dashboard/get-filtered-usage-events (`usageEventsDisplay`).
     /// Timestamp is Unix milliseconds as a string; model + tokenUsage drive widget rows; `kind` is not surfaced.
     @Test
@@ -109,6 +159,62 @@ struct CursorStatusProbeUsageSummaryTests {
         #expect(recent[1].model == "composer-2")
         #expect(recent[1].tokens == 120)
         #expect(recent[1].requests == 2)
+    }
+
+    @Test
+    func `usage events response decodes total count for pagination`() throws {
+        let json = """
+        {
+          "totalUsageEventsCount": 450,
+          "usageEventsDisplay": [
+            {
+              "timestamp": "1779888240000",
+              "model": "claude-opus-4-8-thinking-max",
+              "requestsCosts": 1,
+              "tokenUsage": { "totalTokens": 1000 }
+            }
+          ]
+        }
+        """
+        let response = try CursorStatusProbe.decodeUsageEventsPageResponse(from: Data(json.utf8))
+
+        #expect(response.totalUsageEventsCount == 450)
+        #expect(response.usageEventsDisplay?.count == 1)
+    }
+
+    @Test
+    func `usage events pagination continues until total count is fetched`() {
+        #expect(CursorStatusProbe.shouldFetchNextUsageEventsPage(
+            currentPageEventCount: 200,
+            fetchedEventCount: 200,
+            totalUsageEventsCount: 450,
+            page: 1))
+        #expect(CursorStatusProbe.shouldFetchNextUsageEventsPage(
+            currentPageEventCount: 200,
+            fetchedEventCount: 400,
+            totalUsageEventsCount: 450,
+            page: 2))
+        #expect(!CursorStatusProbe.shouldFetchNextUsageEventsPage(
+            currentPageEventCount: 50,
+            fetchedEventCount: 450,
+            totalUsageEventsCount: 450,
+            page: 3))
+    }
+
+    @Test
+    func `usage events pagination stops at max page guard`() {
+        #expect(!CursorStatusProbe.shouldFetchNextUsageEventsPage(
+            currentPageEventCount: 200,
+            fetchedEventCount: 4000,
+            totalUsageEventsCount: nil,
+            page: 20,
+            maxPages: 20))
+        #expect(CursorStatusProbe.shouldFetchNextUsageEventsPage(
+            currentPageEventCount: 200,
+            fetchedEventCount: 4000,
+            totalUsageEventsCount: 5000,
+            page: 20,
+            maxPages: 20))
     }
 
     @Test

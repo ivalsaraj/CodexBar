@@ -186,7 +186,7 @@ extension UsageStore {
         if provider == .cursor,
            let cursorTokenUsage = usageSnapshot.cursorTokenUsage
         {
-            let costSummary = usageSnapshot.cursorRecentRequests
+            let costSummary = cursorTokenUsage.requestCostSummary ?? usageSnapshot.cursorRecentRequests
                 .flatMap(CursorRequestCostEstimator.summarizedEstimate(for:))
             let estimatedCycleCost = costSummary?.exactUSD
                 .map { NSDecimalNumber(decimal: $0).doubleValue }

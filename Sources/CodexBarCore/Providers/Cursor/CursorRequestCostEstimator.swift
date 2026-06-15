@@ -1,7 +1,7 @@
 import Foundation
 
 /// Aggregated cycle-level cost summary across priced Cursor request rows.
-public struct CursorRequestCostSummary: Equatable, Sendable {
+public struct CursorRequestCostSummary: Codable, Equatable, Sendable {
     public let exactUSD: Decimal?
     public let lowerBoundUSD: Decimal?
     public let upperBoundUSD: Decimal?

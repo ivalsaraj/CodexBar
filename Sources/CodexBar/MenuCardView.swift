@@ -1440,8 +1440,8 @@ extension UsageMenuCardView.Model {
             }
             let quotaSummary = input.snapshot?.cursorRequests?.summaryText
             let recentRequests = Array(input.snapshot?.cursorRecentRequests?.prefix(30) ?? [])
-            let estimatedCycleCost = input.snapshot?.cursorRecentRequests
-                .flatMap(CursorRequestCostEstimator.summarizedEstimate(for:))
+            let estimatedCycleCost = input.snapshot?.cursorTokenUsage?.requestCostSummary ?? input.snapshot?
+                .cursorRecentRequests.flatMap(CursorRequestCostEstimator.summarizedEstimate(for:))
             guard cycleTokens != nil || quotaSummary != nil || !recentRequests.isEmpty else { return nil }
 
             let hasCycle = (cycleTokens ?? 0) > 0
