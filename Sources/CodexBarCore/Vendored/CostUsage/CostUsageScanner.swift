@@ -266,8 +266,12 @@ enum CostUsageScanner {
         }
 
         static func isInRange(dayKey: String, since: String, until: String) -> Bool {
-            if dayKey < since { return false }
-            if dayKey > until { return false }
+            if dayKey < since {
+                return false
+            }
+            if dayKey > until {
+                return false
+            }
             return true
         }
     }
@@ -275,7 +279,9 @@ enum CostUsageScanner {
     // MARK: - Codex
 
     private static func defaultCodexSessionsRoot(options: Options) -> URL {
-        if let override = options.codexSessionsRoot { return override }
+        if let override = options.codexSessionsRoot {
+            return override
+        }
         let env = ProcessInfo.processInfo.environment["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let env, !env.isEmpty {
             return URL(fileURLWithPath: env).appendingPathComponent("sessions", isDirectory: true)
@@ -380,7 +386,9 @@ enum CostUsageScanner {
         let filePath = fileURL.standardizedFileURL.path
         return roots.contains { root in
             let rootPath = root.standardizedFileURL.path
-            if filePath == rootPath { return true }
+            if filePath == rootPath {
+                return true
+            }
             let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
             return filePath.hasPrefix(prefix)
         }
@@ -597,7 +605,9 @@ enum CostUsageScanner {
                     guard let timestamp = obj["timestamp"] as? String else { return }
 
                     func toInt(_ value: Any?) -> Int {
-                        if let number = value as? NSNumber { return number.intValue }
+                        if let number = value as? NSNumber {
+                            return number.intValue
+                        }
                         return 0
                     }
 
@@ -763,7 +773,9 @@ enum CostUsageScanner {
                     let model = currentModel ?? modelFromInfo ?? "gpt-5"
 
                     func toInt(_ v: Any?) -> Int {
-                        if let n = v as? NSNumber { return n.intValue }
+                        if let n = v as? NSNumber {
+                            return n.intValue
+                        }
                         return 0
                     }
 
@@ -835,7 +847,9 @@ enum CostUsageScanner {
                         return
                     }
 
-                    if deltaInput == 0, deltaCached == 0, deltaOutput == 0 { return }
+                    if deltaInput == 0, deltaCached == 0, deltaOutput == 0 {
+                        return
+                    }
                     let cachedClamp = min(deltaCached, deltaInput)
                     add(dayKey: dayKey, model: model, input: deltaInput, cached: cachedClamp, output: deltaOutput)
                 })
@@ -1296,16 +1310,24 @@ extension Data {
 
 extension [Int] {
     subscript(safe index: Int) -> Int? {
-        if index < 0 { return nil }
-        if index >= self.count { return nil }
+        if index < 0 {
+            return nil
+        }
+        if index >= self.count {
+            return nil
+        }
         return self[index]
     }
 }
 
 extension [UInt8] {
     subscript(safe index: Int) -> UInt8? {
-        if index < 0 { return nil }
-        if index >= self.count { return nil }
+        if index < 0 {
+            return nil
+        }
+        if index >= self.count {
+            return nil
+        }
         return self[index]
     }
 }

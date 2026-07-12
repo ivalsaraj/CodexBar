@@ -716,7 +716,9 @@ private struct UsageHistoryChart: View {
 
     var body: some View {
         let values = self.points.map { point -> Double in
-            if let cost = point.costUSD { return cost }
+            if let cost = point.costUSD {
+                return cost
+            }
             return Double(point.totalTokens ?? 0)
         }
         let maxValue = values.max() ?? 0

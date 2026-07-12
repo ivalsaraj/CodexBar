@@ -54,7 +54,9 @@ extension UsageStore {
         let now = Date()
         let refreshInterval = self.openAIWebRefreshIntervalSeconds()
         let lastUpdatedAt = self.openAIDashboard?.updatedAt ?? self.lastOpenAIDashboardSnapshot?.updatedAt
-        if let lastUpdatedAt, now.timeIntervalSince(lastUpdatedAt) < refreshInterval { return }
+        if let lastUpdatedAt, now.timeIntervalSince(lastUpdatedAt) < refreshInterval {
+            return
+        }
         let stamp = now.formatted(date: .abbreviated, time: .shortened)
         self.logOpenAIWeb("[\(stamp)] OpenAI web refresh request: \(reason)")
         let forceRefresh = Self.forceOpenAIWebRefreshForStaleRequest(
@@ -748,7 +750,9 @@ extension UsageStore {
 
             if allowLastKnownLiveFallback {
                 let lastKnown = self.lastKnownLiveSystemCodexEmail?.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let lastKnown, !lastKnown.isEmpty { return lastKnown }
+                if let lastKnown, !lastKnown.isEmpty {
+                    return lastKnown
+                }
             }
             return nil
         case .managedAccount:
@@ -1042,7 +1046,9 @@ extension UsageStore {
                 } else {
                     found
                         .sorted { lhs, rhs in
-                            if lhs.sourceLabel == rhs.sourceLabel { return lhs.email < rhs.email }
+                            if lhs.sourceLabel == rhs.sourceLabel {
+                                return lhs.email < rhs.email
+                            }
                             return lhs.sourceLabel < rhs.sourceLabel
                         }
                         .map { "\($0.sourceLabel): \($0.email)" }
@@ -1160,7 +1166,9 @@ extension UsageStore {
 
             guard allowLastKnownLiveFallback else { return nil }
             let lastKnown = self.lastKnownLiveSystemCodexEmail?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let lastKnown, !lastKnown.isEmpty { return lastKnown }
+            if let lastKnown, !lastKnown.isEmpty {
+                return lastKnown
+            }
             return nil
         case .managedAccount:
             if self.openAIWebManagedTargetStoreIsUnreadable() {
@@ -1169,7 +1177,9 @@ extension UsageStore {
 
             let managed = self.currentManagedCodexRuntimeEmail()?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if let managed, !managed.isEmpty { return managed }
+            if let managed, !managed.isEmpty {
+                return managed
+            }
             return nil
         }
     }
@@ -1197,7 +1207,9 @@ extension UsageStore {
     }
 
     nonisolated static func shouldSkipOpenAIWebRefresh(_ context: OpenAIWebRefreshGateContext) -> Bool {
-        if context.force || context.accountDidChange { return false }
+        if context.force || context.accountDidChange {
+            return false
+        }
         if let lastAttemptAt = context.lastAttemptAt,
            context.now.timeIntervalSince(lastAttemptAt) < context.refreshInterval
         {

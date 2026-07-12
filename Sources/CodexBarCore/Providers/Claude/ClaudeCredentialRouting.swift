@@ -29,7 +29,9 @@ public enum ClaudeCredentialRouting: Sendable, Equatable {
     }
 
     public var isOAuth: Bool {
-        if case .oauth = self { return true }
+        if case .oauth = self {
+            return true
+        }
         return false
     }
 

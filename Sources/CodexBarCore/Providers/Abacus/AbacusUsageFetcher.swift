@@ -297,9 +297,15 @@ public enum AbacusUsageFetcher {
     }
 
     private static func double(from value: Any?) -> Double? {
-        if let d = value as? Double { return d }
-        if let i = value as? Int { return Double(i) }
-        if let n = value as? NSNumber { return n.doubleValue }
+        if let d = value as? Double {
+            return d
+        }
+        if let i = value as? Int {
+            return Double(i)
+        }
+        if let n = value as? NSNumber {
+            return n.doubleValue
+        }
         return nil
     }
 
@@ -307,7 +313,9 @@ public enum AbacusUsageFetcher {
         guard let isoString else { return nil }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: isoString) { return date }
+        if let date = formatter.date(from: isoString) {
+            return date
+        }
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: isoString)
     }

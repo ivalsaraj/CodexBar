@@ -57,7 +57,9 @@ extension SettingsStore {
         else {
             return fallback
         }
-        if self.tokenAccounts(for: .cursor).isEmpty { return fallback }
+        if self.tokenAccounts(for: .cursor).isEmpty {
+            return fallback
+        }
         return .manual
     }
 }

@@ -3,6 +3,7 @@ import Testing
 @testable import CodexBar
 @testable import CodexBarCore
 
+// swiftlint:disable:next type_body_length
 struct ClaudeUsageTests {
     private actor AsyncCounter {
         private var value = 0
@@ -573,8 +574,12 @@ struct ClaudeUsageTests {
                 "session_5h": ["pct_used": 0, "resets": ""],
                 "week_all_models": ["pct_used": 0, "resets": ""],
             ] as [String: Any]
-            if let email = entry["email"] { payload["account_email"] = email }
-            if let org = entry["org"] { payload["account_org"] = org }
+            if let email = entry["email"] {
+                payload["account_email"] = email
+            }
+            if let org = entry["org"] {
+                payload["account_org"] = org
+            }
             let data = try JSONSerialization.data(withJSONObject: payload)
             let snap = ClaudeUsageFetcher.parse(json: data)
             let emailRaw: String? = entry["email"] ?? String?.none
@@ -635,7 +640,9 @@ struct ClaudeUsageTests {
 
         try process.run()
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-            if process.isRunning { process.terminate() }
+            if process.isRunning {
+                process.terminate()
+            }
         }
         process.waitUntilExit()
 

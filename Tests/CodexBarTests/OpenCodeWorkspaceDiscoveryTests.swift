@@ -6,7 +6,7 @@ import Testing
 @Suite(.serialized)
 struct OpenCodeWorkspaceDiscoveryTests {
     @Test
-    func discoveriesReturnTypedLabelsAndOwnersThroughInjectedSession() async throws {
+    func `discoveries return typed labels and owners through injected session`() async throws {
         defer {
             OpenCodeStubURLProtocol.handler = nil
         }
@@ -36,7 +36,7 @@ struct OpenCodeWorkspaceDiscoveryTests {
     }
 
     @Test
-    func discoveryResultExposesMissingCredentialsAndFailures() async {
+    func `discovery result exposes missing credentials and failures`() async {
         defer { OpenCodeStubURLProtocol.handler = nil }
         OpenCodeStubURLProtocol.handler = { request in
             try Self.makeResponse(url: #require(request.url), body: "{}", statusCode: 500)
@@ -63,7 +63,7 @@ struct OpenCodeWorkspaceDiscoveryTests {
 
     @Test
     @MainActor
-    func failedImportDoesNotPersistFirstTimeCredential() async throws {
+    func `failed import does not persist first time credential`() async throws {
         defer { OpenCodeStubURLProtocol.handler = nil }
         OpenCodeStubURLProtocol.handler = { request in
             try Self.makeResponse(url: #require(request.url), body: "{}", statusCode: 500)
@@ -100,7 +100,7 @@ struct OpenCodeWorkspaceDiscoveryTests {
 
     @Test
     @MainActor
-    func importMapsDiscoveryFailureToTypedMutationResult() async throws {
+    func `import maps discovery failure to typed mutation result`() async throws {
         defer { OpenCodeStubURLProtocol.handler = nil }
         OpenCodeStubURLProtocol.handler = { request in
             try Self.makeResponse(url: #require(request.url), body: "{}", statusCode: 500)

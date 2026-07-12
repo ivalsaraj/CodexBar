@@ -301,13 +301,19 @@ public struct MiniMaxUsageFetcher: Sendable {
 
         func compose(_ base: URL) -> URL? {
             var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
-            if let path { components.path = "/" + path }
-            if let query { components.query = query }
+            if let path {
+                components.path = "/" + path
+            }
+            if let query {
+                components.query = query
+            }
             return components.url
         }
 
         if let url = URL(string: cleaned), url.scheme != nil {
-            if let composed = compose(url) { return composed }
+            if let composed = compose(url) {
+                return composed
+            }
             return url
         }
         guard let base = URL(string: "https://\(cleaned)") else { return nil }
@@ -611,7 +617,9 @@ enum MiniMaxUsageParser {
 
         for candidate in candidates {
             let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { return trimmed }
+            if !trimmed.isEmpty {
+                return trimmed
+            }
         }
         return nil
     }
@@ -632,7 +640,9 @@ enum MiniMaxUsageParser {
                     with: "",
                     options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { return trimmed }
+            if !trimmed.isEmpty {
+                return trimmed
+            }
         }
         return nil
     }
@@ -838,18 +848,32 @@ enum MiniMaxUsageParser {
 
     private static func minutes(from value: Double, unit: String) -> Int {
         let lower = unit.lowercased()
-        if lower.hasPrefix("d") { return Int((value * 24 * 60).rounded()) }
-        if lower.hasPrefix("h") { return Int((value * 60).rounded()) }
-        if lower.hasPrefix("m") { return Int(value.rounded()) }
-        if lower.hasPrefix("s") { return max(1, Int((value / 60).rounded())) }
+        if lower.hasPrefix("d") {
+            return Int((value * 24 * 60).rounded())
+        }
+        if lower.hasPrefix("h") {
+            return Int((value * 60).rounded())
+        }
+        if lower.hasPrefix("m") {
+            return Int(value.rounded())
+        }
+        if lower.hasPrefix("s") {
+            return max(1, Int((value / 60).rounded()))
+        }
         return 0
     }
 
     private static func seconds(from value: Double, unit: String) -> TimeInterval {
         let lower = unit.lowercased()
-        if lower.hasPrefix("d") { return value * 24 * 60 * 60 }
-        if lower.hasPrefix("h") { return value * 60 * 60 }
-        if lower.hasPrefix("m") { return value * 60 }
+        if lower.hasPrefix("d") {
+            return value * 24 * 60 * 60
+        }
+        if lower.hasPrefix("h") {
+            return value * 60 * 60
+        }
+        if lower.hasPrefix("m") {
+            return value * 60
+        }
         return value
     }
 

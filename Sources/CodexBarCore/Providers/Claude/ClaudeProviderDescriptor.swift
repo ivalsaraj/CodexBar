@@ -183,7 +183,9 @@ struct ClaudeOAuthFetchStrategy: ProviderFetchStrategy {
 
     private func loadNonInteractiveCredentialRecord(environment: [String: String]) -> ClaudeOAuthCredentialRecord? {
         #if DEBUG
-        if let override = Self.nonInteractiveCredentialRecordOverride { return override }
+        if let override = Self.nonInteractiveCredentialRecordOverride {
+            return override
+        }
         #endif
 
         return try? ClaudeOAuthCredentialsStore.loadRecord(
@@ -195,7 +197,9 @@ struct ClaudeOAuthFetchStrategy: ProviderFetchStrategy {
 
     private func isClaudeCLIAvailable(environment: [String: String]) -> Bool {
         #if DEBUG
-        if let override = Self.claudeCLIAvailableOverride { return override }
+        if let override = Self.claudeCLIAvailableOverride {
+            return override
+        }
         #endif
         return ClaudeCLIResolver.isAvailable(environment: environment)
     }

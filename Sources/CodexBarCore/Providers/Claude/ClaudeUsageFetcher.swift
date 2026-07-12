@@ -561,7 +561,9 @@ extension ClaudeUsageFetcher {
 
         func firstWindowDict(_ keys: [String]) -> [String: Any]? {
             for key in keys {
-                if let dict = obj[key] as? [String: Any] { return dict }
+                if let dict = obj[key] as? [String: Any] {
+                    return dict
+                }
             }
             return nil
         }
@@ -637,7 +639,9 @@ extension ClaudeUsageFetcher {
             df.locale = Locale(identifier: "en_US_POSIX")
             df.timeZone = tz ?? TimeZone.current
             df.dateFormat = format
-            if let t = timePart, let date = df.date(from: t) { return date }
+            if let t = timePart, let date = df.date(from: t) {
+                return date
+            }
         }
         return nil
     }

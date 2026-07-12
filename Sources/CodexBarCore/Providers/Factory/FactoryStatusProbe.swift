@@ -566,7 +566,9 @@ public actor FactorySessionStore {
         self.sessionCookies = cookieArray.compactMap { props in
             var cookieProps: [HTTPCookiePropertyKey: Any] = [:]
             for (key, value) in props {
-                if key.hasSuffix("_isDate") || key.hasSuffix("_isURL") { continue }
+                if key.hasSuffix("_isDate") || key.hasSuffix("_isURL") {
+                    continue
+                }
 
                 let propKey = HTTPCookiePropertyKey(key)
 
@@ -660,7 +662,9 @@ public struct FactoryStatusProbe: Sendable {
                     lastError = error
                 }
             }
-            if let lastError { throw lastError }
+            if let lastError {
+                throw lastError
+            }
             throw FactoryStatusProbeError.noSessionCookie
         }
 
@@ -707,7 +711,9 @@ public struct FactoryStatusProbe: Sendable {
             }
         }
 
-        if let lastError { throw lastError }
+        if let lastError {
+            throw lastError
+        }
         throw FactoryStatusProbeError.noSessionCookie
     }
 
@@ -741,7 +747,9 @@ public struct FactoryStatusProbe: Sendable {
                     }
                 }
             }
-            if let lastError { return .failure(lastError) }
+            if let lastError {
+                return .failure(lastError)
+            }
             return .skipped
         } catch {
             BrowserCookieAccessGate.recordIfNeeded(error)
@@ -830,7 +838,9 @@ public struct FactoryStatusProbe: Sendable {
                 lastError = error
             }
         }
-        if let lastError { return .failure(lastError) }
+        if let lastError {
+            return .failure(lastError)
+        }
         return .skipped
     }
 
@@ -873,7 +883,9 @@ public struct FactoryStatusProbe: Sendable {
             }
         }
 
-        if let lastError { return .failure(lastError) }
+        if let lastError {
+            return .failure(lastError)
+        }
         return .skipped
     }
 
@@ -910,7 +922,9 @@ public struct FactoryStatusProbe: Sendable {
             }
         }
 
-        if let lastError { throw lastError }
+        if let lastError {
+            throw lastError
+        }
         throw FactoryStatusProbeError.noSessionCookie
     }
 
@@ -993,7 +1007,9 @@ public struct FactoryStatusProbe: Sendable {
                 }
             }
 
-            if let lastError { throw lastError }
+            if let lastError {
+                throw lastError
+            }
             throw error
         } catch {
             throw error
@@ -1007,7 +1023,9 @@ public struct FactoryStatusProbe: Sendable {
     private static func bearerToken(fromHeader cookieHeader: String) -> String? {
         for pair in CookieHeaderNormalizer.pairs(from: cookieHeader) where pair.name == "access-token" {
             let token = pair.value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !token.isEmpty { return token }
+            if !token.isEmpty {
+                return token
+            }
         }
         return nil
     }
@@ -1159,7 +1177,9 @@ public struct FactoryStatusProbe: Sendable {
         var seen = Set<String>()
         return candidates.filter { url in
             let key = url.absoluteString
-            if seen.contains(key) { return false }
+            if seen.contains(key) {
+                return false
+            }
             seen.insert(key)
             return true
         }
@@ -1201,7 +1221,9 @@ public struct FactoryStatusProbe: Sendable {
                 lastError = error
             }
         }
-        if let lastError { throw lastError }
+        if let lastError {
+            throw lastError
+        }
         throw FactoryStatusProbeError.notLoggedIn
     }
 
@@ -1220,7 +1242,9 @@ public struct FactoryStatusProbe: Sendable {
                 lastError = error
             }
         }
-        if let lastError { throw lastError }
+        if let lastError {
+            throw lastError
+        }
         throw FactoryStatusProbeError.networkError("WorkOS auth failed")
     }
 
@@ -1289,7 +1313,9 @@ public struct FactoryStatusProbe: Sendable {
                 logger("WorkOS cookie auth failed for client \(clientID): \(error.localizedDescription)")
             }
         }
-        if let lastError { throw lastError }
+        if let lastError {
+            throw lastError
+        }
         throw FactoryStatusProbeError.networkError("WorkOS cookie auth failed")
     }
 

@@ -299,9 +299,15 @@ final class UsageStore {
 
     private static func isRunningTestsProcess() -> Bool {
         let environment = ProcessInfo.processInfo.environment
-        if environment["XCTestConfigurationFilePath"] != nil { return true }
-        if environment["XCTestSessionIdentifier"] != nil { return true }
-        if environment["SWIFT_TESTING_ENABLED"] != nil { return true }
+        if environment["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+        if environment["XCTestSessionIdentifier"] != nil {
+            return true
+        }
+        if environment["SWIFT_TESTING_ENABLED"] != nil {
+            return true
+        }
         return CommandLine.arguments.contains { argument in
             argument.contains("xctest") || argument.contains("swift-testing")
         }
@@ -330,14 +336,18 @@ final class UsageStore {
 
     var preferredSnapshot: UsageSnapshot? {
         for provider in self.enabledProviders() {
-            if let snap = self.snapshots[provider] { return snap }
+            if let snap = self.snapshots[provider] {
+                return snap
+            }
         }
         return nil
     }
 
     var iconStyle: IconStyle {
         let enabled = self.enabledProviders()
-        if enabled.count > 1 { return .combined }
+        if enabled.count > 1 {
+            return .combined
+        }
         if let provider = enabled.first {
             return self.style(for: provider)
         }
@@ -601,7 +611,9 @@ final class UsageStore {
                 }
             }
             for provider in providers {
-                if Task.isCancelled { break }
+                if Task.isCancelled {
+                    break
+                }
                 await self.refreshTokenUsage(provider, force: force)
             }
         }
@@ -1205,7 +1217,9 @@ extension UsageStore {
                 do {
                     try fm.removeItem(at: cacheDir)
                 } catch let error as NSError {
-                    if error.domain == NSCocoaErrorDomain, error.code == NSFileNoSuchFileError { continue }
+                    if error.domain == NSCocoaErrorDomain, error.code == NSFileNoSuchFileError {
+                        continue
+                    }
                     return error.localizedDescription
                 }
             }
@@ -1311,7 +1325,9 @@ extension UsageStore {
             self.tokenFailureGates[provider]?.recordSuccess()
             self.persistWidgetSnapshot(reason: "token-usage")
         } catch {
-            if error is CancellationError { return }
+            if error is CancellationError {
+                return
+            }
             let duration = Date().timeIntervalSince(startedAt)
             let msg = error.localizedDescription
             let durationText = String(format: "%.2f", duration)

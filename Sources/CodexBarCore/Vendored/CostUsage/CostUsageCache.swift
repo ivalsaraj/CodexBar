@@ -27,7 +27,9 @@ enum CostUsageCacheIO {
 
     static func load(provider: UsageProvider, cacheRoot: URL? = nil) -> CostUsageCache {
         let url = self.cacheFileURL(provider: provider, cacheRoot: cacheRoot)
-        if let decoded = self.loadCache(at: url) { return decoded }
+        if let decoded = self.loadCache(at: url) {
+            return decoded
+        }
         return CostUsageCache()
     }
 

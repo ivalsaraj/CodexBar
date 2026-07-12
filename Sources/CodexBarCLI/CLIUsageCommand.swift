@@ -204,7 +204,9 @@ extension CodexBarCLI {
     }
 
     private static func accountSelections(from accounts: [ProviderTokenAccount]) -> [ProviderTokenAccount?] {
-        if accounts.isEmpty { return [nil] }
+        if accounts.isEmpty {
+            return [nil]
+        }
         return accounts.map { Optional($0) }
     }
 

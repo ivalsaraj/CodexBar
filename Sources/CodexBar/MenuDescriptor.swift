@@ -139,7 +139,9 @@ struct MenuDescriptor {
         let meta = store.metadata(for: provider)
         var entries: [Entry] = []
         let headlineText: String = {
-            if let ver = Self.versionNumber(for: provider, store: store) { return "\(meta.displayName) \(ver)" }
+            if let ver = Self.versionNumber(for: provider, store: store) {
+                return "\(meta.displayName) \(ver)"
+            }
             return meta.displayName
         }()
         entries.append(.text(headlineText, .headline))
@@ -433,8 +435,12 @@ struct MenuDescriptor {
     }
 
     private static func switchAccountTarget(for provider: UsageProvider?, store: UsageStore) -> MenuAction {
-        if let provider { return .switchAccount(provider) }
-        if let enabled = store.enabledProviders().first { return .switchAccount(enabled) }
+        if let provider {
+            return .switchAccount(provider)
+        }
+        if let enabled = store.enabledProviders().first {
+            return .switchAccount(enabled)
+        }
         return .switchAccount(.codex)
     }
 

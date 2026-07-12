@@ -108,7 +108,9 @@ extension UsageStore {
         let deadline = Date().addingTimeInterval(Self.codexSnapshotWaitTimeoutSeconds)
 
         while Date() < deadline {
-            if Task.isCancelled { return nil }
+            if Task.isCancelled {
+                return nil
+            }
             if let snapshot = await MainActor.run(body: { self.snapshots[.codex] }),
                snapshot.updatedAt >= minimumUpdatedAt
             {
@@ -125,7 +127,9 @@ extension UsageStore {
         let refreshStartDeadline = Date().addingTimeInterval(Self.codexRefreshStartGraceSeconds)
 
         while Date() < deadline {
-            if Task.isCancelled { return nil }
+            if Task.isCancelled {
+                return nil
+            }
             let state = await MainActor.run {
                 (
                     snapshot: self.snapshots[.codex],

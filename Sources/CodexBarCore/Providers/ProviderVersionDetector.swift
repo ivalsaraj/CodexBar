@@ -31,7 +31,9 @@ public enum ProviderVersionDetector {
             ["-v"],
         ]
         for args in candidates {
-            if let version = Self.run(path: path, args: args) { return version }
+            if let version = Self.run(path: path, args: args) {
+                return version
+            }
         }
         return nil
     }
@@ -45,7 +47,9 @@ public enum ProviderVersionDetector {
             ["-v"],
         ]
         for args in candidates {
-            if let version = Self.run(path: path, args: args) { return version }
+            if let version = Self.run(path: path, args: args) {
+                return version
+            }
         }
         return nil
     }

@@ -202,7 +202,9 @@ struct TTYCommandRunnerEnvTests {
         TTYCommandRunner.drainRemainingOutput(
             until: Date().addingTimeInterval(1),
             readChunk: {
-                if reads.isEmpty { return .closed }
+                if reads.isEmpty {
+                    return .closed
+                }
                 return reads.removeFirst()
             },
             processChunk: { data in
@@ -230,7 +232,9 @@ struct TTYCommandRunnerEnvTests {
             until: Date().addingTimeInterval(1),
             readChunk: {
                 readCount += 1
-                if reads.isEmpty { return .closed }
+                if reads.isEmpty {
+                    return .closed
+                }
                 return reads.removeFirst()
             },
             processChunk: { data in

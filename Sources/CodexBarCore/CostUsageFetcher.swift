@@ -108,13 +108,19 @@ public struct CostUsageFetcher: Sendable {
         let currentDay = daily.data.max { lhs, rhs in
             let lDate = CostUsageDateParser.parse(lhs.date) ?? .distantPast
             let rDate = CostUsageDateParser.parse(rhs.date) ?? .distantPast
-            if lDate != rDate { return lDate < rDate }
+            if lDate != rDate {
+                return lDate < rDate
+            }
             let lCost = lhs.costUSD ?? -1
             let rCost = rhs.costUSD ?? -1
-            if lCost != rCost { return lCost < rCost }
+            if lCost != rCost {
+                return lCost < rCost
+            }
             let lTokens = lhs.totalTokens ?? -1
             let rTokens = rhs.totalTokens ?? -1
-            if lTokens != rTokens { return lTokens < rTokens }
+            if lTokens != rTokens {
+                return lTokens < rTokens
+            }
             return lhs.date < rhs.date
         }
         // Prefer summary totals when present; fall back to summing daily entries.
@@ -137,17 +143,25 @@ public struct CostUsageFetcher: Sendable {
     static func selectCurrentSession(from sessions: [CostUsageSessionReport.Entry])
         -> CostUsageSessionReport.Entry?
     {
-        if sessions.isEmpty { return nil }
+        if sessions.isEmpty {
+            return nil
+        }
         return sessions.max { lhs, rhs in
             let lDate = CostUsageDateParser.parse(lhs.lastActivity) ?? .distantPast
             let rDate = CostUsageDateParser.parse(rhs.lastActivity) ?? .distantPast
-            if lDate != rDate { return lDate < rDate }
+            if lDate != rDate {
+                return lDate < rDate
+            }
             let lCost = lhs.costUSD ?? -1
             let rCost = rhs.costUSD ?? -1
-            if lCost != rCost { return lCost < rCost }
+            if lCost != rCost {
+                return lCost < rCost
+            }
             let lTokens = lhs.totalTokens ?? -1
             let rTokens = rhs.totalTokens ?? -1
-            if lTokens != rTokens { return lTokens < rTokens }
+            if lTokens != rTokens {
+                return lTokens < rTokens
+            }
             return lhs.session < rhs.session
         }
     }
@@ -155,17 +169,25 @@ public struct CostUsageFetcher: Sendable {
     static func selectMostRecentMonth(from months: [CostUsageMonthlyReport.Entry])
         -> CostUsageMonthlyReport.Entry?
     {
-        if months.isEmpty { return nil }
+        if months.isEmpty {
+            return nil
+        }
         return months.max { lhs, rhs in
             let lDate = CostUsageDateParser.parseMonth(lhs.month) ?? .distantPast
             let rDate = CostUsageDateParser.parseMonth(rhs.month) ?? .distantPast
-            if lDate != rDate { return lDate < rDate }
+            if lDate != rDate {
+                return lDate < rDate
+            }
             let lCost = lhs.costUSD ?? -1
             let rCost = rhs.costUSD ?? -1
-            if lCost != rCost { return lCost < rCost }
+            if lCost != rCost {
+                return lCost < rCost
+            }
             let lTokens = lhs.totalTokens ?? -1
             let rTokens = rhs.totalTokens ?? -1
-            if lTokens != rTokens { return lTokens < rTokens }
+            if lTokens != rTokens {
+                return lTokens < rTokens
+            }
             return lhs.month < rhs.month
         }
     }

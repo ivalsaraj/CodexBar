@@ -23,8 +23,12 @@ enum SessionQuotaNotificationLogic {
         let wasDepleted = previousRemaining <= Self.depletedThreshold
         let isDepleted = currentRemaining <= Self.depletedThreshold
 
-        if !wasDepleted, isDepleted { return .depleted }
-        if wasDepleted, !isDepleted { return .restored }
+        if !wasDepleted, isDepleted {
+            return .depleted
+        }
+        if wasDepleted, !isDepleted {
+            return .restored
+        }
         return .none
     }
 }

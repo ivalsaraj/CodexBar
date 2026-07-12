@@ -687,7 +687,9 @@ public actor CursorSessionStore {
             var cookieProps: [HTTPCookiePropertyKey: Any] = [:]
             for (key, value) in props {
                 // Skip marker keys
-                if key.hasSuffix("_isDate") || key.hasSuffix("_isURL") { continue }
+                if key.hasSuffix("_isDate") || key.hasSuffix("_isURL") {
+                    continue
+                }
 
                 let propKey = HTTPCookiePropertyKey(key)
 
@@ -1111,7 +1113,9 @@ public struct CursorStatusProbe: Sendable {
                     timeout: remainingTimeout)
                 let (response, rawJSON) = try await self.fetchUsageEventsPage(pageRequest)
                 if let advertisedCount = response.totalUsageEventsCount {
-                    if let expectedCount, expectedCount != advertisedCount { return .unavailable }
+                    if let expectedCount, expectedCount != advertisedCount {
+                        return .unavailable
+                    }
                     guard advertisedCount <= Self.maxUsageEventsPages * Self.usageEventsPageSize else {
                         return .unavailable
                     }
@@ -1195,8 +1199,12 @@ public struct CursorStatusProbe: Sendable {
         let planLimitRaw = Double(summary.individualUsage?.plan?.limit ?? 0)
         func normPct(_ value: Double?) -> Double? {
             guard let v = value else { return nil }
-            if v < 0 { return 0 }
-            if v > 100 { return 100 }
+            if v < 0 {
+                return 0
+            }
+            if v > 100 {
+                return 100
+            }
             return v
         }
 

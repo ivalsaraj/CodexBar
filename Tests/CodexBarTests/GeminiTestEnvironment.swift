@@ -40,8 +40,12 @@ struct GeminiTestEnvironment {
             "access_token": accessToken,
             "expiry_date": expiry.timeIntervalSince1970 * 1000,
         ]
-        if let refreshToken { payload["refresh_token"] = refreshToken }
-        if let idToken { payload["id_token"] = idToken }
+        if let refreshToken {
+            payload["refresh_token"] = refreshToken
+        }
+        if let idToken {
+            payload["id_token"] = idToken
+        }
         let data = try JSONSerialization.data(withJSONObject: payload)
         try data.write(to: self.geminiDir.appendingPathComponent("oauth_creds.json"), options: .atomic)
     }

@@ -106,7 +106,9 @@ public struct CodebuffUsageSnapshot: Sendable {
     }
 
     private var resolvedTotal: Double? {
-        if let creditsTotal { return max(0, creditsTotal) }
+        if let creditsTotal {
+            return max(0, creditsTotal)
+        }
         if let creditsUsed, let creditsRemaining {
             return max(0, creditsUsed + creditsRemaining)
         }

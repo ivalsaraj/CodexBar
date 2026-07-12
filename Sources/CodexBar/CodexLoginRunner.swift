@@ -131,7 +131,9 @@ struct CodexLoginRunner {
         await withTaskGroup(of: String?.self) { group -> String in
             group.addTask {
                 if #available(macOS 13.0, *) {
-                    if let data = try? pipe.fileHandleForReading.readToEnd() { return self.decode(data) }
+                    if let data = try? pipe.fileHandleForReading.readToEnd() {
+                        return self.decode(data)
+                    }
                 }
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 return Self.decode(data)
@@ -143,7 +145,9 @@ struct CodexLoginRunner {
             }
             let result = await group.next()
             group.cancelAll()
-            if let result, let text = result { return text }
+            if let result, let text = result {
+                return text
+            }
             return ""
         }
     }

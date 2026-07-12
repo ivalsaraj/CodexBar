@@ -60,9 +60,15 @@ private enum ProviderMacroError {
 
 private enum ProviderMacroIntrospection {
     static func typeDecl(from declaration: some DeclSyntaxProtocol) -> (decl: DeclGroupSyntax, name: String)? {
-        if let decl = declaration.as(StructDeclSyntax.self) { return (decl, decl.name.text) }
-        if let decl = declaration.as(ClassDeclSyntax.self) { return (decl, decl.name.text) }
-        if let decl = declaration.as(EnumDeclSyntax.self) { return (decl, decl.name.text) }
+        if let decl = declaration.as(StructDeclSyntax.self) {
+            return (decl, decl.name.text)
+        }
+        if let decl = declaration.as(ClassDeclSyntax.self) {
+            return (decl, decl.name.text)
+        }
+        if let decl = declaration.as(EnumDeclSyntax.self) {
+            return (decl, decl.name.text)
+        }
         return nil
     }
 
@@ -72,7 +78,9 @@ private enum ProviderMacroIntrospection {
             guard self.isStatic(varDecl.modifiers) else { continue }
             for binding in varDecl.bindings {
                 guard let pattern = binding.pattern.as(IdentifierPatternSyntax.self) else { continue }
-                if pattern.identifier.text == "descriptor" { return true }
+                if pattern.identifier.text == "descriptor" {
+                    return true
+                }
             }
         }
         return false
@@ -82,14 +90,20 @@ private enum ProviderMacroIntrospection {
         for member in decl.memberBlock.members {
             guard let funcDecl = member.decl.as(FunctionDeclSyntax.self) else { continue }
             guard self.isStatic(funcDecl.modifiers) else { continue }
-            if funcDecl.name.text == "makeDescriptor" { return true }
+            if funcDecl.name.text == "makeDescriptor" {
+                return true
+            }
         }
         return false
     }
 
     static func hasAccessibleInit(in decl: DeclGroupSyntax) -> Bool {
-        if self.hasZeroArgInit(in: decl) { return true }
-        if decl.is(EnumDeclSyntax.self) { return false }
+        if self.hasZeroArgInit(in: decl) {
+            return true
+        }
+        if decl.is(EnumDeclSyntax.self) {
+            return false
+        }
         return self.canSynthesizeDefaultInit(in: decl)
     }
 
@@ -97,9 +111,13 @@ private enum ProviderMacroIntrospection {
         for member in decl.memberBlock.members {
             guard let initDecl = member.decl.as(InitializerDeclSyntax.self) else { continue }
             let params = initDecl.signature.parameterClause.parameters
-            if params.isEmpty { return true }
+            if params.isEmpty {
+                return true
+            }
             let allDefaulted = params.allSatisfy { $0.defaultValue != nil }
-            if allDefaulted { return true }
+            if allDefaulted {
+                return true
+            }
         }
         return false
     }
@@ -109,8 +127,12 @@ private enum ProviderMacroIntrospection {
             guard let varDecl = member.decl.as(VariableDeclSyntax.self) else { continue }
             guard !self.isStatic(varDecl.modifiers) else { continue }
             for binding in varDecl.bindings {
-                if binding.accessorBlock != nil { continue }
-                if binding.initializer == nil { return false }
+                if binding.accessorBlock != nil {
+                    continue
+                }
+                if binding.initializer == nil {
+                    return false
+                }
             }
         }
         return true

@@ -74,7 +74,9 @@ extension SettingsStore {
         else {
             return fallback
         }
-        if self.tokenAccounts(for: .opencodego).isEmpty { return fallback }
+        if self.tokenAccounts(for: .opencodego).isEmpty {
+            return fallback
+        }
         return .manual
     }
 

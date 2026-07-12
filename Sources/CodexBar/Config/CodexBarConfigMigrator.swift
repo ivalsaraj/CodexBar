@@ -167,7 +167,9 @@ struct CodexBarConfigMigrator {
     {
         for (provider, loader) in providers {
             let token = try? loader()
-            if token != nil { state.sawLegacySecrets = true }
+            if token != nil {
+                state.sawLegacySecrets = true
+            }
             self.updateProvider(provider, config: &config, state: &state) { entry in
                 self.setIfEmpty(&entry.apiKey, token)
             }
@@ -181,7 +183,9 @@ struct CodexBarConfigMigrator {
     {
         for (provider, loader) in providers {
             let header = try? loader()
-            if header != nil { state.sawLegacySecrets = true }
+            if header != nil {
+                state.sawLegacySecrets = true
+            }
             self.updateProvider(provider, config: &config, state: &state) { entry in
                 self.setIfEmpty(&entry.cookieHeader, header)
             }
@@ -222,7 +226,9 @@ struct CodexBarConfigMigrator {
         if token?.isEmpty ?? true {
             token = userDefaults.string(forKey: "kimiManualCookieHeader")
         }
-        if token != nil { state.sawLegacySecrets = true }
+        if token != nil {
+            state.sawLegacySecrets = true
+        }
         self.updateProvider(.kimi, config: &config, state: &state) { entry in
             self.setIfEmpty(&entry.cookieHeader, token)
         }
@@ -235,7 +241,9 @@ struct CodexBarConfigMigrator {
         state: inout MigrationState)
     {
         let header = try? stores.opencodeCookieStore.loadCookieHeader()
-        if header != nil { state.sawLegacySecrets = true }
+        if header != nil {
+            state.sawLegacySecrets = true
+        }
         let workspaceID = userDefaults.string(forKey: "opencodeWorkspaceID")
         self.updateProvider(.opencode, config: &config, state: &state) { entry in
             var changed = false

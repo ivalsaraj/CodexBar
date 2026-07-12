@@ -100,7 +100,9 @@ extension StatusItemController {
 
         guard let nextWakeAt else { return Self.blinkIdleFallbackInterval }
         let delay = nextWakeAt.timeIntervalSince(now)
-        if delay <= 0 { return Self.blinkActiveTickInterval }
+        if delay <= 0 {
+            return Self.blinkActiveTickInterval
+        }
         return .seconds(delay)
     }
 
@@ -217,8 +219,12 @@ extension StatusItemController {
     }
 
     private func isBlinkingAllowed(at date: Date = .init()) -> Bool {
-        if self.settings.randomBlinkEnabled { return true }
-        if let until = self.blinkForceUntil, until > date { return true }
+        if self.settings.randomBlinkEnabled {
+            return true
+        }
+        if let until = self.blinkForceUntil, until > date {
+            return true
+        }
         self.blinkForceUntil = nil
         return false
     }
@@ -302,7 +308,9 @@ extension StatusItemController {
         let statusIndicator: ProviderStatusIndicator = {
             for provider in self.store.enabledProvidersForDisplay() {
                 let indicator = self.store.statusIndicator(for: provider)
-                if indicator.hasIssue { return indicator }
+                if indicator.hasIssue {
+                    return indicator
+                }
             }
             return .none
         }()
@@ -502,7 +510,9 @@ extension StatusItemController {
     }
 
     private func setButtonImage(_ image: NSImage, for button: NSStatusBarButton) {
-        if button.image === image { return }
+        if button.image === image {
+            return
+        }
         button.image = image
     }
 
@@ -663,7 +673,9 @@ extension StatusItemController {
     }
 
     private func shouldAnimate(provider: UsageProvider, mergeIcons: Bool? = nil) -> Bool {
-        if self.store.debugForceAnimation { return true }
+        if self.store.debugForceAnimation {
+            return true
+        }
 
         let isMerged = mergeIcons ?? self.shouldMergeIcons
         let isVisible = isMerged ? self.isEnabled(provider) : self.isVisible(provider)
@@ -673,7 +685,9 @@ extension StatusItemController {
         // Animating the fallback causes unnecessary CPU usage (battery drain). See #269, #139.
         let isEnabled = self.isEnabled(provider)
         let isFallbackOnly = !isEnabled && self.fallbackProvider == provider
-        if isFallbackOnly { return false }
+        if isFallbackOnly {
+            return false
+        }
 
         let isStale = self.store.isStale(provider: provider)
         let hasData = self.store.snapshot(for: provider) != nil

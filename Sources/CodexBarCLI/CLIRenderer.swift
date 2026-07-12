@@ -329,18 +329,26 @@ enum CLIRenderer {
     }
 
     private static func paceRightLabel(for pace: UsagePace, now: Date) -> String? {
-        if pace.willLastToReset { return "Lasts until reset" }
+        if pace.willLastToReset {
+            return "Lasts until reset"
+        }
         guard let etaSeconds = pace.etaSeconds else { return nil }
         let etaText = Self.paceDurationText(seconds: etaSeconds, now: now)
-        if etaText == "now" { return "Runs out now" }
+        if etaText == "now" {
+            return "Runs out now"
+        }
         return "Runs out in \(etaText)"
     }
 
     private static func paceDurationText(seconds: TimeInterval, now: Date) -> String {
         let date = now.addingTimeInterval(seconds)
         let countdown = UsageFormatter.resetCountdownDescription(from: date, now: now)
-        if countdown == "now" { return "now" }
-        if countdown.hasPrefix("in ") { return String(countdown.dropFirst(3)) }
+        if countdown == "now" {
+            return "now"
+        }
+        if countdown.hasPrefix("in ") {
+            return String(countdown.dropFirst(3))
+        }
         return countdown
     }
 

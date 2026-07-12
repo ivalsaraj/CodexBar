@@ -25,8 +25,12 @@ extension CodexBarCLI {
             }
             return .custom(enabled)
         }
-        if enabled.count >= 3 { return .custom(enabled) }
-        if let first = enabled.first { return ProviderSelection(provider: first) }
+        if enabled.count >= 3 {
+            return .custom(enabled)
+        }
+        if let first = enabled.first {
+            return ProviderSelection(provider: first)
+        }
         return .single(.codex)
     }
 
@@ -56,9 +60,13 @@ extension CodexBarCLI {
 
     static func shouldUseColor(noColor: Bool, format: OutputFormat) -> Bool {
         guard format == .text else { return false }
-        if noColor { return false }
+        if noColor {
+            return false
+        }
         let env = ProcessInfo.processInfo.environment
-        if env["TERM"]?.lowercased() == "dumb" { return false }
+        if env["TERM"]?.lowercased() == "dumb" {
+            return false
+        }
         return isatty(STDOUT_FILENO) == 1
     }
 

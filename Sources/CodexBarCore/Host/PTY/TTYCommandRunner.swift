@@ -264,7 +264,9 @@ public struct TTYCommandRunner {
                 let dst = dest.bindMemory(to: UInt8.self)
                 for idx in 0..<src.count {
                     var byte = src[idx]
-                    if byte >= 65, byte <= 90 { byte += 32 }
+                    if byte >= 65, byte <= 90 {
+                        byte += 32
+                    }
                     dst[idx] = byte
                 }
             }
@@ -291,7 +293,9 @@ public struct TTYCommandRunner {
     }
 
     static func drainReadResult(for data: Data, terminalRead: Int, errno err: Int32) -> DrainReadResult {
-        if !data.isEmpty { return .data(data) }
+        if !data.isEmpty {
+            return .data(data)
+        }
 
         if terminalRead == 0 {
             return .closed
@@ -332,7 +336,9 @@ public struct TTYCommandRunner {
         }
 
         let mainURL = Bundle.main.bundleURL
-        if mainURL.pathExtension == "app", let found = candidate(inAppBundleURL: mainURL) { return found }
+        if mainURL.pathExtension == "app", let found = candidate(inAppBundleURL: mainURL) {
+            return found
+        }
 
         if let argv0 = CommandLine.arguments.first {
             var url = URL(fileURLWithPath: argv0)
@@ -342,8 +348,12 @@ public struct TTYCommandRunner {
             var probe = url
             for _ in 0..<6 {
                 let parent = probe.deletingLastPathComponent()
-                if parent.pathExtension == "app", let found = candidate(inAppBundleURL: parent) { return found }
-                if parent.path == probe.path { break }
+                if parent.pathExtension == "app", let found = candidate(inAppBundleURL: parent) {
+                    return found
+                }
+                if parent.path == probe.path {
+                    break
+                }
                 probe = parent
             }
         }
@@ -405,7 +415,9 @@ public struct TTYCommandRunner {
                         retries = 0
                         continue
                     }
-                    if written == 0 { break }
+                    if written == 0 {
+                        break
+                    }
 
                     let err = errno
                     if err == EAGAIN || err == EWOULDBLOCK {
@@ -687,8 +699,12 @@ public struct TTYCommandRunner {
                     lastEnter = Date()
                 }
 
-                if case .closed = readResult, !proc.isRunning { break }
-                if !proc.isRunning { break }
+                if case .closed = readResult, !proc.isRunning {
+                    break
+                }
+                if !proc.isRunning {
+                    break
+                }
                 usleep(60000)
             }
 
@@ -844,7 +860,9 @@ public struct TTYCommandRunner {
                     continue
                 }
             }
-            if sawCodexStatus { break }
+            if sawCodexStatus {
+                break
+            }
             usleep(120_000)
         }
 
@@ -874,8 +892,12 @@ public struct TTYCommandRunner {
     // swiftlint:enable function_body_length
 
     public static func which(_ tool: String) -> String? {
-        if tool == "codex", let located = BinaryLocator.resolveCodexBinary() { return located }
-        if tool == "claude", let located = BinaryLocator.resolveClaudeBinary() { return located }
+        if tool == "codex", let located = BinaryLocator.resolveCodexBinary() {
+            return located
+        }
+        if tool == "claude", let located = BinaryLocator.resolveClaudeBinary() {
+            return located
+        }
         return self.runWhich(tool)
     }
 

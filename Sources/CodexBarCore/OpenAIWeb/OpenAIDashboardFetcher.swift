@@ -279,7 +279,9 @@ public struct OpenAIDashboardFetcher {
             let hasDashboardPageSignal = dashboardData.hasDashboardPageSignal
             let hasReturnableData = dashboardData.hasReturnableData
 
-            if codeReview != nil, codeReviewFirstSeenAt == nil { codeReviewFirstSeenAt = Date() }
+            if codeReview != nil, codeReviewFirstSeenAt == nil {
+                codeReviewFirstSeenAt = Date()
+            }
             if anyDashboardSignalAt == nil, hasDashboardPageSignal {
                 anyDashboardSignalAt = Date()
             }
@@ -440,7 +442,9 @@ public struct OpenAIDashboardFetcher {
                 continue
             }
 
-            if scrape.loginRequired { throw FetchError.loginRequired }
+            if scrape.loginRequired {
+                throw FetchError.loginRequired
+            }
             if scrape.cloudflareInterstitial {
                 throw FetchError.noDashboardData(body: "Cloudflare challenge detected in WebView.")
             }
@@ -827,7 +831,9 @@ public struct OpenAIDashboardFetcher {
     private nonisolated static func firstNonEmpty(_ candidates: String?...) -> String? {
         for candidate in candidates {
             let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed?.isEmpty == false { return trimmed }
+            if trimmed?.isEmpty == false {
+                return trimmed
+            }
         }
         return nil
     }
@@ -866,7 +872,9 @@ extension OpenAIDashboardFetcher {
     }
 
     nonisolated static func shouldWaitForCreditsHistory(_ context: CreditsHistoryWaitContext) -> Bool {
-        if context.didScrollToCredits { return true }
+        if context.didScrollToCredits {
+            return true
+        }
 
         // When the header is visible but rows are still empty, wait briefly for the table to render.
         if context.creditsHeaderPresent, context.creditsHeaderInViewport {
@@ -935,7 +943,9 @@ extension OpenAIDashboardFetcher {
             firstSeenAt = nil
             return
         }
-        if firstSeenAt == nil { firstSeenAt = now }
+        if firstSeenAt == nil {
+            firstSeenAt = now
+        }
         guard error != lastError else { return }
         lastError = error
         logger("usage breakdown error: \(error)")

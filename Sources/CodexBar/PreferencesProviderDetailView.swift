@@ -237,7 +237,9 @@ private struct ProviderDetailHeaderView: View {
         let first = lines[0]
         let rest = lines.dropFirst().joined(separator: "\n")
         let tail = rest.trimmingCharacters(in: .whitespacesAndNewlines)
-        if tail.isEmpty { return String(first) }
+        if tail.isEmpty {
+            return String(first)
+        }
         return "\(first) • \(tail)"
     }
 }

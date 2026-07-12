@@ -110,7 +110,9 @@ enum PiSessionCostScanner {
     }
 
     private static func defaultPiSessionsRoot(options: Options) -> URL {
-        if let override = options.piSessionsRoot { return override }
+        if let override = options.piSessionsRoot {
+            return override
+        }
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".pi", isDirectory: true)
             .appendingPathComponent("agent", isDirectory: true)

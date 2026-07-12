@@ -89,7 +89,9 @@ extension SettingsStore {
 
         let trimmedLabel = label?.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedToken = token?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let trimmedToken, trimmedToken.isEmpty { return }
+        if let trimmedToken, trimmedToken.isEmpty {
+            return
+        }
 
         let existing = data.accounts[index]
         let resolvedIdentifier: String?
@@ -165,7 +167,9 @@ extension SettingsStore {
     }
 
     func ensureTokenAccountsLoaded() {
-        if self.tokenAccountsLoaded { return }
+        if self.tokenAccountsLoaded {
+            return
+        }
         self.tokenAccountsLoaded = true
     }
 

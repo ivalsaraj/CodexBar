@@ -532,7 +532,9 @@ private actor BlockingStatusMenuCodexFetchStrategy {
     }
 
     func waitUntilStarted() async {
-        if self.didStart { return }
+        if self.didStart {
+            return
+        }
         await withCheckedContinuation { continuation in
             self.startedWaiters.append(continuation)
         }
@@ -559,7 +561,9 @@ private actor BlockingManagedCodexLoginRunnerForStatusMenuTests: ManagedCodexLog
     }
 
     func waitUntilStarted() async {
-        if self.didStart { return }
+        if self.didStart {
+            return
+        }
         await withCheckedContinuation { continuation in
             self.startedWaiters.append(continuation)
         }

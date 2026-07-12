@@ -76,8 +76,12 @@ struct KimiWebFetchStrategy: ProviderFetchStrategy {
     }
 
     func shouldFallback(on error: Error, context: ProviderFetchContext) -> Bool {
-        if case KimiAPIError.missingToken = error { return false }
-        if case KimiAPIError.invalidToken = error { return false }
+        if case KimiAPIError.missingToken = error {
+            return false
+        }
+        if case KimiAPIError.invalidToken = error {
+            return false
+        }
         return true
     }
 

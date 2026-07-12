@@ -124,7 +124,9 @@ struct ProvidersPane: View {
             isPresented: Binding(
                 get: { self.activeConfirmation != nil },
                 set: { isPresented in
-                    if !isPresented { self.activeConfirmation = nil }
+                    if !isPresented {
+                        self.activeConfirmation = nil
+                    }
                 }),
             actions: {
                 if let active = self.activeConfirmation {

@@ -438,8 +438,12 @@ final class ProviderSwitcherView: NSView {
         let maxRows = min(4, count)
         let fourRowThreshold = 15
         let minimumComfortableAverage: CGFloat = stackedIcons ? 50 : 54
-        if count >= fourRowThreshold { return maxRows }
-        if maxAllowedSegmentWidth >= minimumComfortableAverage { return 1 }
+        if count >= fourRowThreshold {
+            return maxRows
+        }
+        if maxAllowedSegmentWidth >= minimumComfortableAverage {
+            return 1
+        }
 
         for rows in 2...maxRows {
             let perRow = self.layoutCount(for: count, rows: rows)
@@ -449,7 +453,9 @@ final class ProviderSwitcherView: NSView {
                 count: perRow,
                 outerPadding: outerPadding,
                 minimumGap: 1)
-            if allowedWidth >= minimumComfortableAverage { return rows }
+            if allowedWidth >= minimumComfortableAverage {
+                return rows
+            }
         }
 
         return maxRows
@@ -494,8 +500,12 @@ final class ProviderSwitcherView: NSView {
         // Only sacrifice padding when we'd otherwise squeeze buttons into unreadable widths.
         let minimumComfortableAverage: CGFloat = count >= 5 ? 50 : 54
 
-        if averageButtonWidth(outerPadding: preferred) >= minimumComfortableAverage { return preferred }
-        if averageButtonWidth(outerPadding: reduced) >= minimumComfortableAverage { return reduced }
+        if averageButtonWidth(outerPadding: preferred) >= minimumComfortableAverage {
+            return preferred
+        }
+        if averageButtonWidth(outerPadding: reduced) >= minimumComfortableAverage {
+            return reduced
+        }
         return minimal
     }
 
@@ -645,7 +655,9 @@ final class ProviderSwitcherView: NSView {
 
         func evenFloor(_ value: CGFloat) -> CGFloat {
             var v = floor(value)
-            if Int(v) % 2 != 0 { v -= 1 }
+            if Int(v) % 2 != 0 {
+                v -= 1
+            }
             return v
         }
 
@@ -830,7 +842,9 @@ final class TokenAccountSwitcherView: NSView {
     private func buildButtons(useTwoRows: Bool) {
         let perRow = useTwoRows ? Int(ceil(Double(self.entries.count) / 2.0)) : self.entries.count
         let rows: [[TokenAccountMenuEntry]] = {
-            if !useTwoRows { return [self.entries] }
+            if !useTwoRows {
+                return [self.entries]
+            }
             let first = Array(self.entries.prefix(perRow))
             let second = Array(self.entries.dropFirst(perRow))
             return [first, second]
@@ -957,7 +971,9 @@ final class CodexAccountSwitcherView: NSView {
     private func buildButtons(useTwoRows: Bool) {
         let perRow = useTwoRows ? Int(ceil(Double(self.accounts.count) / 2.0)) : self.accounts.count
         let rows: [[CodexVisibleAccount]] = {
-            if !useTwoRows { return [self.accounts] }
+            if !useTwoRows {
+                return [self.accounts]
+            }
             let first = Array(self.accounts.prefix(perRow))
             let second = Array(self.accounts.dropFirst(perRow))
             return [first, second]

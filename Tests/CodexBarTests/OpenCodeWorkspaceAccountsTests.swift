@@ -4,7 +4,7 @@ import Testing
 
 struct OpenCodeWorkspaceAccountsTests {
     @Test
-    func canonicalIDsDistinguishWorkspacesWhileRemainingStableForSamePair() throws {
+    func `canonical I ds distinguish workspaces while remaining stable for same pair`() throws {
         let tokenAccountID = try #require(UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"))
         let first = try #require(OpenCodeWorkspaceAccount(
             tokenAccountID: tokenAccountID,
@@ -28,7 +28,7 @@ struct OpenCodeWorkspaceAccountsTests {
     }
 
     @Test
-    func deduplicatesAccountsAndPreservesActiveWorkspace() throws {
+    func `deduplicates accounts and preserves active workspace`() throws {
         let tokenAccountID = try #require(UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"))
         let alpha = try #require(OpenCodeWorkspaceAccount(
             tokenAccountID: tokenAccountID,
@@ -50,7 +50,7 @@ struct OpenCodeWorkspaceAccountsTests {
     }
 
     @Test
-    func pruningRemovesDeletedTokenAccountsAndFallsBackDeterministically() throws {
+    func `pruning removes deleted token accounts and falls back deterministically`() throws {
         let firstToken = try #require(UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC"))
         let secondToken = try #require(UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"))
         let first = try #require(OpenCodeWorkspaceAccount(
@@ -72,7 +72,7 @@ struct OpenCodeWorkspaceAccountsTests {
     }
 
     @Test
-    func invalidAndMissingCredentialsHaveExplicitMutationResults() {
+    func `invalid and missing credentials have explicit mutation results`() {
         var accounts = OpenCodeWorkspaceAccounts()
 
         #expect(accounts.add(
@@ -86,7 +86,7 @@ struct OpenCodeWorkspaceAccountsTests {
     }
 
     @Test
-    func persistedAccountIDIsRecomputedFromCanonicalFields() throws {
+    func `persisted account ID is recomputed from canonical fields`() throws {
         let json = """
         {
           "id": "stale-id",

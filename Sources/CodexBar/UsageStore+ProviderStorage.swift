@@ -191,7 +191,9 @@ extension UsageStore {
         var pathCache: [String: ProviderStorageFootprint] = [:]
 
         for provider in candidatePathsByProvider.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
-            if Task.isCancelled { return footprints }
+            if Task.isCancelled {
+                return footprints
+            }
             guard let candidatePaths = candidatePathsByProvider[provider] else { continue }
             let pathKey = candidatePaths.joined(separator: "\u{1f}")
             if let cached = pathCache[pathKey] {

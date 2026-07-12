@@ -84,7 +84,9 @@ public enum ClaudeOAuthRefreshFailureGate {
 
     public static func shouldAttempt(now: Date = Date()) -> Bool {
         #if DEBUG
-        if let override = self.shouldAttemptOverride { return override }
+        if let override = self.shouldAttemptOverride {
+            return override
+        }
         #endif
 
         return self.lock.withLock { state in
@@ -216,7 +218,9 @@ public enum ClaudeOAuthRefreshFailureGate {
 
     private static func currentFingerprint() -> AuthFingerprint? {
         #if DEBUG
-        if let override = self.fingerprintProviderOverride { return override() }
+        if let override = self.fingerprintProviderOverride {
+            return override()
+        }
         #endif
         return AuthFingerprint(
             keychain: ClaudeOAuthCredentialsStore.currentClaudeKeychainFingerprintWithoutPromptForAuthGate(),

@@ -528,7 +528,9 @@ extension SettingsStore {
         else {
             return fallback
         }
-        if self.tokenAccounts(for: .codex).isEmpty { return fallback }
+        if self.tokenAccounts(for: .codex).isEmpty {
+            return fallback
+        }
         return .manual
     }
 }

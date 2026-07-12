@@ -113,7 +113,9 @@ extension UsageStore {
         selected: ProviderTokenAccount?) -> [ProviderTokenAccount]
     {
         let limit = Self.tokenAccountMenuSnapshotLimit
-        if accounts.count <= limit { return accounts }
+        if accounts.count <= limit {
+            return accounts
+        }
         var limited = Array(accounts.prefix(limit))
         if let selected, !limited.contains(where: { $0.id == selected.id }) {
             limited.removeLast()

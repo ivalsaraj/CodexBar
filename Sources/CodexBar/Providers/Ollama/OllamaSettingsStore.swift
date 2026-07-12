@@ -57,7 +57,9 @@ extension SettingsStore {
         else {
             return fallback
         }
-        if self.tokenAccounts(for: .ollama).isEmpty { return fallback }
+        if self.tokenAccounts(for: .ollama).isEmpty {
+            return fallback
+        }
         return .manual
     }
 }

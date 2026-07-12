@@ -126,7 +126,9 @@ enum CodexBarCLI {
 
     static func effectiveArgv(_ argv: [String]) -> [String] {
         guard let first = argv.first else { return ["usage"] }
-        if first.hasPrefix("-") { return ["usage"] + argv }
+        if first.hasPrefix("-") {
+            return ["usage"] + argv
+        }
         return argv
     }
 }

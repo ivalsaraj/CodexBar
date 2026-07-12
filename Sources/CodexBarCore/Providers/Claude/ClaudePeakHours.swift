@@ -59,7 +59,9 @@ public enum ClaudePeakHours: Sendable {
         default: 0
         }
 
-        if skip == 0 { return anchor }
+        if skip == 0 {
+            return anchor
+        }
         return calendar.date(byAdding: .day, value: skip, to: anchor) ?? anchor
     }
 

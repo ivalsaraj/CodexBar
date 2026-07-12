@@ -260,7 +260,9 @@ public enum CodexOAuthUsageFetcher {
 
     private static func normalizeChatGPTBaseURL(_ value: String) -> String {
         var trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { trimmed = Self.defaultChatGPTBaseURL }
+        if trimmed.isEmpty {
+            trimmed = Self.defaultChatGPTBaseURL
+        }
         while trimmed.hasSuffix("/") {
             trimmed.removeLast()
         }

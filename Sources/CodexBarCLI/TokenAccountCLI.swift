@@ -357,7 +357,9 @@ struct TokenAccountCLIContext {
         if account != nil, TokenAccountSupportCatalog.support(for: provider)?.requiresManualCookieSource == true {
             return .manual
         }
-        if let override = config?.cookieSource { return override }
+        if let override = config?.cookieSource {
+            return override
+        }
         if config?.sanitizedCookieHeader != nil {
             return .manual
         }

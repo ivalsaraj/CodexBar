@@ -90,7 +90,9 @@ extension SettingsStore {
         else {
             return fallback
         }
-        if self.tokenAccounts(for: .minimax).isEmpty { return fallback }
+        if self.tokenAccounts(for: .minimax).isEmpty {
+            return fallback
+        }
         return .manual
     }
 }

@@ -176,7 +176,9 @@ private actor BlockingTokenAccountFetchStrategy {
     }
 
     func waitUntilStarted(count: Int) async {
-        if self.startedCount >= count { return }
+        if self.startedCount >= count {
+            return
+        }
         await withCheckedContinuation { continuation in
             self.startedWaiters.append((count: count, continuation: continuation))
         }

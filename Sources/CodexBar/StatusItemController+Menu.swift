@@ -1,3 +1,5 @@
+// swiftlint:disable file_length
+
 import AppKit
 import CodexBarCore
 import Observation
@@ -574,8 +576,12 @@ extension StatusItemController {
     private func addActionableSections(_ sections: [MenuDescriptor.Section], to menu: NSMenu, width: CGFloat) {
         let actionableSections = sections.filter { section in
             section.entries.contains { entry in
-                if case .action = entry { return true }
-                if case .submenu = entry { return true }
+                if case .action = entry {
+                    return true
+                }
+                if case .submenu = entry {
+                    return true
+                }
                 return false
             }
         }
@@ -899,7 +905,9 @@ extension StatusItemController {
 
     private func resolvedMenuProvider(enabledProviders: [UsageProvider]? = nil) -> UsageProvider? {
         let enabled = enabledProviders ?? self.store.enabledProvidersForDisplay()
-        if enabled.isEmpty { return .codex }
+        if enabled.isEmpty {
+            return .codex
+        }
         if let selected = self.selectedMenuProvider, enabled.contains(selected) {
             return selected
         }
@@ -1638,7 +1646,9 @@ extension StatusItemController {
     }
 
     private func selectOverviewProvider(_ provider: UsageProvider, menu: NSMenu) {
-        if !self.settings.mergedMenuLastSelectedWasOverview, self.selectedMenuProvider == provider { return }
+        if !self.settings.mergedMenuLastSelectedWasOverview, self.selectedMenuProvider == provider {
+            return
+        }
         self.settings.mergedMenuLastSelectedWasOverview = false
         self.lastMergedSwitcherSelection = nil
         self.selectedMenuProvider = provider

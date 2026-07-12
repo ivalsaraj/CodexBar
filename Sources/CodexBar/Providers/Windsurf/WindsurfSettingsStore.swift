@@ -87,7 +87,9 @@ extension SettingsStore {
         else {
             return fallback
         }
-        if self.tokenAccounts(for: .windsurf).isEmpty { return fallback }
+        if self.tokenAccounts(for: .windsurf).isEmpty {
+            return fallback
+        }
         return .manual
     }
 }

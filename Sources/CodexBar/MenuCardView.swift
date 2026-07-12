@@ -637,16 +637,14 @@ struct UsageMenuCardExtraUsageSectionView: View {
     let width: CGFloat
 
     var body: some View {
-        Group {
-            if let providerCost = self.model.providerCost {
-                ProviderCostContent(
-                    section: providerCost,
-                    progressColor: self.model.progressColor)
-                    .padding(.horizontal, 16)
-                    .padding(.top, self.topPadding)
-                    .padding(.bottom, self.bottomPadding)
-                    .frame(width: self.width, alignment: .leading)
-            }
+        if let providerCost = self.model.providerCost {
+            ProviderCostContent(
+                section: providerCost,
+                progressColor: self.model.progressColor)
+                .padding(.horizontal, 16)
+                .padding(.top, self.topPadding)
+                .padding(.bottom, self.bottomPadding)
+                .frame(width: self.width, alignment: .leading)
         }
     }
 }
@@ -823,7 +821,9 @@ extension UsageMenuCardView.Model {
         account: AccountInfo,
         metadata: ProviderMetadata) -> String
     {
-        if let email = snapshot?.accountEmail(for: provider), !email.isEmpty { return email }
+        if let email = snapshot?.accountEmail(for: provider), !email.isEmpty {
+            return email
+        }
         if metadata.usesAccountFallback,
            let email = account.email, !email.isEmpty
         {
@@ -1369,9 +1369,15 @@ extension UsageMenuCardView.Model {
         let actualUsed = window.usedPercent
         let expectedPercent = showUsed ? expectedUsed : (100 - expectedUsed)
         let actualPercent = showUsed ? actualUsed : (100 - actualUsed)
-        if expectedPercent.isFinite == false || actualPercent.isFinite == false { return nil }
+        if expectedPercent.isFinite == false || actualPercent.isFinite == false {
+            return nil
+        }
         let paceOnTop = actualUsed <= expectedUsed
-        let pacePercent: Double? = if detail.stage == .onTrack { nil } else { expectedPercent }
+        let pacePercent: Double? = if detail.stage == .onTrack {
+            nil
+        } else {
+            expectedPercent
+        }
         return PaceDetail(
             leftLabel: detail.leftLabel,
             rightLabel: detail.rightLabel,

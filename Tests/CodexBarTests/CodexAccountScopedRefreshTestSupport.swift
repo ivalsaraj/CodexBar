@@ -265,7 +265,9 @@ actor BlockingCodexFetchStrategy {
     }
 
     func waitUntilStarted() async {
-        if self.didStart { return }
+        if self.didStart {
+            return
+        }
         await withCheckedContinuation { continuation in
             self.startedWaiters.append(continuation)
         }
@@ -293,7 +295,9 @@ actor BlockingOpenAIDashboardLoader {
     }
 
     func waitUntilStarted() async {
-        if self.didStart { return }
+        if self.didStart {
+            return
+        }
         await withCheckedContinuation { continuation in
             self.startedWaiters.append(continuation)
         }
@@ -320,7 +324,9 @@ actor BlockingWidgetSnapshotSaver {
     }
 
     func waitUntilStarted(count: Int) async {
-        if self.snapshots.count >= count { return }
+        if self.snapshots.count >= count {
+            return
+        }
         await withCheckedContinuation { continuation in
             self.startedWaiters.append(continuation)
         }

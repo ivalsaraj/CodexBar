@@ -296,7 +296,9 @@ public enum ShellCommandLocator {
         func fire() -> Bool {
             self.lock.lock()
             defer { self.lock.unlock() }
-            if self.fired { return false }
+            if self.fired {
+                return false
+            }
             self.fired = true
             return true
         }
@@ -431,7 +433,9 @@ public enum ShellCommandLocator {
             let data = handle.availableData
             if data.isEmpty {
                 handle.readabilityHandler = nil
-                if stdoutDone.fire() { drainGroup.leave() }
+                if stdoutDone.fire() {
+                    drainGroup.leave()
+                }
             } else {
                 stdoutCollector.append(data)
             }
@@ -442,7 +446,9 @@ public enum ShellCommandLocator {
             let data = handle.availableData
             if data.isEmpty {
                 handle.readabilityHandler = nil
-                if stderrDone.fire() { drainGroup.leave() }
+                if stderrDone.fire() {
+                    drainGroup.leave()
+                }
             }
         }
 
@@ -469,8 +475,12 @@ public enum ShellCommandLocator {
             }
             stdoutHandle.readabilityHandler = nil
             stderrHandle.readabilityHandler = nil
-            if stdoutDone.fire() { drainGroup.leave() }
-            if stderrDone.fire() { drainGroup.leave() }
+            if stdoutDone.fire() {
+                drainGroup.leave()
+            }
+            if stderrDone.fire() {
+                drainGroup.leave()
+            }
             return nil
         }
 
@@ -487,8 +497,12 @@ public enum ShellCommandLocator {
         if drainGroup.wait(timeout: .now() + 0.6) != .success {
             stdoutHandle.readabilityHandler = nil
             stderrHandle.readabilityHandler = nil
-            if stdoutDone.fire() { drainGroup.leave() }
-            if stderrDone.fire() { drainGroup.leave() }
+            if stdoutDone.fire() {
+                drainGroup.leave()
+            }
+            if stderrDone.fire() {
+                drainGroup.leave()
+            }
         }
         return stdoutCollector.drain()
     }
@@ -558,8 +572,12 @@ public enum ShellCommandLocator {
     }
 
     private static func expandPath(_ raw: String, home: String) -> String {
-        if raw == "~" { return home }
-        if raw.hasPrefix("~/") { return home + String(raw.dropFirst()) }
+        if raw == "~" {
+            return home
+        }
+        if raw.hasPrefix("~/") {
+            return home + String(raw.dropFirst())
+        }
         return raw
     }
 }

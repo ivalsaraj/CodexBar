@@ -141,7 +141,9 @@ public enum CursorModelNormalizer {
         let mode = remainder.contains("thinking") ? "thinking" : nil
         remainder.removeAll { $0 == "thinking" }
         let effort = remainder.last.flatMap { self.effortTokens.contains($0) ? $0 : nil }
-        if effort != nil { remainder.removeLast() }
+        if effort != nil {
+            remainder.removeLast()
+        }
 
         let family: String?
         let versionParts: [String]
@@ -181,7 +183,9 @@ public enum CursorModelNormalizer {
     }
 
     private static func inferAnthropicFamily(versionParts: [String], effort: String?) -> String {
-        if versionParts == ["4", "6"], effort == "max" || effort == "xhigh" { return "opus" }
+        if versionParts == ["4", "6"], effort == "max" || effort == "xhigh" {
+            return "opus"
+        }
         return "claude"
     }
 

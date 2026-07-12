@@ -159,7 +159,9 @@ actor CoalescingManagedOpenAIDashboardLoader {
     }
 
     func waitUntilStarted(count: Int = 1) async {
-        if self.started >= count { return }
+        if self.started >= count {
+            return
+        }
         await withCheckedContinuation { continuation in
             self.startWaiters.append((count: count, continuation: continuation))
         }

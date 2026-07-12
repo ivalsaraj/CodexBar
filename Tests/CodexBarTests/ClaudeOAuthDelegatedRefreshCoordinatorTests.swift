@@ -252,7 +252,9 @@ struct ClaudeOAuthDelegatedRefreshCoordinatorTests {
             }
 
             func waitStarted() async {
-                if self.hasStarted { return }
+                if self.hasStarted {
+                    return
+                }
                 await withCheckedContinuation { cont in
                     self.startedContinuations.append(cont)
                 }
@@ -266,7 +268,9 @@ struct ClaudeOAuthDelegatedRefreshCoordinatorTests {
             }
 
             func waitRelease() async {
-                if self.isReleased { return }
+                if self.isReleased {
+                    return
+                }
                 await withCheckedContinuation { cont in
                     self.releaseContinuations.append(cont)
                 }

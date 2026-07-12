@@ -122,7 +122,9 @@ public struct CodexReconciledState: Sendable {
     }
 
     private static func resolvePlan(response: CodexUsageResponse, credentials: CodexOAuthCredentials) -> String? {
-        if let plan = response.planType?.rawValue, !plan.isEmpty { return plan }
+        if let plan = response.planType?.rawValue, !plan.isEmpty {
+            return plan
+        }
         guard let idToken = credentials.idToken,
               let payload = UsageFetcher.parseJWT(idToken)
         else {

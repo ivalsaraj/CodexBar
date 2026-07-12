@@ -160,8 +160,12 @@ enum SyntheticUsageParser {
         let object = try JSONSerialization.jsonObject(with: data, options: [])
 
         let root: [String: Any] = {
-            if let dict = object as? [String: Any] { return dict }
-            if let array = object as? [Any] { return ["quotas": array] }
+            if let dict = object as? [String: Any] {
+                return dict
+            }
+            if let array = object as? [Any] {
+                return ["quotas": array]
+            }
             return [:]
         }()
 
@@ -225,13 +229,17 @@ enum SyntheticUsageParser {
 
         for candidate in candidates {
             let quotas = self.extractQuotaObjects(from: candidate)
-            if !quotas.isEmpty { return quotas }
+            if !quotas.isEmpty {
+                return quotas
+            }
         }
         return []
     }
 
     private static func planName(from root: [String: Any]) -> String? {
-        if let direct = self.firstString(in: root, keys: planKeys) { return direct }
+        if let direct = self.firstString(in: root, keys: planKeys) {
+            return direct
+        }
         if let dataDict = root["data"] as? [String: Any],
            let plan = self.firstString(in: dataDict, keys: planKeys)
         {
@@ -308,7 +316,9 @@ enum SyntheticUsageParser {
     }
 
     private static func windowMinutes(from payload: [String: Any]) -> Int? {
-        if let minutes = self.firstInt(in: payload, keys: windowMinutesKeys) { return minutes }
+        if let minutes = self.firstInt(in: payload, keys: windowMinutesKeys) {
+            return minutes
+        }
         if let hours = self.firstDouble(in: payload, keys: windowHoursKeys) {
             return Int((hours * 60).rounded())
         }
@@ -457,27 +467,35 @@ enum SyntheticUsageParser {
 
     private static func normalizedPercent(_ value: Double?) -> Double? {
         guard let value else { return nil }
-        if value <= 1 { return value * 100 }
+        if value <= 1 {
+            return value * 100
+        }
         return value
     }
 
     private static func firstString(in payload: [String: Any], keys: [String]) -> String? {
         for key in keys {
-            if let value = self.stringValue(payload[key]) { return value }
+            if let value = self.stringValue(payload[key]) {
+                return value
+            }
         }
         return nil
     }
 
     private static func firstDouble(in payload: [String: Any], keys: [String]) -> Double? {
         for key in keys {
-            if let value = self.doubleValue(payload[key]) { return value }
+            if let value = self.doubleValue(payload[key]) {
+                return value
+            }
         }
         return nil
     }
 
     private static func firstInt(in payload: [String: Any], keys: [String]) -> Int? {
         for key in keys {
-            if let value = self.intValue(payload[key]) { return value }
+            if let value = self.intValue(payload[key]) {
+                return value
+            }
         }
         return nil
     }

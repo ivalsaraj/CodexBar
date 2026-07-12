@@ -331,7 +331,9 @@ public struct OpenCodeGoUsageFetcher: Sendable {
     }
 
     private static func parseUsageNested(_ dict: [String: Any], now: Date, depth: Int) -> OpenCodeGoUsageSnapshot? {
-        if depth > 3 { return nil }
+        if depth > 3 {
+            return nil
+        }
         var rolling: [String: Any]?
         var weekly: [String: Any]?
         var monthly: [String: Any]?
@@ -475,10 +477,14 @@ public struct OpenCodeGoUsageFetcher: Sendable {
         guard !candidates.isEmpty else { return nil }
         let comparator: (WindowCandidate, WindowCandidate) -> Bool = { lhs, rhs in
             if pickShorter {
-                if lhs.resetInSec == rhs.resetInSec { return lhs.percent > rhs.percent }
+                if lhs.resetInSec == rhs.resetInSec {
+                    return lhs.percent > rhs.percent
+                }
                 return lhs.resetInSec < rhs.resetInSec
             }
-            if lhs.resetInSec == rhs.resetInSec { return lhs.percent > rhs.percent }
+            if lhs.resetInSec == rhs.resetInSec {
+                return lhs.percent > rhs.percent
+            }
             return lhs.resetInSec > rhs.resetInSec
         }
         return candidates.min(by: comparator)

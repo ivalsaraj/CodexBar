@@ -182,7 +182,9 @@ private struct ProviderSidebarDropDelegate: DropDelegate {
               let toIndex = self.providers.firstIndex(of: self.item)
         else { return }
 
-        if fromIndex == toIndex { return }
+        if fromIndex == toIndex {
+            return
+        }
         let adjustedIndex = toIndex > fromIndex ? toIndex + 1 : toIndex
         self.moveProviders(IndexSet(integer: fromIndex), adjustedIndex)
     }

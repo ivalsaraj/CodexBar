@@ -4,7 +4,7 @@ import Testing
 
 struct OpenCodeUsageParserTests {
     @Test
-    func parsesTypedWorkspaceMetadataFromJSON() {
+    func `parses typed workspace metadata from JSON`() {
         let text = #"{"workspaces":[{"id":"wrk_ALPHA","name":"Alpha","owner":{"name":"Alice"}}]}"#
 
         let workspaces = OpenCodeUsageFetcher.parseWorkspaces(text: text)

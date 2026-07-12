@@ -738,14 +738,18 @@ struct PlanUtilizationHistoryChartMenuView: View {
         geo: GeometryProxy)
     {
         guard let location else {
-            if self.selectedPointID != nil { self.selectedPointID = nil }
+            if self.selectedPointID != nil {
+                self.selectedPointID = nil
+            }
             return
         }
 
         guard let plotAnchor = proxy.plotFrame else { return }
         let plotFrame = geo[plotAnchor]
         guard plotFrame.contains(location) else {
-            if self.selectedPointID != nil { self.selectedPointID = nil }
+            if self.selectedPointID != nil {
+                self.selectedPointID = nil
+            }
             return
         }
 

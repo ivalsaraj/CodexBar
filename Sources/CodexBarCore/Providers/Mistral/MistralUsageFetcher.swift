@@ -190,7 +190,9 @@ public enum MistralUsageFetcher {
     private static func parseDate(_ string: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: string) { return date }
+        if let date = formatter.date(from: string) {
+            return date
+        }
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: string)
     }

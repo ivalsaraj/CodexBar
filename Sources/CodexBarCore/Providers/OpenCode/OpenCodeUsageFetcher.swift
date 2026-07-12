@@ -23,6 +23,7 @@ public enum OpenCodeUsageError: LocalizedError {
     }
 }
 
+// swiftlint:disable:next type_body_length
 public struct OpenCodeUsageFetcher: Sendable {
     private static let log = CodexBarLog.logger(LogCategories.opencodeUsage)
     private static let baseURL = URL(string: "https://opencode.ai")!
@@ -604,7 +605,9 @@ public struct OpenCodeUsageFetcher: Sendable {
     }
 
     private static func parseUsageNested(_ dict: [String: Any], now: Date, depth: Int) -> OpenCodeUsageSnapshot? {
-        if depth > 3 { return nil }
+        if depth > 3 {
+            return nil
+        }
         var rolling: [String: Any]?
         var weekly: [String: Any]?
 
@@ -733,10 +736,14 @@ public struct OpenCodeUsageFetcher: Sendable {
         guard !candidates.isEmpty else { return nil }
         let comparator: (WindowCandidate, WindowCandidate) -> Bool = { lhs, rhs in
             if pickShorter {
-                if lhs.resetInSec == rhs.resetInSec { return lhs.percent > rhs.percent }
+                if lhs.resetInSec == rhs.resetInSec {
+                    return lhs.percent > rhs.percent
+                }
                 return lhs.resetInSec < rhs.resetInSec
             }
-            if lhs.resetInSec == rhs.resetInSec { return lhs.percent > rhs.percent }
+            if lhs.resetInSec == rhs.resetInSec {
+                return lhs.percent > rhs.percent
+            }
             return lhs.resetInSec > rhs.resetInSec
         }
         return candidates.min(by: comparator)
@@ -865,7 +872,9 @@ public struct OpenCodeUsageFetcher: Sendable {
     }
 
     private static func summarizeJSON(object: Any, depth: Int) -> String {
-        if depth > 3 { return "" }
+        if depth > 3 {
+            return ""
+        }
         if let dict = object as? [String: Any] {
             let keys = dict.keys.sorted()
             var parts: [String] = []

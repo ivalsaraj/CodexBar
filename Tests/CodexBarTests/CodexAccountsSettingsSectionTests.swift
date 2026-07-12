@@ -411,7 +411,9 @@ private actor BlockingManagedCodexLoginRunnerForSettingsSectionTests: ManagedCod
     }
 
     func waitUntilStarted() async {
-        if self.didStart { return }
+        if self.didStart {
+            return
+        }
         await withCheckedContinuation { continuation in
             self.startedWaiters.append(continuation)
         }

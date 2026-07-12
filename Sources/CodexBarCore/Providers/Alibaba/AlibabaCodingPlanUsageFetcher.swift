@@ -979,10 +979,18 @@ public struct AlibabaCodingPlanUsageFetcher: Sendable {
     }
 
     private static func parseInt(_ raw: Any?) -> Int? {
-        if let value = raw as? Int { return value }
-        if let value = raw as? Int64 { return Int(value) }
-        if let value = raw as? Double { return Int(value) }
-        if let value = raw as? NSNumber { return value.intValue }
+        if let value = raw as? Int {
+            return value
+        }
+        if let value = raw as? Int64 {
+            return Int(value)
+        }
+        if let value = raw as? Double {
+            return Int(value)
+        }
+        if let value = raw as? NSNumber {
+            return value.intValue
+        }
         if let value = raw as? String {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             return Int(trimmed)

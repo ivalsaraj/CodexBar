@@ -55,7 +55,9 @@ extension SettingsStore {
         else {
             return fallback
         }
-        if self.tokenAccounts(for: .abacus).isEmpty { return fallback }
+        if self.tokenAccounts(for: .abacus).isEmpty {
+            return fallback
+        }
         return .manual
     }
 }

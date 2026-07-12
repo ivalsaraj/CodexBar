@@ -151,7 +151,9 @@ actor ClaudeCLISession {
                 buffer.append(newData)
                 lastOutputAt = Date()
                 Self.appendScanText(newData: newData, scanTailText: &scanTailText, utf8Carry: &utf8Carry)
-                if scanTailText.count > 8192 { scanTailText = String(scanTailText.suffix(8192)) }
+                if scanTailText.count > 8192 {
+                    scanTailText = String(scanTailText.suffix(8192))
+                }
             }
 
             let scanData = scanBuffer.append(newData)
@@ -199,7 +201,9 @@ actor ClaudeCLISession {
                 let settleDeadline = Date().addingTimeInterval(settle)
                 while Date() < settleDeadline {
                     let newData = self.readChunk()
-                    if !newData.isEmpty { buffer.append(newData) }
+                    if !newData.isEmpty {
+                        buffer.append(newData)
+                    }
                     try await Task.sleep(nanoseconds: 50_000_000)
                 }
             }
@@ -430,7 +434,9 @@ actor ClaudeCLISession {
                     retries = 0
                     continue
                 }
-                if written == 0 { break }
+                if written == 0 {
+                    break
+                }
 
                 let err = errno
                 if err == EINTR || err == EAGAIN || err == EWOULDBLOCK {

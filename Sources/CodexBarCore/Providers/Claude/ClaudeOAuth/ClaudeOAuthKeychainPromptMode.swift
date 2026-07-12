@@ -19,7 +19,9 @@ public enum ClaudeOAuthKeychainPromptPreference {
 
     public static func storedMode(userDefaults: UserDefaults = .standard) -> ClaudeOAuthKeychainPromptMode {
         #if DEBUG
-        if let taskOverride { return taskOverride }
+        if let taskOverride {
+            return taskOverride
+        }
         #endif
         if let raw = userDefaults.string(forKey: self.userDefaultsKey),
            let mode = ClaudeOAuthKeychainPromptMode(rawValue: raw)

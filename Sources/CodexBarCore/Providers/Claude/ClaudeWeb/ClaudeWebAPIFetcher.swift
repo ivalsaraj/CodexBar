@@ -727,7 +727,9 @@ public enum ClaudeWebAPIFetcher {
     {
         guard let memberships, !memberships.isEmpty else { return nil }
         if let orgId {
-            if let match = memberships.first(where: { $0.organization.uuid == orgId }) { return match }
+            if let match = memberships.first(where: { $0.organization.uuid == orgId }) {
+                return match
+            }
         }
         return memberships.first
     }
@@ -779,7 +781,9 @@ public enum ClaudeWebAPIFetcher {
         regex.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
             guard let match, let r = Range(match.range(at: 0), in: text) else { return }
             let value = String(text[r]).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !value.isEmpty { results.append(value) }
+            if !value.isEmpty {
+                results.append(value)
+            }
         }
         return Array(Set(results)).sorted()
     }
@@ -792,7 +796,9 @@ public enum ClaudeWebAPIFetcher {
         regex.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
             guard let match, let r = Range(match.range(at: 1), in: text) else { return }
             let value = String(text[r]).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !value.isEmpty { results.append(value) }
+            if !value.isEmpty {
+                results.append(value)
+            }
         }
         return Array(Set(results)).sorted()
     }
@@ -808,7 +814,9 @@ public enum ClaudeWebAPIFetcher {
         }
 
         func appendValue(_ keyPath: String, value: Any) {
-            if results.count >= 40 { return }
+            if results.count >= 40 {
+                return
+            }
             let rendered: String
             switch value {
             case let str as String:

@@ -175,7 +175,9 @@ struct MiniMaxCodingPlanFetchStrategy: ProviderFetchStrategy {
         let sessions = (try? MiniMaxCookieImporter.importSessions(
             browserDetection: context.browserDetection)) ?? []
         guard !sessions.isEmpty else {
-            if let lastError { throw lastError }
+            if let lastError {
+                throw lastError
+            }
             throw MiniMaxSettingsError.missingCookie
         }
 
@@ -304,7 +306,9 @@ struct MiniMaxCodingPlanFetchStrategy: ProviderFetchStrategy {
         for token in attempts {
             let tokenLabel: String = {
                 guard let token else { return "" }
-                if token == cookieToken { return " + HERTZ-SESSION bearer" }
+                if token == cookieToken {
+                    return " + HERTZ-SESSION bearer"
+                }
                 return " + access token"
             }()
             Self.log.debug("Trying MiniMax \(prefix)cookies from \(sourceLabel)\(tokenLabel)")
@@ -343,8 +347,12 @@ struct MiniMaxCodingPlanFetchStrategy: ProviderFetchStrategy {
     }
 
     private static func shouldTryNextBrowser(for error: Error) -> Bool {
-        if case MiniMaxUsageError.invalidCredentials = error { return true }
-        if case MiniMaxUsageError.parseFailed = error { return true }
+        if case MiniMaxUsageError.invalidCredentials = error {
+            return true
+        }
+        if case MiniMaxUsageError.parseFailed = error {
+            return true
+        }
         return false
     }
 }

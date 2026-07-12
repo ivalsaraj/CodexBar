@@ -15,7 +15,9 @@ public enum UsageFormatter {
 
     public static func resetCountdownDescription(from date: Date, now: Date = .init()) -> String {
         let seconds = max(0, date.timeIntervalSince(now))
-        if seconds < 1 { return "now" }
+        if seconds < 1 {
+            return "now"
+        }
 
         let totalMinutes = max(1, Int(ceil(seconds / 60.0)))
         let days = totalMinutes / (24 * 60)
@@ -23,11 +25,15 @@ public enum UsageFormatter {
         let minutes = totalMinutes % 60
 
         if days > 0 {
-            if hours > 0 { return "in \(days)d \(hours)h" }
+            if hours > 0 {
+                return "in \(days)d \(hours)h"
+            }
             return "in \(days)d"
         }
         if hours > 0 {
-            if minutes > 0 { return "in \(hours)h \(minutes)m" }
+            if minutes > 0 {
+                return "in \(hours)h \(minutes)m"
+            }
             return "in \(hours)h"
         }
         return "in \(totalMinutes)m"
@@ -62,7 +68,9 @@ public enum UsageFormatter {
         if let desc = window.resetDescription {
             let trimmed = desc.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
-            if trimmed.lowercased().hasPrefix("resets") { return trimmed }
+            if trimmed.lowercased().hasPrefix("resets") {
+                return trimmed
+            }
             return "Resets \(trimmed)"
         }
         return nil
@@ -219,7 +227,9 @@ public enum UsageFormatter {
                 formatted = String(format: "%.0f", scaled)
             } else {
                 var s = String(format: "%.1f", scaled)
-                if s.hasSuffix(".0") { s.removeLast(2) }
+                if s.hasSuffix(".0") {
+                    s.removeLast(2)
+                }
                 formatted = s
             }
             return "\(sign)\(formatted)\(unit.suffix)"

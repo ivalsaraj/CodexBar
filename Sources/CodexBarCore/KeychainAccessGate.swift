@@ -10,14 +10,20 @@ public enum KeychainAccessGate {
 
     public nonisolated(unsafe) static var isDisabled: Bool {
         get {
-            if let taskOverrideValue { return taskOverrideValue }
+            if let taskOverrideValue {
+                return taskOverrideValue
+            }
             #if DEBUG
             if Self.forcesDisabledUnderTests {
                 return true
             }
             #endif
-            if let overrideValue { return overrideValue }
-            if UserDefaults.standard.bool(forKey: Self.flagKey) { return true }
+            if let overrideValue {
+                return overrideValue
+            }
+            if UserDefaults.standard.bool(forKey: Self.flagKey) {
+                return true
+            }
             if let shared = AppGroupSupport.sharedDefaults(), shared.bool(forKey: Self.flagKey) {
                 return true
             }

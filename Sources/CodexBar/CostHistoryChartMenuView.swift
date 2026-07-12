@@ -204,7 +204,9 @@ struct CostHistoryChartMenuView: View {
             dateKeys.append((entry.date, date))
             maxRenderedBreakdownRows = max(maxRenderedBreakdownRows, Self.renderedBreakdownRowCount(for: entry))
             if let cur = peak {
-                if costUSD > cur.costUSD { peak = (entry.date, costUSD) }
+                if costUSD > cur.costUSD {
+                    peak = (entry.date, costUSD)
+                }
             } else {
                 peak = (entry.date, costUSD)
             }
@@ -213,7 +215,9 @@ struct CostHistoryChartMenuView: View {
 
         let axisDates: [Date] = {
             guard let first = dateKeys.first?.date, let last = dateKeys.last?.date else { return [] }
-            if Calendar.current.isDate(first, inSameDayAs: last) { return [first] }
+            if Calendar.current.isDate(first, inSameDayAs: last) {
+                return [first]
+            }
             return [first, last]
         }()
 
@@ -313,7 +317,9 @@ struct CostHistoryChartMenuView: View {
         geo: GeometryProxy)
     {
         guard let location else {
-            if self.selectedDateKey != nil { self.selectedDateKey = nil }
+            if self.selectedDateKey != nil {
+                self.selectedDateKey = nil
+            }
             return
         }
 
@@ -336,7 +342,9 @@ struct CostHistoryChartMenuView: View {
         for entry in model.dateKeys {
             let dist = abs(entry.date.timeIntervalSince(date))
             if let cur = best {
-                if dist < cur.distance { best = (entry.key, dist) }
+                if dist < cur.distance {
+                    best = (entry.key, dist)
+                }
             } else {
                 best = (entry.key, dist)
             }
@@ -370,11 +378,15 @@ struct CostHistoryChartMenuView: View {
             .sorted { lhs, rhs in
                 let lCost = lhs.costUSD ?? -1
                 let rCost = rhs.costUSD ?? -1
-                if lCost != rCost { return lCost > rCost }
+                if lCost != rCost {
+                    return lCost > rCost
+                }
 
                 let lTokens = lhs.totalTokens ?? -1
                 let rTokens = rhs.totalTokens ?? -1
-                if lTokens != rTokens { return lTokens > rTokens }
+                if lTokens != rTokens {
+                    return lTokens > rTokens
+                }
 
                 return lhs.modelName > rhs.modelName
             }

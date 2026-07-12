@@ -10,7 +10,9 @@ public struct ZaiSettingsReader: Sendable {
     public static func apiToken(
         environment: [String: String] = ProcessInfo.processInfo.environment) -> String?
     {
-        if let token = self.cleaned(environment[apiTokenKey]) { return token }
+        if let token = self.cleaned(environment[apiTokenKey]) {
+            return token
+        }
         return nil
     }
 

@@ -69,9 +69,15 @@ final class SettingsStore {
     static let mergedOverviewProviderLimit = 3
     static let isRunningTests: Bool = {
         let env = ProcessInfo.processInfo.environment
-        if env["XCTestConfigurationFilePath"] != nil { return true }
-        if env["TESTING_LIBRARY_VERSION"] != nil { return true }
-        if env["SWIFT_TESTING"] != nil { return true }
+        if env["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+        if env["TESTING_LIBRARY_VERSION"] != nil {
+            return true
+        }
+        if env["SWIFT_TESTING"] != nil {
+            return true
+        }
         return NSClassFromString("XCTestCase") != nil
     }()
 
@@ -87,9 +93,15 @@ final class SettingsStore {
     var providerEnablement: [UsageProvider: Bool] = [:]
 
     static func shouldBridgeSharedDefaults(for userDefaults: UserDefaults) -> Bool {
-        if !self.isRunningTests { return true }
-        if userDefaults === UserDefaults.standard { return true }
-        if let shared = sharedDefaults, userDefaults === shared { return true }
+        if !self.isRunningTests {
+            return true
+        }
+        if userDefaults === UserDefaults.standard {
+            return true
+        }
+        if let shared = sharedDefaults, userDefaults === shared {
+            return true
+        }
         return false
     }
 
@@ -177,7 +189,9 @@ final class SettingsStore {
         self.runInitialProviderDetectionIfNeeded()
         self.ensureAlibabaProviderAutoEnabledIfNeeded()
         self.applyTokenCostDefaultIfNeeded()
-        if self.claudeUsageDataSource != .cli { self.claudeWebExtrasEnabled = false }
+        if self.claudeUsageDataSource != .cli {
+            self.claudeWebExtrasEnabled = false
+        }
         if hasStoredOpenAIWebAccessPreference {
             self.openAIWebAccessEnabled = self.defaultsState.openAIWebAccessEnabled
         } else {
@@ -198,8 +212,12 @@ extension SettingsStore {
         hadExistingConfig: Bool) -> Bool
     {
         guard let codex = config.providerConfig(for: .codex) else { return false }
-        if let cookieSource = codex.cookieSource { return cookieSource.isEnabled }
-        if codex.sanitizedCookieHeader != nil { return true }
+        if let cookieSource = codex.cookieSource {
+            return cookieSource.isEnabled
+        }
+        if codex.sanitizedCookieHeader != nil {
+            return true
+        }
         return hadExistingConfig
     }
 
@@ -266,13 +284,19 @@ extension SettingsStore {
         let claudePeakHoursEnabled = userDefaults.object(forKey: "claudePeakHoursEnabled") as? Bool ?? true
         let creditsExtrasDefault = userDefaults.object(forKey: "showOptionalCreditsAndExtraUsage") as? Bool
         let showOptionalCreditsAndExtraUsage = creditsExtrasDefault ?? true
-        if creditsExtrasDefault == nil { userDefaults.set(true, forKey: "showOptionalCreditsAndExtraUsage") }
+        if creditsExtrasDefault == nil {
+            userDefaults.set(true, forKey: "showOptionalCreditsAndExtraUsage")
+        }
         let openAIWebAccessDefault = userDefaults.object(forKey: "openAIWebAccessEnabled") as? Bool
         let openAIWebAccessEnabled = openAIWebAccessDefault ?? false
-        if openAIWebAccessDefault == nil { userDefaults.set(false, forKey: "openAIWebAccessEnabled") }
+        if openAIWebAccessDefault == nil {
+            userDefaults.set(false, forKey: "openAIWebAccessEnabled")
+        }
         let openAIWebBatterySaverDefault = userDefaults.object(forKey: "openAIWebBatterySaverEnabled") as? Bool
         let openAIWebBatterySaverEnabled = openAIWebBatterySaverDefault ?? false
-        if openAIWebBatterySaverDefault == nil { userDefaults.set(false, forKey: "openAIWebBatterySaverEnabled") }
+        if openAIWebBatterySaverDefault == nil {
+            userDefaults.set(false, forKey: "openAIWebBatterySaverEnabled")
+        }
         let providerStorageFootprintsDefault = userDefaults.object(forKey: "providerStorageFootprintsEnabled") as? Bool
         let providerStorageFootprintsEnabled = providerStorageFootprintsDefault ?? false
         if providerStorageFootprintsDefault == nil {

@@ -145,7 +145,9 @@ extension SettingsStore {
         else {
             return fallback
         }
-        if self.tokenAccounts(for: .opencode).isEmpty { return fallback }
+        if self.tokenAccounts(for: .opencode).isEmpty {
+            return fallback
+        }
         return .manual
     }
 

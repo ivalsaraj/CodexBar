@@ -127,8 +127,12 @@ public struct CostUsageDailyReport: Sendable, Decodable {
                 (try? container.decodeIfPresent([String].self, forKey: key)).flatMap(\.self)
             }
 
-            if let modelsUsed = decodeStringList(.modelsUsed) { return modelsUsed }
-            if let models = decodeStringList(.models) { return models }
+            if let modelsUsed = decodeStringList(.modelsUsed) {
+                return modelsUsed
+            }
+            if let models = decodeStringList(.models) {
+                return models
+            }
 
             guard container.contains(.models) else { return nil }
 
@@ -655,21 +659,29 @@ enum CostUsageDateParser {
 
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = iso.date(from: trimmed) { return d }
+        if let d = iso.date(from: trimmed) {
+            return d
+        }
         iso.formatOptions = [.withInternetDateTime]
-        if let d = iso.date(from: trimmed) { return d }
+        if let d = iso.date(from: trimmed) {
+            return d
+        }
 
         let day = DateFormatter()
         day.locale = Locale(identifier: "en_US_POSIX")
         day.timeZone = TimeZone.current
         day.dateFormat = "yyyy-MM-dd"
-        if let d = day.date(from: trimmed) { return d }
+        if let d = day.date(from: trimmed) {
+            return d
+        }
 
         let monthDayYear = DateFormatter()
         monthDayYear.locale = Locale(identifier: "en_US_POSIX")
         monthDayYear.timeZone = TimeZone.current
         monthDayYear.dateFormat = "MMM d, yyyy"
-        if let d = monthDayYear.date(from: trimmed) { return d }
+        if let d = monthDayYear.date(from: trimmed) {
+            return d
+        }
 
         return nil
     }
@@ -682,19 +694,25 @@ enum CostUsageDateParser {
         monthYear.locale = Locale(identifier: "en_US_POSIX")
         monthYear.timeZone = TimeZone.current
         monthYear.dateFormat = "MMM yyyy"
-        if let d = monthYear.date(from: trimmed) { return d }
+        if let d = monthYear.date(from: trimmed) {
+            return d
+        }
 
         let fullMonthYear = DateFormatter()
         fullMonthYear.locale = Locale(identifier: "en_US_POSIX")
         fullMonthYear.timeZone = TimeZone.current
         fullMonthYear.dateFormat = "MMMM yyyy"
-        if let d = fullMonthYear.date(from: trimmed) { return d }
+        if let d = fullMonthYear.date(from: trimmed) {
+            return d
+        }
 
         let ym = DateFormatter()
         ym.locale = Locale(identifier: "en_US_POSIX")
         ym.timeZone = TimeZone.current
         ym.dateFormat = "yyyy-MM"
-        if let d = ym.date(from: trimmed) { return d }
+        if let d = ym.date(from: trimmed) {
+            return d
+        }
 
         return nil
     }

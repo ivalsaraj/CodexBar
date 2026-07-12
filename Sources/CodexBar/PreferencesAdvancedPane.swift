@@ -106,7 +106,9 @@ struct AdvancedPane: View {
 
 extension AdvancedPane {
     private func installCLI() async {
-        if self.isInstallingCLI { return }
+        if self.isInstallingCLI {
+            return
+        }
         self.isInstallingCLI = true
         defer { self.isInstallingCLI = false }
 

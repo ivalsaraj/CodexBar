@@ -539,7 +539,9 @@ extension SettingsStore {
         for provider in providers where !seen.contains(provider) {
             seen.insert(provider)
             normalized.append(provider)
-            if let maxCount, normalized.count >= maxCount { break }
+            if let maxCount, normalized.count >= maxCount {
+                break
+            }
         }
         return normalized
     }

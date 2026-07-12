@@ -333,7 +333,9 @@ private actor BlockingManagedOpenAIDashboardLoader {
     }
 
     func waitUntilStarted(count: Int = 1) async {
-        if self.started >= count { return }
+        if self.started >= count {
+            return
+        }
         await withCheckedContinuation { continuation in
             self.startWaiters.append((count: count, continuation: continuation))
         }
@@ -373,7 +375,9 @@ private actor OpenAIDashboardImportCallTracker {
     }
 
     func waitUntilCalls(count: Int) async {
-        if self.calls >= count { return }
+        if self.calls >= count {
+            return
+        }
         await withCheckedContinuation { continuation in
             self.waiters.append((count: count, continuation: continuation))
         }

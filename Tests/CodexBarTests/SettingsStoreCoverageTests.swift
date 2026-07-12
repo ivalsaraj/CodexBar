@@ -6,7 +6,7 @@ import Testing
 @MainActor
 struct SettingsStoreCoverageTests {
     @Test
-    func openCodeWorkspaceSettingsReuseOneCredentialAndResolveActiveSnapshot() throws {
+    func `open code workspace settings reuse one credential and resolve active snapshot`() throws {
         let settings = Self.makeSettingsStore()
         settings.addTokenAccount(provider: .opencode, label: "Shared", token: "auth=shared")
         let tokenAccount = try #require(settings.selectedTokenAccount(for: .opencode))
@@ -31,7 +31,7 @@ struct SettingsStoreCoverageTests {
     }
 
     @Test
-    func widgetWorkspaceSelectionIsConsumedBeforeLaterMenuSelection() throws {
+    func `widget workspace selection is consumed before later menu selection`() throws {
         let settings = Self.makeSettingsStore(suiteName: "SettingsStoreCoverageTests-widget-selection")
         settings.addTokenAccount(provider: .opencode, label: "Shared", token: "auth=shared")
         let tokenAccount = try #require(settings.selectedTokenAccount(for: .opencode))

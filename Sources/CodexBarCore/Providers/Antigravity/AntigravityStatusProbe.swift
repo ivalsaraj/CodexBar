@@ -398,7 +398,9 @@ public struct AntigravityStatusProbe: Sendable {
 
     private static func invalidCode(_ code: CodeValue?) -> String? {
         guard let code else { return nil }
-        if code.isOK { return nil }
+        if code.isOK {
+            return nil
+        }
         return "\(code.rawValue)"
     }
 
@@ -487,8 +489,12 @@ public struct AntigravityStatusProbe: Sendable {
     }
 
     private static func isAntigravityCommandLine(_ command: String) -> Bool {
-        if command.contains("--app_data_dir") && command.contains("antigravity") { return true }
-        if command.contains("/antigravity/") || command.contains("\\antigravity\\") { return true }
+        if command.contains("--app_data_dir") && command.contains("antigravity") {
+            return true
+        }
+        if command.contains("/antigravity/") || command.contains("\\antigravity\\") {
+            return true
+        }
         return false
     }
 
@@ -663,7 +669,9 @@ public struct AntigravityStatusProbe: Sendable {
     {
         for endpoint in candidateEndpoints {
             let ok = await testConnectivity(endpoint, timeout)
-            if ok { return endpoint }
+            if ok {
+                return endpoint
+            }
         }
         if let fallback = fallbackProbeEndpoint(candidateEndpoints) {
             self.log.debug("Port probe fell back to best-effort endpoint", metadata: [
@@ -1029,7 +1037,9 @@ private struct PlanInfo: Decodable {
         ]
         for candidate in candidates {
             guard let value = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) else { continue }
-            if !value.isEmpty { return value }
+            if !value.isEmpty {
+                return value
+            }
         }
         return nil
     }
