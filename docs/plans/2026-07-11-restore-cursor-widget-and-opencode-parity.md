@@ -1,6 +1,6 @@
 # Cursor Widget, Cost Diagnostics, and OpenCode Workspace Parity Implementation Plan
 
-**Status:** Pending recovery integration — source implementation is preserved, but fork-main integration and final verification are not complete.
+**Status:** Completed — fork-main integration, verification, Codex approvals, commit, push, and PR completed.
 
 ## Mandatory execution precedence
 
