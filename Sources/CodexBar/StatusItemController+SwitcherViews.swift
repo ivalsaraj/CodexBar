@@ -793,36 +793,27 @@ final class ProviderSwitcherView: NSView {
 }
 
 final class TokenAccountSwitcherView: NSView {
-    private let accounts: [ProviderTokenAccount]
-    private let sessionBadgeTexts: [String?]
-    private let onSelect: (Int) -> Void
-    private let activeIndex: Int
+    private let entries: [TokenAccountMenuEntry]
+    private let onSelect: (Int) -> Task<Void, Never>?
     private var selectedIndex: Int
     private var buttons: [NSButton] = []
-    private var hoverTrackingArea: NSTrackingArea?
-    private var hoveredButtonTag: Int?
     private let rowSpacing: CGFloat = 4
     private let rowHeight: CGFloat = 26
     private let selectedBackground = NSColor.controlAccentColor.cgColor
-    private let unselectedBackground = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+    private let unselectedBackground = NSColor.clear.cgColor
     private let selectedTextColor = NSColor.white
-    private let unselectedTextColor = NSColor.labelColor.withAlphaComponent(0.92)
-    private let activeIndicatorColor = NSColor.systemGreen
+    private let unselectedTextColor = NSColor.secondaryLabelColor
 
     init(
-        accounts: [ProviderTokenAccount],
-        sessionBadgeTexts: [String?] = [],
-        activeIndex: Int,
+        entries: [TokenAccountMenuEntry],
         selectedIndex: Int,
         width: CGFloat,
-        onSelect: @escaping (Int) -> Void)
+        onSelect: @escaping (Int) -> Task<Void, Never>?)
     {
-        self.accounts = accounts
-        self.sessionBadgeTexts = sessionBadgeTexts
+        self.entries = entries
         self.onSelect = onSelect
-        self.activeIndex = min(max(activeIndex, 0), max(0, accounts.count - 1))
-        self.selectedIndex = min(max(selectedIndex, 0), max(0, accounts.count - 1))
-        let useTwoRows = accounts.count > 3
+        self.selectedIndex = min(max(selectedIndex, 0), max(0, entries.count - 1))
+        let useTwoRows = entries.count > 3
         let rows = useTwoRows ? 2 : 1
         let height = self.rowHeight * CGFloat(rows) + (useTwoRows ? self.rowSpacing : 0)
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
@@ -836,50 +827,12 @@ final class TokenAccountSwitcherView: NSView {
         nil
     }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        self.window?.acceptsMouseMovedEvents = true
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverTrackingArea {
-            self.removeTrackingArea(hoverTrackingArea)
-        }
-        let trackingArea = NSTrackingArea(
-            rect: .zero,
-            options: [
-                .activeAlways,
-                .inVisibleRect,
-                .mouseEnteredAndExited,
-                .mouseMoved,
-            ],
-            owner: self,
-            userInfo: nil)
-        self.addTrackingArea(trackingArea)
-        self.hoverTrackingArea = trackingArea
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        let location = self.convert(event.locationInWindow, from: nil)
-        let hoveredTag = self.buttons.first(where: { $0.frame.contains(location) })?.tag
-        guard hoveredTag != self.hoveredButtonTag else { return }
-        self.hoveredButtonTag = hoveredTag
-        self.updateButtonStyles()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        guard self.hoveredButtonTag != nil else { return }
-        self.hoveredButtonTag = nil
-        self.updateButtonStyles()
-    }
-
     private func buildButtons(useTwoRows: Bool) {
-        let perRow = useTwoRows ? Int(ceil(Double(self.accounts.count) / 2.0)) : self.accounts.count
-        let rows: [[ProviderTokenAccount]] = {
-            if !useTwoRows { return [self.accounts] }
-            let first = Array(self.accounts.prefix(perRow))
-            let second = Array(self.accounts.dropFirst(perRow))
+        let perRow = useTwoRows ? Int(ceil(Double(self.entries.count) / 2.0)) : self.entries.count
+        let rows: [[TokenAccountMenuEntry]] = {
+            if !useTwoRows { return [self.entries] }
+            let first = Array(self.entries.prefix(perRow))
+            let second = Array(self.entries.dropFirst(perRow))
             return [first, second]
         }()
 
@@ -898,13 +851,13 @@ final class TokenAccountSwitcherView: NSView {
             row.spacing = self.rowSpacing
             row.translatesAutoresizingMaskIntoConstraints = false
 
-            for account in rowAccounts {
+            for entry in rowAccounts {
                 let button = PaddedToggleButton(
-                    title: account.displayName,
+                    title: entry.title,
                     target: self,
                     action: #selector(self.handleSelect))
                 button.tag = globalIndex
-                button.toolTip = account.displayName
+                button.toolTip = entry.title
                 button.isBordered = false
                 button.setButtonType(.toggle)
                 button.controlSize = .small
@@ -933,437 +886,34 @@ final class TokenAccountSwitcherView: NSView {
     private func updateButtonStyles() {
         for (index, button) in self.buttons.enumerated() {
             let selected = index == self.selectedIndex
-            let hovered = button.tag == self.hoveredButtonTag
             button.state = selected ? .on : .off
-            button.layer?.backgroundColor = if selected {
-                self.selectedBackground
-            } else if hovered {
-                NSColor.labelColor.withAlphaComponent(0.14).cgColor
-            } else {
-                self.unselectedBackground
-            }
-            button.layer?.borderWidth = selected ? 0 : 1
-            button.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
+            button.layer?.backgroundColor = selected ? self.selectedBackground : self.unselectedBackground
             button.contentTintColor = selected ? self.selectedTextColor : self.unselectedTextColor
-            self.applyTitleStyle(button: button, index: index, selected: selected)
         }
-    }
-
-    private func applyTitleStyle(button: NSButton, index: Int, selected: Bool) {
-        guard index < self.accounts.count else { return }
-        let name = self.accounts[index].displayName
-        let isActive = index == self.activeIndex
-        let badgeText = index < self.sessionBadgeTexts.count ? self.sessionBadgeTexts[index] : nil
-        let foreground = selected ? self.selectedTextColor : self.unselectedTextColor
-        let activePrefix = isActive ? "● " : ""
-        let badgeSuffix = if let badgeText, !badgeText.isEmpty { " \(badgeText)" } else { "" }
-        let title = "\(activePrefix)\(name)\(badgeSuffix)"
-        let activeTooltip = if isActive { "\(name) (active profile)" } else { name }
-        button.toolTip = activeTooltip
-
-        let attributed = NSMutableAttributedString(string: title, attributes: [
-            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-            .foregroundColor: foreground,
-        ])
-        if isActive {
-            attributed.addAttributes([
-                .font: NSFont.systemFont(ofSize: 10, weight: .bold),
-                .foregroundColor: self.activeIndicatorColor,
-            ], range: NSRange(location: 0, length: 1))
-        }
-        if let badgeText, !badgeText.isEmpty {
-            let badgeRange = (title as NSString).range(of: badgeText, options: .backwards)
-            guard badgeRange.location != NSNotFound else {
-                button.attributedTitle = attributed
-                return
-            }
-            attributed.addAttributes([
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold),
-                .foregroundColor: selected ? self.selectedTextColor : NSColor.controlAccentColor,
-            ], range: badgeRange)
-        }
-        button.attributedTitle = attributed
     }
 
     @objc private func handleSelect(_ sender: NSButton) {
-        let index = sender.tag
-        guard index >= 0, index < self.accounts.count else { return }
+        _ = self.select(index: sender.tag)
+    }
+
+    @discardableResult
+    private func select(index: Int) -> Task<Void, Never>? {
+        guard index >= 0, index < self.entries.count else { return nil }
         self.selectedIndex = index
         self.updateButtonStyles()
-        self.onSelect(index)
-    }
-}
-
-final class CodexDependentProcessesPanelView: NSView {
-    private struct RefreshState {
-        let processesLoading: Bool
-        let dataLoading: Bool
-
-        var isRefreshing: Bool {
-            self.processesLoading || self.dataLoading
-        }
+        return self.onSelect(index)
     }
 
-    private let onToggle: () -> Void
-    private let onRefresh: () -> Void
-    private let onStop: (CodexDependentProcessSnapshot.Process) -> Void
-    private let stoppingPIDs: Set<Int>
-    private var processByPID: [Int: CodexDependentProcessSnapshot.Process] = [:]
-
-    init(
-        snapshot: CodexDependentProcessSnapshot?,
-        expanded: Bool,
-        loading: Bool,
-        dataLoading: Bool,
-        lastSwitchAt: Date?,
-        stoppingPIDs: Set<Int>,
-        width: CGFloat,
-        onToggle: @escaping () -> Void,
-        onRefresh: @escaping () -> Void,
-        onStop: @escaping (CodexDependentProcessSnapshot.Process) -> Void)
-    {
-        self.onToggle = onToggle
-        self.onRefresh = onRefresh
-        self.onStop = onStop
-        self.stoppingPIDs = stoppingPIDs
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 1))
-        self.translatesAutoresizingMaskIntoConstraints = false
-        self.wantsLayer = true
-        self.layer?.cornerRadius = 6
-        self.layer?.backgroundColor = NSColor.clear.cgColor
-        let refreshState = RefreshState(processesLoading: loading, dataLoading: dataLoading)
-        self.buildView(
-            snapshot: snapshot,
-            expanded: expanded,
-            refreshState: refreshState,
-            lastSwitchAt: lastSwitchAt,
-            width: width)
+    #if DEBUG
+    func _test_select(index: Int) -> Task<Void, Never>? {
+        guard let button = self.buttons.first(where: { $0.tag == index }) else { return nil }
+        return self.select(index: button.tag)
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
+    func _test_buttonTitles() -> [String] {
+        self.buttons.map(\.title)
     }
-
-    private func buildView(
-        snapshot: CodexDependentProcessSnapshot?,
-        expanded: Bool,
-        refreshState: RefreshState,
-        lastSwitchAt: Date?,
-        width: CGFloat)
-    {
-        let processes = snapshot?.processes ?? []
-        let rootStack = NSStackView()
-        rootStack.orientation = .vertical
-        rootStack.alignment = .leading
-        rootStack.spacing = 6
-        rootStack.translatesAutoresizingMaskIntoConstraints = false
-        self.addSubview(rootStack)
-
-        let headerStack = NSStackView()
-        headerStack.orientation = .horizontal
-        headerStack.alignment = .centerY
-        headerStack.spacing = 6
-
-        let disclosure = expanded ? "▾" : "▸"
-        let headerTitle = "\(disclosure) Dependent Codex Processes (\(processes.count))"
-        let headerButton = NSButton(title: headerTitle, target: self, action: #selector(self.handleToggle))
-        headerButton.isBordered = false
-        headerButton.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        headerButton.alignment = .left
-        headerButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let refreshTitle = refreshState.isRefreshing ? "Refreshing…" : "Refresh"
-        let refreshButton = NSButton(title: refreshTitle, target: self, action: #selector(self.handleRefresh))
-        refreshButton.bezelStyle = .inline
-        refreshButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
-        refreshButton.isEnabled = !refreshState.isRefreshing
-        refreshButton.setContentHuggingPriority(.required, for: .horizontal)
-
-        headerStack.addArrangedSubview(headerButton)
-        headerStack.addArrangedSubview(spacer)
-        headerStack.addArrangedSubview(refreshButton)
-        rootStack.addArrangedSubview(headerStack)
-
-        if let statusText = StatusItemController.codexDependentRefreshStatusText(
-            processesLoading: refreshState.processesLoading,
-            dataLoading: refreshState.dataLoading)
-        {
-            let statusLabel = NSTextField(labelWithString: statusText)
-            statusLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
-            statusLabel.textColor = NSColor.secondaryLabelColor
-            statusLabel.lineBreakMode = .byTruncatingTail
-            statusLabel.maximumNumberOfLines = 1
-            rootStack.addArrangedSubview(statusLabel)
-        }
-
-        if expanded {
-            rootStack.addArrangedSubview(self.makeColumnsHeader())
-
-            let scrollView = NSScrollView()
-            scrollView.drawsBackground = false
-            scrollView.borderType = .noBorder
-            scrollView.hasVerticalScroller = true
-            scrollView.hasHorizontalScroller = false
-            scrollView.autohidesScrollers = true
-            scrollView.translatesAutoresizingMaskIntoConstraints = false
-
-            let content = NSStackView()
-            content.orientation = .vertical
-            content.alignment = .leading
-            content.spacing = 6
-            content.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
-
-            if refreshState.processesLoading, processes.isEmpty {
-                content.addArrangedSubview(self.makePlaceholder("Loading dependent processes…"))
-            } else if processes.isEmpty {
-                content.addArrangedSubview(self.makePlaceholder("No dependent Codex processes detected."))
-            } else {
-                for (index, process) in processes.enumerated() {
-                    let row = self.makeProcessRow(
-                        process: process,
-                        lastSwitchAt: lastSwitchAt,
-                        width: width)
-                    content.addArrangedSubview(row)
-                    if index < processes.count - 1 {
-                        content.addArrangedSubview(self.makeProcessSeparator(width: width))
-                    }
-                }
-            }
-
-            let document = FlippedDocumentView()
-            document.addSubview(content)
-            content.translatesAutoresizingMaskIntoConstraints = false
-            let contentWidth = max(180, width - 26)
-            NSLayoutConstraint.activate([
-                content.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-                content.trailingAnchor.constraint(equalTo: document.trailingAnchor),
-                content.topAnchor.constraint(equalTo: document.topAnchor),
-                content.bottomAnchor.constraint(equalTo: document.bottomAnchor),
-                content.widthAnchor.constraint(equalToConstant: contentWidth),
-            ])
-            document.layoutSubtreeIfNeeded()
-            let contentHeight = max(20, content.fittingSize.height)
-            document.frame = NSRect(x: 0, y: 0, width: contentWidth, height: contentHeight)
-            let maxScrollHeight: CGFloat = 156
-            let scrollHeight = min(maxScrollHeight, contentHeight + 4)
-            scrollView.hasVerticalScroller = contentHeight > scrollHeight
-            scrollView.documentView = document
-
-            rootStack.addArrangedSubview(scrollView)
-            NSLayoutConstraint.activate([
-                scrollView.heightAnchor.constraint(equalToConstant: scrollHeight),
-                scrollView.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
-            ])
-        }
-
-        NSLayoutConstraint.activate([
-            rootStack.leadingAnchor.constraint(equalTo: self.leadingAnchor, constant: 8),
-            rootStack.trailingAnchor.constraint(equalTo: self.trailingAnchor, constant: -8),
-            rootStack.topAnchor.constraint(equalTo: self.topAnchor, constant: 6),
-            rootStack.bottomAnchor.constraint(equalTo: self.bottomAnchor, constant: -6),
-            rootStack.widthAnchor.constraint(equalToConstant: max(180, width - 16)),
-        ])
-
-        self.layoutSubtreeIfNeeded()
-        let measuredHeight = max(30, rootStack.fittingSize.height + 12)
-        self.frame = NSRect(x: 0, y: 0, width: width, height: measuredHeight)
-    }
-
-    private func makeColumnsHeader() -> NSView {
-        let columns = NSStackView()
-        columns.orientation = .horizontal
-        columns.alignment = .centerY
-        columns.distribution = .fill
-        columns.spacing = 4
-        columns.translatesAutoresizingMaskIntoConstraints = false
-
-        let process = self.makeColumnLabel("Process")
-        let pid = self.makeColumnLabel("PID")
-        let source = self.makeColumnLabel("Source")
-        let started = self.makeColumnLabel("Started")
-        let risk = self.makeColumnLabel("Auth Risk")
-        let action = self.makeColumnLabel("Action")
-        action.alignment = .center
-
-        columns.addArrangedSubview(process)
-        columns.addArrangedSubview(pid)
-        columns.addArrangedSubview(source)
-        columns.addArrangedSubview(started)
-        columns.addArrangedSubview(risk)
-        columns.addArrangedSubview(action)
-
-        pid.widthAnchor.constraint(equalToConstant: 34).isActive = true
-        source.widthAnchor.constraint(equalToConstant: 64).isActive = true
-        started.widthAnchor.constraint(equalToConstant: 52).isActive = true
-        risk.widthAnchor.constraint(equalToConstant: 88).isActive = true
-        action.widthAnchor.constraint(equalToConstant: 62).isActive = true
-
-        return columns
-    }
-
-    private func makeProcessRow(
-        process: CodexDependentProcessSnapshot.Process,
-        lastSwitchAt: Date?,
-        width: CGFloat) -> NSView
-    {
-        let wrapper = NSStackView()
-        wrapper.orientation = .vertical
-        wrapper.alignment = .leading
-        wrapper.spacing = 2
-        wrapper.translatesAutoresizingMaskIntoConstraints = false
-
-        let topRow = NSStackView()
-        topRow.orientation = .horizontal
-        topRow.alignment = .centerY
-        topRow.distribution = .fill
-        topRow.spacing = 4
-        topRow.translatesAutoresizingMaskIntoConstraints = false
-
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.distribution = .fill
-        row.spacing = 4
-        row.translatesAutoresizingMaskIntoConstraints = false
-
-        let processLabel = self.makeValueLabel(process.process)
-        processLabel.toolTip = process.command
-        let pidLabel = self.makeValueLabel(String(process.pid))
-        pidLabel.alignment = .center
-        let sourceLabel = self.makeValueLabel(process.source.rawValue)
-        let startedLabel = self.makeValueLabel(Self.startedAtFormatter.string(from: process.startedAt))
-        let riskText = StatusItemController.codexDependentProcessAuthRiskLabel(
-            for: process,
-            lastSwitchAt: lastSwitchAt)
-        let riskLabel = self.makeValueLabel(riskText)
-        riskLabel.toolTip = riskText
-
-        row.addArrangedSubview(processLabel)
-        row.addArrangedSubview(pidLabel)
-        row.addArrangedSubview(sourceLabel)
-        row.addArrangedSubview(startedLabel)
-        row.addArrangedSubview(riskLabel)
-
-        pidLabel.widthAnchor.constraint(equalToConstant: 34).isActive = true
-        sourceLabel.widthAnchor.constraint(equalToConstant: 64).isActive = true
-        startedLabel.widthAnchor.constraint(equalToConstant: 52).isActive = true
-        riskLabel.widthAnchor.constraint(equalToConstant: 88).isActive = true
-
-        let rowDocument = FlippedDocumentView()
-        rowDocument.addSubview(row)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: rowDocument.leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: rowDocument.trailingAnchor),
-            row.topAnchor.constraint(equalTo: rowDocument.topAnchor),
-            row.bottomAnchor.constraint(equalTo: rowDocument.bottomAnchor),
-        ])
-        rowDocument.layoutSubtreeIfNeeded()
-        let rowSize = row.fittingSize
-        let rowDocWidth = max(max(220, width - 100), rowSize.width)
-        let rowDocHeight = max(18, rowSize.height)
-        rowDocument.frame = NSRect(x: 0, y: 0, width: rowDocWidth, height: rowDocHeight)
-
-        let rowScroll = NSScrollView()
-        rowScroll.drawsBackground = false
-        rowScroll.borderType = .noBorder
-        rowScroll.hasVerticalScroller = false
-        rowScroll.hasHorizontalScroller = true
-        rowScroll.autohidesScrollers = true
-        rowScroll.documentView = rowDocument
-        rowScroll.translatesAutoresizingMaskIntoConstraints = false
-
-        let isStopping = self.stoppingPIDs.contains(process.pid)
-        self.processByPID[process.pid] = process
-        let stopButton = NSButton(
-            title: isStopping ? "Stopping…" : "Stop",
-            target: self,
-            action: #selector(self.handleStop(_:)))
-        stopButton.bezelStyle = .inline
-        stopButton.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
-        stopButton.tag = process.pid
-        stopButton.isEnabled = !isStopping && StatusItemController.canStopCodexDependentProcess(process)
-        stopButton.toolTip = stopButton.isEnabled ? "Stop this process" : "Process cannot be stopped from CodexBar"
-
-        topRow.addArrangedSubview(rowScroll)
-        topRow.addArrangedSubview(stopButton)
-        NSLayoutConstraint.activate([
-            stopButton.widthAnchor.constraint(equalToConstant: 62),
-            rowScroll.widthAnchor.constraint(equalTo: topRow.widthAnchor, constant: -66),
-            rowScroll.heightAnchor.constraint(equalToConstant: rowDocHeight + 4),
-        ])
-
-        wrapper.addArrangedSubview(topRow)
-        wrapper.widthAnchor.constraint(equalToConstant: max(180, width - 24)).isActive = true
-        return wrapper
-    }
-
-    private func makeProcessSeparator(width: CGFloat) -> NSView {
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        separator.widthAnchor.constraint(equalToConstant: max(180, width - 24)).isActive = true
-        return separator
-    }
-
-    private func makeColumnLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
-        label.textColor = NSColor.secondaryLabelColor
-        label.lineBreakMode = .byTruncatingTail
-        label.maximumNumberOfLines = 1
-        return label
-    }
-
-    private func makeValueLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
-        label.textColor = NSColor.labelColor
-        label.lineBreakMode = .byTruncatingTail
-        label.maximumNumberOfLines = 1
-        return label
-    }
-
-    private func makePlaceholder(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = NSFont.systemFont(ofSize: 11, weight: .regular)
-        label.textColor = NSColor.secondaryLabelColor
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 2
-        return label
-    }
-
-    @objc private func handleToggle() {
-        self.onToggle()
-    }
-
-    @objc private func handleRefresh() {
-        self.onRefresh()
-    }
-
-    @objc private func handleStop(_ sender: NSButton) {
-        guard let process = self.processByPID[sender.tag] else { return }
-        self.onStop(process)
-    }
-
-    private static let startedAtFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
-
-    private final class FlippedDocumentView: NSView {
-        override var isFlipped: Bool {
-            true
-        }
-    }
+    #endif
 }
 
 final class CodexAccountSwitcherView: NSView {
@@ -1412,7 +962,6 @@ final class CodexAccountSwitcherView: NSView {
             let second = Array(self.accounts.dropFirst(perRow))
             return [first, second]
         }()
-
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .centerX
@@ -1429,8 +978,9 @@ final class CodexAccountSwitcherView: NSView {
 
             let buttonWidth = self.buttonWidth(for: rowAccounts.count)
             for account in rowAccounts {
+                let title = self.compactButtonTitle(for: account, buttonWidth: buttonWidth)
                 let button = PaddedToggleButton(
-                    title: self.compactButtonTitle(for: account, buttonWidth: buttonWidth),
+                    title: title,
                     target: self,
                     action: #selector(self.handleSelect))
                 button.identifier = NSUserInterfaceItemIdentifier(account.id)

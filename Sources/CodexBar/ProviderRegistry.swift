@@ -23,7 +23,8 @@ struct ProviderRegistry {
         metadata: [UsageProvider: ProviderMetadata],
         codexFetcher: UsageFetcher,
         claudeFetcher: any ClaudeUsageFetching,
-        browserDetection: BrowserDetection) -> [UsageProvider: ProviderSpec]
+        browserDetection: BrowserDetection,
+        environmentBase: [String: String] = ProcessInfo.processInfo.environment) -> [UsageProvider: ProviderSpec]
     {
         var specs: [UsageProvider: ProviderSpec] = [:]
         specs.reserveCapacity(UsageProvider.allCases.count)
@@ -41,7 +42,7 @@ struct ProviderRegistry {
                         ?? .auto
                     let snapshot = Self.makeSettingsSnapshot(settings: settings, tokenOverride: nil)
                     let env = Self.makeEnvironment(
-                        base: ProcessInfo.processInfo.environment,
+                        base: environmentBase,
                         provider: provider,
                         settings: settings,
                         tokenOverride: nil)
@@ -72,6 +73,7 @@ struct ProviderRegistry {
         tokenOverride: TokenAccountOverride?) -> ProviderSettingsSnapshot
     {
         settings.ensureTokenAccountsLoaded()
+        settings.syncOpenCodeWorkspaceSelectionFromAppGroup()
         var builder = ProviderSettingsSnapshotBuilder(
             debugMenuEnabled: settings.debugMenuEnabled,
             debugKeepCLISessionsAlive: settings.debugKeepCLISessionsAlive)
@@ -99,25 +101,13 @@ struct ProviderRegistry {
             base: base,
             provider: provider,
             config: settings.providerConfig(for: provider))
-        guard let account else { return env }
-        let support = TokenAccountSupportCatalog.support(for: provider)
-
-        switch support?.injection {
-        case .codexOAuth:
-            // For active account, auth.json has already been written at switch time.
-            // For per-account fetch override, isolate auth.json via temp CODEX_HOME.
-            if tokenOverride != nil {
-                let tempBase = CodexAccountEnvironment.tempBase
-                if let tempHome = try? CodexOAuthTempHome.make(jsonString: account.token, under: tempBase) {
-                    env["CODEX_HOME"] = tempHome.path
-                    CodexAccountEnvironment.registerTempHome(tempHome)
-                }
-            }
-        default:
-            if let override = TokenAccountSupportCatalog.envOverride(for: provider, token: account.token) {
-                for (key, value) in override {
-                    env[key] = value
-                }
+        // If token account is selected, use its token instead of config's apiKey
+        if let account, let override = TokenAccountSupportCatalog.envOverride(
+            for: provider,
+            token: account.token)
+        {
+            for (key, value) in override {
+                env[key] = value
             }
         }
         // Managed Codex routing only scopes remote account fetches such as identity, plan,
@@ -127,7 +117,10 @@ struct ProviderRegistry {
         // Mac's Codex sessions, not as account-owned remote state. If we later want
         // account-scoped token history in the UI, that needs an explicit product decision and
         // presentation change so the two concepts are not conflated.
-        if provider == .codex, let managedHomePath = settings.activeManagedCodexRemoteHomePath {
+        if provider == .codex,
+           case .managedAccount = settings.codexActiveSource,
+           let managedHomePath = settings.activeManagedCodexRemoteHomePath
+        {
             env = CodexHomeScope.scopedEnvironment(base: env, codexHome: managedHomePath)
         }
         return env

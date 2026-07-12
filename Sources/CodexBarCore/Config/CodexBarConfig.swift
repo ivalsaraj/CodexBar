@@ -82,8 +82,10 @@ public struct ProviderConfig: Codable, Sendable, Identifiable {
     public var cookieSource: ProviderCookieSource?
     public var region: String?
     public var workspaceID: String?
+    public var opencodeWorkspaceAccounts: OpenCodeWorkspaceAccounts?
+    public var opencodeActiveWorkspaceAccountID: String?
+    public var enterpriseHost: String?
     public var tokenAccounts: ProviderTokenAccountData?
-    public var openCodeWorkspaceAccounts: OpenCodeWorkspaceAccountData?
     public var codexActiveSource: CodexActiveSource?
 
     public init(
@@ -96,8 +98,10 @@ public struct ProviderConfig: Codable, Sendable, Identifiable {
         cookieSource: ProviderCookieSource? = nil,
         region: String? = nil,
         workspaceID: String? = nil,
+        opencodeWorkspaceAccounts: OpenCodeWorkspaceAccounts? = nil,
+        opencodeActiveWorkspaceAccountID: String? = nil,
+        enterpriseHost: String? = nil,
         tokenAccounts: ProviderTokenAccountData? = nil,
-        openCodeWorkspaceAccounts: OpenCodeWorkspaceAccountData? = nil,
         codexActiveSource: CodexActiveSource? = nil)
     {
         self.id = id
@@ -109,8 +113,10 @@ public struct ProviderConfig: Codable, Sendable, Identifiable {
         self.cookieSource = cookieSource
         self.region = region
         self.workspaceID = workspaceID
+        self.opencodeWorkspaceAccounts = opencodeWorkspaceAccounts
+        self.opencodeActiveWorkspaceAccountID = opencodeActiveWorkspaceAccountID
+        self.enterpriseHost = enterpriseHost
         self.tokenAccounts = tokenAccounts
-        self.openCodeWorkspaceAccounts = openCodeWorkspaceAccounts
         self.codexActiveSource = codexActiveSource
     }
 
@@ -120,6 +126,10 @@ public struct ProviderConfig: Codable, Sendable, Identifiable {
 
     public var sanitizedCookieHeader: String? {
         Self.clean(self.cookieHeader)
+    }
+
+    public var sanitizedEnterpriseHost: String? {
+        Self.clean(self.enterpriseHost)
     }
 
     private static func clean(_ raw: String?) -> String? {

@@ -7,7 +7,9 @@ struct CodexBarUsageWidgetView: View {
     let entry: CodexBarWidgetEntry
 
     var body: some View {
-        let providerEntry = self.entry.snapshot.entry(for: self.entry.provider, accountID: self.entry.accountID)
+        let providerEntry = self.entry.snapshot.entry(
+            for: self.entry.provider,
+            accountID: self.entry.accountID)
         ZStack {
             Color.black.opacity(0.02)
             if let providerEntry {
@@ -49,7 +51,9 @@ struct CodexBarHistoryWidgetView: View {
     let entry: CodexBarWidgetEntry
 
     var body: some View {
-        let providerEntry = self.entry.snapshot.entry(for: self.entry.provider, accountID: self.entry.accountID)
+        let providerEntry = self.entry.snapshot.entry(
+            for: self.entry.provider,
+            accountID: self.entry.accountID)
         ZStack {
             Color.black.opacity(0.02)
             if let providerEntry {
@@ -78,13 +82,24 @@ struct CodexBarCompactWidgetView: View {
     let entry: CodexBarCompactEntry
 
     var body: some View {
-        let providerEntry = self.entry.snapshot.entry(for: self.entry.provider, accountID: self.entry.accountID)
+        let providerEntry = self.entry.snapshot.entry(
+            for: self.entry.provider,
+            accountID: self.entry.accountID)
         ZStack {
             Color.black.opacity(0.02)
-            if let providerEntry {
-                CompactMetricView(entry: providerEntry, metric: self.entry.metric)
-            } else {
-                self.emptyState
+            VStack(alignment: .leading, spacing: 6) {
+                if let providerEntry {
+                    CompactMetricView(entry: providerEntry, metric: self.entry.metric)
+                } else {
+                    self.emptyState
+                }
+                if self.entry.provider == .opencode {
+                    OpenCodeWorkspaceSwitcherRow(
+                        snapshot: self.entry.snapshot,
+                        selectedID: self.entry.accountID,
+                        compact: true)
+                        .padding(.horizontal, 8)
+                }
             }
         }
         .containerBackground(.fill.tertiary, for: .widget)
@@ -108,8 +123,9 @@ struct CodexBarSwitcherWidgetView: View {
     let entry: CodexBarSwitcherEntry
 
     var body: some View {
-        let providerEntry = self.entry.snapshot.entry(for: self.entry.provider, accountID: self.entry.accountID)
-        let openCodeAccounts = self.entry.snapshot.entries(for: .opencode)
+        let providerEntry = self.entry.snapshot.entry(
+            for: self.entry.provider,
+            accountID: self.entry.accountID)
         ZStack {
             Color.black.opacity(0.02)
             VStack(alignment: .leading, spacing: 10) {
@@ -119,10 +135,11 @@ struct CodexBarSwitcherWidgetView: View {
                     updatedAt: providerEntry?.updatedAt ?? Date(),
                     compact: self.family == .systemSmall,
                     showsTimestamp: self.family != .systemSmall)
-                if self.entry.provider == .opencode, openCodeAccounts.count > 1 {
+                if self.entry.provider == .opencode {
                     OpenCodeWorkspaceSwitcherRow(
-                        accounts: openCodeAccounts,
-                        selectedAccountID: self.entry.accountID)
+                        snapshot: self.entry.snapshot,
+                        selectedID: self.entry.accountID,
+                        compact: self.family == .systemSmall)
                 }
                 if let providerEntry {
                     self.content(providerEntry: providerEntry)
@@ -159,37 +176,6 @@ struct CodexBarSwitcherWidgetView: View {
     }
 }
 
-private struct OpenCodeWorkspaceSwitcherRow: View {
-    let accounts: [WidgetSnapshot.ProviderEntry]
-    let selectedAccountID: UUID?
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(self.accounts, id: \.accountID) { account in
-                    if let accountID = account.accountID {
-                        Button(intent: SwitchWidgetOpenCodeWorkspaceIntent(accountID: accountID)) {
-                            Text(account.accountLabel ?? "Workspace")
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(self.background(for: accountID))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-
-    private func background(for accountID: UUID) -> some ShapeStyle {
-        if accountID == self.selectedAccountID {
-            return AnyShapeStyle(Color.primary.opacity(0.14))
-        }
-        return AnyShapeStyle(Color.primary.opacity(0.06))
-    }
-}
-
 private struct CompactMetricView: View {
     let entry: WidgetSnapshot.ProviderEntry
     let metric: CompactMetric
@@ -221,29 +207,37 @@ private struct CompactMetricView: View {
             let value = self.entry.creditsRemaining.map(WidgetFormat.credits) ?? "—"
             return (value, "Credits left", nil)
         case .todayCost:
-            guard let tokenUsage = self.entry.tokenUsage else { return ("—", "Today cost", nil) }
-            if let sessionCostText = tokenUsage.sessionCostText {
-                let detail = tokenUsage.sessionTokens.map(WidgetFormat.tokenCount)
-                return (sessionCostText, tokenUsage.primaryLabel, detail)
+            let value = self.entry.provider == .cursor
+                ? self.entry.tokenUsage?.sessionCostText
+                ?? self.entry.tokenUsage?.sessionCostUSD.map(WidgetFormat.usd)
+                ?? "—"
+                : self.entry.tokenUsage?.sessionCostUSD.map(WidgetFormat.usd) ?? "—"
+            let label = self.entry.provider == .cursor
+                ? self.entry.cursorRequestRange?.label ?? "Usage"
+                : "Today cost"
+            let detail = if self.entry.provider == .cursor {
+                self.entry.cursorRequestRange.map(WidgetFormat.cursorDateRange)
+                    ?? self.entry.tokenUsage?.sessionTokens.map(WidgetFormat.tokenCount)
+            } else {
+                self.entry.tokenUsage?.sessionTokens.map(WidgetFormat.tokenCount)
             }
-            if let sessionCostUSD = tokenUsage.sessionCostUSD {
-                let detail = tokenUsage.sessionTokens.map(WidgetFormat.tokenCount)
-                return (WidgetFormat.usd(sessionCostUSD), tokenUsage.primaryLabel, detail)
-            }
-            return (
-                WidgetFormat.costAndTokens(cost: nil, tokens: tokenUsage.sessionTokens),
-                tokenUsage.primaryLabel,
-                nil)
+            return (value, label, detail)
         case .last30DaysCost:
-            guard let tokenUsage = self.entry.tokenUsage else { return ("—", "30d cost", nil) }
-            if let last30DaysCostUSD = tokenUsage.last30DaysCostUSD {
-                let detail = tokenUsage.last30DaysTokens.map(WidgetFormat.tokenCount)
-                return (WidgetFormat.usd(last30DaysCostUSD), tokenUsage.secondaryLabel, detail)
+            let value = self.entry.provider == .cursor
+                ? self.entry.tokenUsage?.sessionCostText
+                ?? self.entry.tokenUsage?.last30DaysCostUSD.map(WidgetFormat.usd)
+                ?? "—"
+                : self.entry.tokenUsage?.last30DaysCostUSD.map(WidgetFormat.usd) ?? "—"
+            let label = self.entry.provider == .cursor
+                ? self.entry.cursorRequestRange?.label ?? "Usage"
+                : "30d cost"
+            let detail = if self.entry.provider == .cursor {
+                self.entry.cursorRequestRange.map(WidgetFormat.cursorDateRange)
+                    ?? self.entry.tokenUsage?.last30DaysTokens.map(WidgetFormat.tokenCount)
+            } else {
+                self.entry.tokenUsage?.last30DaysTokens.map(WidgetFormat.tokenCount)
             }
-            return (
-                WidgetFormat.costAndTokens(cost: nil, tokens: tokenUsage.last30DaysTokens),
-                tokenUsage.secondaryLabel,
-                nil)
+            return (value, label, detail)
         }
     }
 }
@@ -268,6 +262,44 @@ private struct ProviderSwitcherRow: View {
                 Text(WidgetFormat.relativeDate(self.updatedAt))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct OpenCodeWorkspaceSwitcherRow: View {
+    let snapshot: WidgetSnapshot
+    let selectedID: String?
+    let compact: Bool
+
+    private var entries: [WidgetSnapshot.ProviderEntry] {
+        self.snapshot.entries.filter { $0.provider == .opencode && $0.accountID != nil }
+    }
+
+    var body: some View {
+        if self.entries.count > 1 {
+            HStack(spacing: self.compact ? 4 : 6) {
+                ForEach(Array(self.entries.enumerated()), id: \.offset) { _, entry in
+                    if let accountID = entry.accountID {
+                        Button(intent: SwitchWidgetOpenCodeWorkspaceIntent(accountID: accountID)) {
+                            Text(entry.accountLabel ?? "Workspace")
+                                .font(
+                                    self.compact
+                                        ? .caption2.weight(.semibold)
+                                        : .caption.weight(.semibold))
+                                .foregroundStyle(accountID == self.selectedID ? Color.primary : Color.secondary)
+                                .padding(.horizontal, self.compact ? 5 : 7)
+                                .padding(.vertical, self.compact ? 3 : 4)
+                                .background(
+                                    Capsule().fill(
+                                        accountID == self.selectedID
+                                            ? Color.accentColor.opacity(0.2)
+                                            : Color.primary.opacity(0.08)))
+                        }
+                        .buttonStyle(.plain)
+                        .help(entry.accountLabel ?? "OpenCode workspace")
+                    }
+                }
             }
         }
     }
@@ -334,7 +366,12 @@ private struct ProviderSwitchChip: View {
         case .synthetic: "Synthetic"
         case .openrouter: "OpenRouter"
         case .warp: "Warp"
+        case .windsurf: "Windsurf"
         case .perplexity: "Pplx"
+        case .abacus: "Abacus"
+        case .mistral: "Mistral"
+        case .deepseek: "DeepSeek"
+        case .codebuff: "Codebuff"
         }
     }
 }
@@ -348,7 +385,6 @@ private struct SwitcherSmallUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
-                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let codeReview = entry.codeReviewRemainingPercent {
@@ -357,6 +393,7 @@ private struct SwitcherSmallUsageView: View {
                     percentLeft: codeReview,
                     color: WidgetColors.color(for: self.entry.provider))
             }
+            CursorWidgetRangeSummaryView(entry: self.entry)
         }
     }
 }
@@ -370,27 +407,17 @@ private struct SwitcherMediumUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
-                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let credits = entry.creditsRemaining {
                 ValueLine(title: "Credits", value: WidgetFormat.credits(credits))
             }
-            if let providerCost = entry.providerCost, !self.entry.showsCursorRequestDetails {
-                ProviderCostLines(cost: providerCost)
-            }
-            if let token = entry.tokenUsage, token.hasPrimaryValue {
+            if self.entry.provider == .cursor {
+                CursorWidgetRangeSummaryView(entry: self.entry)
+            } else if let token = entry.tokenUsage {
                 ValueLine(
-                    title: token.primaryLabel,
-                    value: token.primaryCostAndTokensValue())
-            }
-            if let presentation = CursorWidgetRequestPresentation.selection(
-                provider: self.entry.provider,
-                details: self.entry.cursorRequestDetails,
-                range: self.entry.cursorRequestRange,
-                size: .medium)
-            {
-                CursorRequestDetailsView(presentation: presentation)
+                    title: "Today",
+                    value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
             }
         }
     }
@@ -405,7 +432,6 @@ private struct SwitcherLargeUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
-                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let codeReview = entry.codeReviewRemainingPercent {
@@ -417,36 +443,48 @@ private struct SwitcherLargeUsageView: View {
             if let credits = entry.creditsRemaining {
                 ValueLine(title: "Credits", value: WidgetFormat.credits(credits))
             }
-            if let providerCost = entry.providerCost, !self.entry.showsCursorRequestDetails {
-                ProviderCostLines(cost: providerCost)
-            }
-            if let token = entry.tokenUsage {
+            if self.entry.provider == .cursor {
+                CursorWidgetRangeSummaryView(entry: self.entry)
+            } else if let token = entry.tokenUsage {
                 VStack(alignment: .leading, spacing: 4) {
-                    if token.hasPrimaryValue {
+                    ValueLine(
+                        title: self.entry.cursorRequestRange?.label ?? "Today",
+                        value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
+                    if self.entry.cursorRequestRange == nil {
                         ValueLine(
-                            title: token.primaryLabel,
-                            value: token.primaryCostAndTokensValue())
-                    }
-                    if token.hasSecondaryValue {
-                        ValueLine(
-                            title: token.secondaryLabel,
+                            title: "30d",
                             value: WidgetFormat.costAndTokens(
                                 cost: token.last30DaysCostUSD,
                                 tokens: token.last30DaysTokens))
                     }
                 }
             }
-            if let presentation = CursorWidgetRequestPresentation.selection(
-                provider: self.entry.provider,
-                details: self.entry.cursorRequestDetails,
-                range: self.entry.cursorRequestRange,
-                size: .large)
-            {
-                CursorRequestDetailsView(presentation: presentation)
-            } else {
-                UsageHistoryChart(points: self.entry.dailyUsage, color: WidgetColors.color(for: self.entry.provider))
-                    .frame(height: 50)
+            if let requests = entry.cursorRequestDetails {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(requests.prefix(3).enumerated()), id: \.offset) { _, request in
+                        VStack(alignment: .leading, spacing: 1) {
+                            ValueLine(
+                                title: request.compactModel ?? request.model,
+                                value: "\(WidgetFormat.tokenCount(request.tokens)) · "
+                                    + UsageFormatter.cursorRequestCountLabel(requests: request.requests))
+                            if let estimateText = request.estimateText {
+                                Text(estimateText)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let requestCostDetail = UsageFormatter.cursorRequestCostDetail(
+                                requestCost: request.requestCost)
+                            {
+                                Text(requestCostDetail)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
             }
+            UsageHistoryChart(points: self.entry.dailyUsage, color: WidgetColors.color(for: self.entry.provider))
+                .frame(height: 50)
         }
     }
 }
@@ -461,7 +499,6 @@ private struct SmallUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
-                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let codeReview = entry.codeReviewRemainingPercent {
@@ -470,6 +507,7 @@ private struct SmallUsageView: View {
                     percentLeft: codeReview,
                     color: WidgetColors.color(for: self.entry.provider))
             }
+            CursorWidgetRangeSummaryView(entry: self.entry)
         }
         .padding(12)
     }
@@ -485,27 +523,17 @@ private struct MediumUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
-                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let credits = entry.creditsRemaining {
                 ValueLine(title: "Credits", value: WidgetFormat.credits(credits))
             }
-            if let providerCost = entry.providerCost, !self.entry.showsCursorRequestDetails {
-                ProviderCostLines(cost: providerCost)
-            }
-            if let token = entry.tokenUsage, token.hasPrimaryValue {
+            if self.entry.provider == .cursor {
+                CursorWidgetRangeSummaryView(entry: self.entry)
+            } else if let token = entry.tokenUsage {
                 ValueLine(
-                    title: token.primaryLabel,
-                    value: token.primaryCostAndTokensValue())
-            }
-            if let presentation = CursorWidgetRequestPresentation.selection(
-                provider: self.entry.provider,
-                details: self.entry.cursorRequestDetails,
-                range: self.entry.cursorRequestRange,
-                size: .medium)
-            {
-                CursorRequestDetailsView(presentation: presentation)
+                    title: "Today",
+                    value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
             }
         }
         .padding(12)
@@ -522,7 +550,6 @@ private struct LargeUsageView: View {
                 UsageBarRow(
                     title: row.title,
                     percentLeft: row.percentLeft,
-                    detailText: row.detailText,
                     color: WidgetColors.color(for: self.entry.provider))
             }
             if let codeReview = entry.codeReviewRemainingPercent {
@@ -534,36 +561,22 @@ private struct LargeUsageView: View {
             if let credits = entry.creditsRemaining {
                 ValueLine(title: "Credits", value: WidgetFormat.credits(credits))
             }
-            if let providerCost = entry.providerCost, !self.entry.showsCursorRequestDetails {
-                ProviderCostLines(cost: providerCost)
-            }
-            if let token = entry.tokenUsage {
+            if self.entry.provider == .cursor {
+                CursorWidgetRangeSummaryView(entry: self.entry)
+            } else if let token = entry.tokenUsage {
                 VStack(alignment: .leading, spacing: 4) {
-                    if token.hasPrimaryValue {
-                        ValueLine(
-                            title: token.primaryLabel,
-                            value: token.primaryCostAndTokensValue())
-                    }
-                    if token.hasSecondaryValue {
-                        ValueLine(
-                            title: token.secondaryLabel,
-                            value: WidgetFormat.costAndTokens(
-                                cost: token.last30DaysCostUSD,
-                                tokens: token.last30DaysTokens))
-                    }
+                    ValueLine(
+                        title: "Today",
+                        value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
+                    ValueLine(
+                        title: "30d",
+                        value: WidgetFormat.costAndTokens(
+                            cost: token.last30DaysCostUSD,
+                            tokens: token.last30DaysTokens))
                 }
             }
-            if let presentation = CursorWidgetRequestPresentation.selection(
-                provider: self.entry.provider,
-                details: self.entry.cursorRequestDetails,
-                range: self.entry.cursorRequestRange,
-                size: .large)
-            {
-                CursorRequestDetailsView(presentation: presentation)
-            } else {
-                UsageHistoryChart(points: self.entry.dailyUsage, color: WidgetColors.color(for: self.entry.provider))
-                    .frame(height: 50)
-            }
+            UsageHistoryChart(points: self.entry.dailyUsage, color: WidgetColors.color(for: self.entry.provider))
+                .frame(height: 50)
         }
         .padding(12)
     }
@@ -573,19 +586,11 @@ struct WidgetUsageRow: Identifiable, Equatable {
     let id: String
     let title: String
     let percentLeft: Double?
-    let detailText: String?
-
-    init(id: String, title: String, percentLeft: Double?, detailText: String? = nil) {
-        self.id = id
-        self.title = title
-        self.percentLeft = percentLeft
-        self.detailText = detailText
-    }
 
     static func rows(for entry: WidgetSnapshot.ProviderEntry) -> [WidgetUsageRow] {
         if let usageRows = entry.usageRows {
             return usageRows.map { row in
-                WidgetUsageRow(id: row.id, title: row.title, percentLeft: row.percentLeft, detailText: row.detailText)
+                WidgetUsageRow(id: row.id, title: row.title, percentLeft: row.percentLeft)
             }
         }
 
@@ -594,19 +599,12 @@ struct WidgetUsageRow: Identifiable, Equatable {
             WidgetUsageRow(
                 id: "primary",
                 title: metadata?.sessionLabel ?? "Session",
-                percentLeft: entry.primary?.remainingPercent,
-                detailText: entry.primary.flatMap(Self.detailText)),
+                percentLeft: entry.primary?.remainingPercent),
             WidgetUsageRow(
                 id: "secondary",
                 title: metadata?.weeklyLabel ?? "Weekly",
-                percentLeft: entry.secondary?.remainingPercent,
-                detailText: entry.secondary.flatMap(Self.detailText)),
+                percentLeft: entry.secondary?.remainingPercent),
         ].filter { $0.percentLeft != nil }
-    }
-
-    private static func detailText(window: RateWindow) -> String? {
-        let detail = window.resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return detail?.isEmpty == false ? detail : nil
     }
 }
 
@@ -619,73 +617,18 @@ private struct HistoryView: View {
             HeaderView(provider: self.entry.provider, updatedAt: self.entry.updatedAt)
             UsageHistoryChart(points: self.entry.dailyUsage, color: WidgetColors.color(for: self.entry.provider))
                 .frame(height: self.isLarge ? 90 : 60)
-            if let providerCost = entry.providerCost {
-                ProviderCostLines(cost: providerCost)
-            }
-            if let token = entry.tokenUsage {
-                if token.hasPrimaryValue {
-                    ValueLine(
-                        title: token.primaryLabel,
-                        value: token.primaryCostAndTokensValue())
-                }
-                if token.hasSecondaryValue {
-                    ValueLine(
-                        title: token.secondaryLabel,
-                        value: WidgetFormat.costAndTokens(
-                            cost: token.last30DaysCostUSD,
-                            tokens: token.last30DaysTokens))
-                }
+            if self.entry.provider == .cursor {
+                CursorWidgetRangeSummaryView(entry: self.entry)
+            } else if let token = entry.tokenUsage {
+                ValueLine(
+                    title: "Today",
+                    value: WidgetFormat.costAndTokens(cost: token.sessionCostUSD, tokens: token.sessionTokens))
+                ValueLine(
+                    title: "30d",
+                    value: WidgetFormat.costAndTokens(cost: token.last30DaysCostUSD, tokens: token.last30DaysTokens))
             }
         }
         .padding(12)
-    }
-}
-
-private struct ProviderCostLines: View {
-    let cost: WidgetSnapshot.ProviderCostSummary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ValueLine(
-                title: self.cost.title,
-                value: WidgetFormat.providerCostValue(self.cost))
-            if let periodLine = WidgetFormat.providerCostPeriodLine(self.cost) {
-                Text(periodLine)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-extension WidgetSnapshot.TokenUsageSummary {
-    fileprivate var primaryLabel: String {
-        self.sessionLabel ?? "Today"
-    }
-
-    fileprivate var secondaryLabel: String {
-        self.last30DaysLabel ?? "30d"
-    }
-
-    fileprivate var hasPrimaryValue: Bool {
-        self.sessionCostUSD != nil || self.sessionCostText != nil || self.sessionTokens != nil
-    }
-
-    fileprivate func primaryCostAndTokensValue() -> String {
-        WidgetFormat.costAndTokens(
-            costText: self.sessionCostText,
-            cost: self.sessionCostUSD,
-            tokens: self.sessionTokens)
-    }
-
-    fileprivate var hasSecondaryValue: Bool {
-        self.last30DaysCostUSD != nil || self.last30DaysTokens != nil
-    }
-}
-
-extension WidgetSnapshot.ProviderCostSummary {
-    fileprivate var title: String {
-        self.currencyCode == "Quota" ? "Quota" : "Extra usage"
     }
 }
 
@@ -709,15 +652,7 @@ private struct HeaderView: View {
 private struct UsageBarRow: View {
     let title: String
     let percentLeft: Double?
-    let detailText: String?
     let color: Color
-
-    init(title: String, percentLeft: Double?, detailText: String? = nil, color: Color) {
-        self.title = title
-        self.percentLeft = percentLeft
-        self.detailText = detailText
-        self.color = color
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -737,11 +672,6 @@ private struct UsageBarRow: View {
                 }
             }
             .frame(height: 6)
-            if let detailText {
-                Text(detailText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 }
@@ -757,6 +687,25 @@ private struct ValueLine: View {
                 .foregroundStyle(.secondary)
             Text(self.value)
                 .font(.caption)
+        }
+    }
+}
+
+private struct CursorWidgetRangeSummaryView: View {
+    let entry: WidgetSnapshot.ProviderEntry
+
+    var body: some View {
+        if self.entry.provider == .cursor, let token = self.entry.tokenUsage {
+            VStack(alignment: .leading, spacing: 2) {
+                if let range = self.entry.cursorRequestRange {
+                    Text(WidgetFormat.cursorDateRange(range))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                ValueLine(
+                    title: self.entry.cursorRequestRange?.label ?? "Usage",
+                    value: WidgetFormat.cursorCostAndTokens(token))
+            }
         }
     }
 }
@@ -837,106 +786,18 @@ enum WidgetColors {
             Color(red: 111 / 255, green: 66 / 255, blue: 193 / 255) // OpenRouter purple
         case .warp:
             Color(red: 147 / 255, green: 139 / 255, blue: 180 / 255)
+        case .windsurf:
+            Color(red: 52 / 255, green: 232 / 255, blue: 187 / 255) // Windsurf #34e8bb
         case .perplexity:
             Color(red: 32 / 255, green: 178 / 255, blue: 170 / 255) // Perplexity teal
-        }
-    }
-}
-
-extension WidgetSnapshot.ProviderEntry {
-    fileprivate var showsCursorRequestDetails: Bool {
-        self.provider == .cursor && !(self.cursorRequestDetails?.isEmpty ?? true)
-    }
-}
-
-enum CursorWidgetRequestPresentation {
-    enum WidgetSize {
-        case medium
-        case large
-    }
-
-    /// Compact widget row. The widget has no hover, so only display-ready fields are kept; the raw
-    /// model and breakdown stay out of the visible row.
-    struct Row: Equatable, Identifiable {
-        let id: Int
-        let modelText: String
-        let metaText: String
-        let tokenText: String
-        let estimateText: String?
-    }
-
-    struct Selection: Equatable {
-        let visible: [WidgetSnapshot.CursorRequestDetail]
-        let rows: [Row]
-        let hiddenCount: Int
-        let range: WidgetSnapshot.CursorRequestRange?
-    }
-
-    static func selection(
-        provider: UsageProvider,
-        details: [WidgetSnapshot.CursorRequestDetail]?,
-        range: WidgetSnapshot.CursorRequestRange? = nil,
-        size: WidgetSize) -> Selection?
-    {
-        guard provider == .cursor,
-              let details,
-              !details.isEmpty
-        else {
-            return nil
-        }
-
-        let maxVisible = size == .medium ? 3 : 5
-        let visible = Array(details.prefix(maxVisible))
-        let hiddenCount = max(0, details.count - visible.count)
-        let rows = visible.enumerated().map { index, detail -> Row in
-            let time = WidgetFormat.requestTime(detail.timestamp)
-            let count = WidgetFormat.requestCountLabel(detail.requests)
-            return Row(
-                id: index,
-                modelText: detail.compactModel ?? detail.model,
-                metaText: "\(time) · \(count)",
-                tokenText: UsageFormatter.tokenCountString(detail.tokens),
-                estimateText: detail.estimateText)
-        }
-        return Selection(visible: visible, rows: rows, hiddenCount: hiddenCount, range: range)
-    }
-}
-
-private struct CursorRequestDetailsView: View {
-    let presentation: CursorWidgetRequestPresentation.Selection
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let range = self.presentation.range {
-                Text(WidgetFormat.cursorRequestRange(range))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            ForEach(self.presentation.rows) { row in
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(row.modelText)
-                        .font(.caption2)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(row.metaText)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(row.tokenText)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    if let estimateText = row.estimateText {
-                        Text(estimateText)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            if self.presentation.hiddenCount > 0 {
-                Text("+\(self.presentation.hiddenCount) more")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+        case .abacus:
+            Color(red: 56 / 255, green: 189 / 255, blue: 248 / 255)
+        case .mistral:
+            Color(red: 255 / 255, green: 80 / 255, blue: 15 / 255) // Mistral orange
+        case .deepseek:
+            Color(red: 82 / 255, green: 125 / 255, blue: 240 / 255)
+        case .codebuff:
+            Color(red: 68 / 255, green: 255 / 255, blue: 0 / 255) // Codebuff lime
         }
     }
 }
@@ -955,18 +816,20 @@ enum WidgetFormat {
         return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
     }
 
-    static func costAndTokens(costText: String? = nil, cost: Double?, tokens: Int?) -> String {
-        let costLabel = costText ?? cost.map { self.usd($0) }
-        if let costLabel, let tokens {
-            return "\(costLabel) · \(self.tokenCount(tokens))"
-        }
-        if let costLabel {
-            return costLabel
-        }
+    static func costAndTokens(cost: Double?, tokens: Int?) -> String {
+        let costText = cost.map(self.usd) ?? "—"
         if let tokens {
-            return self.tokenCount(tokens)
+            return "\(costText) · \(self.tokenCount(tokens))"
         }
-        return "—"
+        return costText
+    }
+
+    static func cursorCostAndTokens(_ token: WidgetSnapshot.TokenUsageSummary) -> String {
+        let costText = token.sessionCostText ?? token.sessionCostUSD.map(self.usd) ?? "—"
+        if let tokens = token.sessionTokens {
+            return "\(costText) · \(self.tokenCount(tokens))"
+        }
+        return costText
     }
 
     static func usd(_ value: Double) -> String {
@@ -986,67 +849,17 @@ enum WidgetFormat {
         return "\(raw) tokens"
     }
 
-    static func requestTime(_ date: Date) -> String {
+    static func cursorDateRange(_ range: WidgetSnapshot.CursorRequestRange) -> String {
         let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-
-    static func requestCountLabel(_ count: Int) -> String {
-        count == 1 ? "Req 1" : "Req \(count)"
-    }
-
-    static func cursorRequestRange(_ range: WidgetSnapshot.CursorRequestRange) -> String {
-        let start = range.start.formatted(.dateTime.month(.abbreviated).day())
-        let end = range.end.formatted(.dateTime.month(.abbreviated).day())
-        return "\(start) - \(end)"
-    }
-
-    static func providerCostValue(_ cost: WidgetSnapshot.ProviderCostSummary) -> String {
-        let used: String
-        let limit: String
-        if cost.currencyCode == "Quota" {
-            used = String(format: "%.0f", cost.used)
-            limit = String(format: "%.0f", cost.limit)
-        } else {
-            used = self.currency(cost.used, currencyCode: cost.currencyCode)
-            limit = self.currency(cost.limit, currencyCode: cost.currencyCode)
-        }
-        return "\(used) / \(limit)"
-    }
-
-    static func providerCostPeriodLine(
-        _ cost: WidgetSnapshot.ProviderCostSummary,
-        now: Date = Date()) -> String?
-    {
-        let period = cost.period?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let renewal = cost.resetsAt else { return nil }
-        let renewalText = "renews \(self.relativeDate(renewal, relativeTo: now))"
-        switch period?.isEmpty == false ? period : nil {
-        case let period?:
-            return "\(period) · \(renewalText)"
-        case nil:
-            return renewalText
-        }
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d"
+        return "\(formatter.string(from: range.start)) – \(formatter.string(from: range.end))"
     }
 
     static func relativeDate(_ date: Date) -> String {
-        self.relativeDate(date, relativeTo: Date())
-    }
-
-    private static func relativeDate(_ date: Date, relativeTo now: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: now)
-    }
-
-    private static func currency(_ value: Double, currencyCode: String) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currencyCode
-        formatter.maximumFractionDigits = 2
-        formatter.minimumFractionDigits = 2
-        return formatter.string(from: NSNumber(value: value)) ?? "\(currencyCode) \(String(format: "%.2f", value))"
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }

@@ -1,4 +1,3 @@
-import CodexBarCore
 import SwiftUI
 
 struct ProviderSettingsSection<Content: View>: View {
@@ -197,6 +196,13 @@ struct ProviderSettingsFieldRowView: View {
                     }
                 }
             }
+
+            if let footer = self.field.footerText, !footer.isEmpty {
+                Text(footer)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
@@ -206,13 +212,25 @@ struct ProviderSettingsTokenAccountsRowView: View {
     let descriptor: ProviderSettingsTokenAccountsDescriptor
     @State private var newLabel: String = ""
     @State private var newToken: String = ""
-    @State private var importErrorMessage: String?
-    @State private var tokenValidationError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(self.descriptor.title)
-                .font(.subheadline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                Text(self.descriptor.title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                if let title = self.descriptor.primaryAddActionTitle,
+                   let action = self.descriptor.primaryAddAction
+                {
+                    Button(title) {
+                        Task { @MainActor in
+                            await action()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
 
             if !self.descriptor.subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(self.descriptor.subtitle)
@@ -222,100 +240,68 @@ struct ProviderSettingsTokenAccountsRowView: View {
             }
 
             let accounts = self.descriptor.accounts()
-            let supportsCodexOAuth: Bool = {
-                guard let injection = TokenAccountSupportCatalog.support(for: self.descriptor.provider)?.injection
-                else {
-                    return false
-                }
-                if case .codexOAuth = injection { return true }
-                return false
-            }()
-            let atLimit = supportsCodexOAuth && accounts.count >= 6
             if accounts.isEmpty {
                 Text("No token accounts yet.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                let selectedIndex = min(self.descriptor.activeIndex(), max(0, accounts.count - 1))
-                Picker("", selection: Binding(
-                    get: { selectedIndex },
-                    set: { index in self.descriptor.setActiveIndex(index) }))
-                {
-                    ForEach(Array(accounts.enumerated()), id: \.offset) { index, account in
-                        Text(account.displayName).tag(index)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .controlSize(.small)
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
+                        HStack(alignment: .center, spacing: 10) {
+                            Button {
+                                self.descriptor.setActiveIndex(index)
+                            } label: {
+                                HStack(alignment: .center, spacing: 8) {
+                                    Image(systemName: self.isActive(index: index, accountCount: accounts.count) ?
+                                        "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(self.isActive(index: index, accountCount: accounts.count) ?
+                                            Color.accentColor : Color.secondary)
+                                    Text(account.displayName)
+                                        .font(
+                                            .footnote.weight(
+                                                self.isActive(index: index, accountCount: accounts.count) ?
+                                                    .semibold : .regular))
+                                        .foregroundStyle(.primary)
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
 
-                Button("Remove selected account") {
-                    let account = accounts[selectedIndex]
-                    self.descriptor.removeAccount(account.id)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            HStack(spacing: 8) {
-                TextField("Label", text: self.$newLabel)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.footnote)
-                SecureField(self.descriptor.placeholder, text: self.$newToken)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.footnote)
-                    .onChange(of: self.newToken) { _, newValue in
-                        self.validateTokenInput(newValue, supportsCodexOAuth: supportsCodexOAuth)
-                    }
-                Button("Add") {
-                    let label = self.newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let token = self.newToken.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !label.isEmpty, !token.isEmpty else { return }
-                    self.descriptor.addAccount(label, token)
-                    self.newLabel = ""
-                    self.newToken = ""
-                    self.importErrorMessage = nil
-                    self.tokenValidationError = nil
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(self.newLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                    self.newToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                    self.tokenValidationError != nil ||
-                    atLimit)
-            }
-
-            if let tokenValidationError {
-                Text(tokenValidationError)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            }
-
-            if atLimit {
-                Text("Maximum 6 Codex accounts. Remove one to add another.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let importCurrentToken = self.descriptor.importCurrentToken {
-                HStack(spacing: 8) {
-                    Button("Import current login") {
-                        switch importCurrentToken() {
-                        case let .success(json):
-                            self.newToken = json
-                            self.importErrorMessage = nil
-                        case let .failure(error):
-                            self.importErrorMessage = error.localizedDescription
+                            Button("Remove") {
+                                self.descriptor.removeAccount(account.id)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                         }
+                        if index < accounts.count - 1 {
+                            Divider()
+                        }
+                    }
+                }
+            }
+
+            if self.descriptor.primaryAddAction == nil {
+                HStack(spacing: 8) {
+                    TextField("Label", text: self.$newLabel)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.footnote)
+                    SecureField(self.descriptor.placeholder, text: self.$newToken)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.footnote)
+                    Button("Add") {
+                        let label = self.newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let token = self.newToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !label.isEmpty, !token.isEmpty else { return }
+                        self.descriptor.addAccount(label, token)
+                        self.newLabel = ""
+                        self.newToken = ""
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help("Reads ~/.codex/auth.json from your active `codex login` session")
-                }
-                if let importErrorMessage {
-                    Text(importErrorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
+                    .disabled(self.newLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        self.newToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
 
@@ -334,24 +320,10 @@ struct ProviderSettingsTokenAccountsRowView: View {
         }
     }
 
-    private func validateTokenInput(_ value: String, supportsCodexOAuth: Bool) {
-        guard supportsCodexOAuth else {
-            self.tokenValidationError = nil
-            return
-        }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            self.tokenValidationError = nil
-            return
-        }
-        do {
-            try CodexOAuthAccountWriter.validate(jsonString: value)
-            self.tokenValidationError = nil
-        } catch let error as CodexOAuthAccountWriterError {
-            self.tokenValidationError = error.errorDescription
-        } catch {
-            self.tokenValidationError = error.localizedDescription
-        }
+    private func isActive(index: Int, accountCount: Int) -> Bool {
+        guard accountCount > 0 else { return false }
+        let selectedIndex = min(self.descriptor.activeIndex(), max(0, accountCount - 1))
+        return selectedIndex == index
     }
 }
 

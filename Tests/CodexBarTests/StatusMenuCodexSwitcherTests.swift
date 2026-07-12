@@ -8,7 +8,7 @@ import Testing
 struct StatusMenuCodexSwitcherTests {
     private func disableMenuCardsForTesting() {
         StatusItemController.menuCardRenderingEnabled = false
-        StatusItemController.menuRefreshEnabled = false
+        StatusItemController.setMenuRefreshEnabledForTesting(false)
     }
 
     private func makeSettings() -> SettingsStore {
@@ -589,7 +589,7 @@ private final class InMemoryManagedCodexAccountStoreForStatusMenuTests: ManagedC
     }
 }
 
-private struct TestManagedCodexHomeFactoryForStatusMenuTests: ManagedCodexHomeProducing, Sendable {
+private struct TestManagedCodexHomeFactoryForStatusMenuTests: ManagedCodexHomeProducing {
     let root: URL
 
     func makeHomeURL() -> URL {
@@ -601,7 +601,7 @@ private struct TestManagedCodexHomeFactoryForStatusMenuTests: ManagedCodexHomePr
     }
 }
 
-private struct StubManagedCodexIdentityReaderForStatusMenuTests: ManagedCodexIdentityReading, Sendable {
+private struct StubManagedCodexIdentityReaderForStatusMenuTests: ManagedCodexIdentityReading {
     let email: String
 
     func loadAccountIdentity(homePath _: String) throws -> CodexAuthBackedAccount {

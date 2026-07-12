@@ -175,7 +175,9 @@ public enum AppGroupSupport {
             }
         }()
 
-        let copiedDefaults = self.copyLegacySharedDefaults(from: legacyDefaults, to: currentDefaults)
+        let copiedDefaults = self.copyLegacySharedDefaults(
+            from: legacyDefaults,
+            to: currentDefaults)
 
         let result = if copiedSnapshot || copiedDefaults > 0 {
             MigrationResult(

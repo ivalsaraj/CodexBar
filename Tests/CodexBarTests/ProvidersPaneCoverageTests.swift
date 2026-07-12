@@ -32,6 +32,19 @@ struct ProvidersPaneCoverageTests {
     }
 
     @Test
+    func `deepseek menu bar metric picker shows balance only copy`() {
+        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-deepseek-picker")
+        let store = Self.makeUsageStore(settings: settings)
+        let pane = ProvidersPane(settings: settings, store: store)
+
+        let picker = pane._test_menuBarMetricPicker(for: .deepseek)
+        #expect(picker?.options.map(\.id) == [
+            MenuBarMetricPreference.automatic.rawValue,
+        ])
+        #expect(picker?.subtitle == "Shows the DeepSeek balance in the menu bar.")
+    }
+
+    @Test
     func `cursor menu bar metric picker omits tertiary api lane when snapshot has no api metric`() {
         let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-cursor-no-tertiary-picker")
         let store = Self.makeUsageStore(settings: settings)
@@ -60,6 +73,83 @@ struct ProvidersPaneCoverageTests {
         #expect(ids.contains(MenuBarMetricPreference.tertiary.rawValue))
         let tertiaryOption = picker?.options.first { $0.id == MenuBarMetricPreference.tertiary.rawValue }
         #expect(tertiaryOption?.title == "Tertiary (API)")
+    }
+
+    @Test
+    func `cursor menu bar metric picker omits extra usage when on demand budget is missing`() {
+        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-cursor-no-extra-usage-picker")
+        let store = Self.makeUsageStore(settings: settings)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 12, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: RateWindow(usedPercent: 34, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                updatedAt: Date()),
+            provider: .cursor)
+        let pane = ProvidersPane(settings: settings, store: store)
+
+        let picker = pane._test_menuBarMetricPicker(for: .cursor)
+        let ids = picker?.options.map(\.id) ?? []
+        #expect(!ids.contains(MenuBarMetricPreference.extraUsage.rawValue))
+    }
+
+    @Test
+    func `cursor menu bar metric picker includes extra usage when on demand budget is available`() {
+        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-cursor-extra-usage-picker")
+        let store = Self.makeUsageStore(settings: settings)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 12, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: RateWindow(usedPercent: 34, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                tertiary: RateWindow(usedPercent: 56, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                providerCost: ProviderCostSnapshot(
+                    used: 15,
+                    limit: 100,
+                    currencyCode: "USD",
+                    updatedAt: Date()),
+                updatedAt: Date()),
+            provider: .cursor)
+        let pane = ProvidersPane(settings: settings, store: store)
+
+        let picker = pane._test_menuBarMetricPicker(for: .cursor)
+        let ids = picker?.options.map(\.id) ?? []
+        #expect(ids.contains(MenuBarMetricPreference.extraUsage.rawValue))
+        let option = picker?.options.first { $0.id == MenuBarMetricPreference.extraUsage.rawValue }
+        #expect(option?.title == "Extra usage")
+    }
+
+    @Test
+    func `zai menu bar metric picker omits tertiary lane when snapshot has no 5-hour metric`() {
+        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-zai-no-tertiary-picker")
+        let store = Self.makeUsageStore(settings: settings)
+        let pane = ProvidersPane(settings: settings, store: store)
+
+        let picker = pane._test_menuBarMetricPicker(for: .zai)
+        let ids = picker?.options.map(\.id) ?? []
+        #expect(ids == [
+            MenuBarMetricPreference.automatic.rawValue,
+            MenuBarMetricPreference.primary.rawValue,
+            MenuBarMetricPreference.secondary.rawValue,
+        ])
+    }
+
+    @Test
+    func `zai menu bar metric picker includes tertiary 5-hour lane when snapshot has it`() {
+        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-zai-tertiary-picker")
+        let store = Self.makeUsageStore(settings: settings)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 12, windowMinutes: 10080, resetsAt: nil, resetDescription: nil),
+                secondary: RateWindow(usedPercent: 34, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                tertiary: RateWindow(usedPercent: 56, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+                updatedAt: Date()),
+            provider: .zai)
+        let pane = ProvidersPane(settings: settings, store: store)
+
+        let picker = pane._test_menuBarMetricPicker(for: .zai)
+        let ids = picker?.options.map(\.id) ?? []
+        #expect(ids.contains(MenuBarMetricPreference.tertiary.rawValue))
+        let tertiaryOption = picker?.options.first { $0.id == MenuBarMetricPreference.tertiary.rawValue }
+        #expect(tertiaryOption?.title == "Tertiary (5-hour)")
     }
 
     @Test
@@ -117,147 +207,6 @@ struct ProvidersPaneCoverageTests {
 
         #expect(picker?.dynamicSubtitle?() == "Paste a Cookie header captured from the billing page.")
         #expect(picker?.trailingText?() == nil)
-    }
-
-    @Test
-    func `opencode providers pane exposes workspace accounts section and hides generic token row`() {
-        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-accounts-section")
-        let store = Self.makeUsageStore(settings: settings)
-        settings.addTokenAccount(provider: .opencode, label: "Legacy Cookie", token: "auth=legacy-cookie")
-
-        let pane = ProvidersPane(settings: settings, store: store)
-        let tokenAccounts = pane._test_tokenAccountDescriptor(for: .opencode)
-        let accountsState = pane._test_openCodeAccountsSectionState()
-
-        #expect(tokenAccounts?.isVisible?() == false)
-        #expect(accountsState?.hasReusableCredential == true)
-        #expect(accountsState?.accounts.isEmpty == true)
-    }
-
-    @Test
-    func `opencode import current login saves every discovered workspace`() async throws {
-        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-import-login")
-        let store = Self.makeUsageStore(settings: settings)
-        let cookie = try #require(Self.makeCookie(name: "auth", value: "import-cookie"))
-        let pane = ProvidersPane(
-            settings: settings,
-            store: store,
-            openCodeWorkspaceFlow: FakeOpenCodeWorkspaceFlow(
-                sessionInfo: OpenCodeCookieImporter.SessionInfo(
-                    cookies: [cookie],
-                    sourceLabel: "Chrome"),
-                discoveredWorkspaces: [
-                    OpenCodeDiscoveredWorkspace(
-                        workspaceID: "wrk_alpha",
-                        workspaceLabel: "Alpha Workspace",
-                        ownerLabel: "Team One"),
-                    OpenCodeDiscoveredWorkspace(
-                        workspaceID: "wrk_beta",
-                        workspaceLabel: "Beta Workspace",
-                        ownerLabel: "Team Two"),
-                ]))
-
-        let result = await pane._test_importOpenCodeCurrentLogin()
-
-        #expect(result == .success("2 workspaces imported."))
-        #expect(settings.openCodeWorkspaceAccounts.map(\.workspaceID) == ["wrk_alpha", "wrk_beta"])
-        #expect(settings.selectedOpenCodeWorkspaceAccount?.workspaceID == "wrk_alpha")
-        #expect(pane._test_openCodeAccountsSectionState()?.notice == "2 workspaces imported.")
-    }
-
-    @Test
-    func `opencode import current login switches active workspace to imported login`() async throws {
-        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-import-switches-login")
-        let store = Self.makeUsageStore(settings: settings)
-        let oldToken = try #require(settings.saveOrReuseOpenCodeCredential(
-            label: "OpenCode (Old)",
-            token: "auth=old-cookie"))
-        let oldAccountID = try #require(settings.saveOpenCodeWorkspaceAccount(
-            tokenAccountID: oldToken.id,
-            label: "Old Workspace",
-            workspaceID: "wrk_old",
-            workspaceLabel: "Old Workspace",
-            discoveredOwnerLabel: nil))
-        _ = settings.setActiveOpenCodeWorkspaceAccount(id: oldAccountID)
-
-        let cookie = try #require(Self.makeCookie(name: "auth", value: "new-cookie"))
-        let pane = ProvidersPane(
-            settings: settings,
-            store: store,
-            openCodeWorkspaceFlow: FakeOpenCodeWorkspaceFlow(
-                sessionInfo: OpenCodeCookieImporter.SessionInfo(
-                    cookies: [cookie],
-                    sourceLabel: "Chrome"),
-                discoveredWorkspaces: [
-                    OpenCodeDiscoveredWorkspace(
-                        workspaceID: "wrk_new",
-                        workspaceLabel: "New Workspace",
-                        ownerLabel: nil),
-                ]))
-
-        let result = await pane._test_importOpenCodeCurrentLogin()
-
-        #expect(result == .success("1 workspace imported."))
-        #expect(settings.selectedOpenCodeWorkspaceAccount?.workspaceID == "wrk_new")
-        #expect(settings.reusableOpenCodeCredential()?.token == "auth=new-cookie")
-    }
-
-    @Test
-    func `failed OpenCode import does not persist the first time credential`() async throws {
-        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-import-failure")
-        let store = Self.makeUsageStore(settings: settings)
-        let cookie = try #require(Self.makeCookie(name: "auth", value: "failed-cookie"))
-        let pane = ProvidersPane(
-            settings: settings,
-            store: store,
-            openCodeWorkspaceFlow: FakeOpenCodeWorkspaceFlow(
-                sessionInfo: OpenCodeCookieImporter.SessionInfo(
-                    cookies: [cookie],
-                    sourceLabel: "Chrome"),
-                discoveredWorkspaces: [],
-                shouldFailDiscovery: true))
-
-        let result = await pane._test_importOpenCodeCurrentLogin()
-
-        guard case .failure = result else {
-            Issue.record("Expected failed OpenCode import")
-            return
-        }
-        #expect(settings.tokenAccounts(for: .opencode).isEmpty)
-        #expect(settings.openCodeWorkspaceAccounts.isEmpty)
-    }
-
-    @Test
-    func `opencode manual add reuses saved credential and only needs workspace id`() async {
-        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-manual-add")
-        let store = Self.makeUsageStore(settings: settings)
-        _ = settings.saveOrReuseOpenCodeCredential(label: "OpenCode (Chrome)", token: "auth=saved-cookie")
-        let pane = ProvidersPane(settings: settings, store: store)
-
-        let result = await pane._test_saveOpenCodeAccount(OpenCodeAccountDraft(
-            workspaceID: "https://opencode.ai/workspace/wrk_manual/go",
-            workspaceLabel: "Manual Workspace"))
-
-        #expect(result == .success("Manual Workspace added."))
-        #expect(settings.openCodeWorkspaceAccounts.count == 1)
-        #expect(settings.openCodeWorkspaceAccounts.first?.workspaceID == "wrk_manual")
-        #expect(settings.openCodeWorkspaceAccounts.first?.workspaceLabel == "Manual Workspace")
-    }
-
-    @Test
-    func `opencode manual add without reusable credential returns visible failure`() async {
-        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-no-credential")
-        let store = Self.makeUsageStore(settings: settings)
-        let pane = ProvidersPane(settings: settings, store: store)
-
-        let result = await pane._test_saveOpenCodeAccount(OpenCodeAccountDraft(
-            workspaceID: "wrk_manual",
-            workspaceLabel: "Manual Workspace"))
-
-        #expect(result == .failure("Import your current OpenCode login first."))
-        #expect(result.shouldResetForm == false)
-        #expect(settings.openCodeWorkspaceAccounts.isEmpty)
-        #expect(pane._test_openCodeAccountsSectionState()?.notice == "Import your current OpenCode login first.")
     }
 
     @Test
@@ -366,42 +315,5 @@ struct ProvidersPaneCoverageTests {
         }
 
         return "\(base64URL(header)).\(base64URL(payload))."
-    }
-
-    private static func makeCookie(name: String, value: String) -> HTTPCookie? {
-        HTTPCookie(properties: [
-            .domain: "opencode.ai",
-            .path: "/",
-            .name: name,
-            .value: value,
-            .secure: "TRUE",
-        ])
-    }
-}
-
-private struct FakeOpenCodeWorkspaceFlow: OpenCodeWorkspaceFlowing {
-    let sessionInfo: OpenCodeCookieImporter.SessionInfo
-    let discoveredWorkspaces: [OpenCodeDiscoveredWorkspace]
-    let shouldFailDiscovery: Bool
-
-    init(
-        sessionInfo: OpenCodeCookieImporter.SessionInfo,
-        discoveredWorkspaces: [OpenCodeDiscoveredWorkspace],
-        shouldFailDiscovery: Bool = false)
-    {
-        self.sessionInfo = sessionInfo
-        self.discoveredWorkspaces = discoveredWorkspaces
-        self.shouldFailDiscovery = shouldFailDiscovery
-    }
-
-    func importSession(browserDetection _: BrowserDetection) async throws -> OpenCodeCookieImporter.SessionInfo {
-        self.sessionInfo
-    }
-
-    func discoverWorkspaces(cookieHeader _: String) async throws -> [OpenCodeDiscoveredWorkspace] {
-        if self.shouldFailDiscovery {
-            throw URLError(.badServerResponse)
-        }
-        return self.discoveredWorkspaces
     }
 }

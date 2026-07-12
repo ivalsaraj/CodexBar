@@ -4,7 +4,7 @@ import Testing
 
 struct AppGroupSupportTests {
     @Test
-    func `app group identifiers use resolved team prefixed release and debug variants`() {
+    func `app group identifiers use resolved team-prefixed release and debug variants`() {
         #expect(
             AppGroupSupport.currentGroupID(teamID: "Y5PE65HELJ", bundleID: "com.steipete.codexbar")
                 == "Y5PE65HELJ.com.steipete.codexbar")
@@ -32,7 +32,7 @@ struct AppGroupSupportTests {
     }
 
     @Test
-    func `legacy migration copies snapshot and shared defaults once`() throws {
+    func `legacy migration copies snapshot once`() throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
@@ -52,7 +52,9 @@ struct AppGroupSupportTests {
         legacyDefaults.set(true, forKey: "debugDisableKeychainAccess")
         legacyDefaults.set(UsageProvider.cursor.rawValue, forKey: "widgetSelectedProvider")
 
-        let legacySnapshotURL = root.appendingPathComponent("legacy/widget-snapshot.json", isDirectory: false)
+        let legacySnapshotURL = root.appendingPathComponent(
+            "legacy/widget-snapshot.json",
+            isDirectory: false)
         try fileManager.createDirectory(
             at: legacySnapshotURL.deletingLastPathComponent(),
             withIntermediateDirectories: true)
@@ -85,5 +87,35 @@ struct AppGroupSupportTests {
             currentSnapshotURLOverride: currentSnapshotURL,
             legacySnapshotURLOverride: legacySnapshotURL)
         #expect(secondResult.status == .alreadyCompleted)
+    }
+
+    @Test
+    func `legacy migration preserves existing target shared defaults`() throws {
+        let standardSuite = "AppGroupSupportTests-standard-existing-\(UUID().uuidString)"
+        let currentSuite = "AppGroupSupportTests-current-existing-\(UUID().uuidString)"
+        let legacySuite = "AppGroupSupportTests-legacy-existing-\(UUID().uuidString)"
+
+        let standardDefaults = try #require(UserDefaults(suiteName: standardSuite))
+        let currentDefaults = try #require(UserDefaults(suiteName: currentSuite))
+        let legacyDefaults = try #require(UserDefaults(suiteName: legacySuite))
+        standardDefaults.removePersistentDomain(forName: standardSuite)
+        currentDefaults.removePersistentDomain(forName: currentSuite)
+        legacyDefaults.removePersistentDomain(forName: legacySuite)
+
+        currentDefaults.set(false, forKey: "debugDisableKeychainAccess")
+        currentDefaults.set(UsageProvider.codex.rawValue, forKey: "widgetSelectedProvider")
+        legacyDefaults.set(true, forKey: "debugDisableKeychainAccess")
+        legacyDefaults.set(UsageProvider.cursor.rawValue, forKey: "widgetSelectedProvider")
+
+        let result = AppGroupSupport.migrateLegacyDataIfNeeded(
+            bundleID: "com.steipete.codexbar",
+            standardDefaults: standardDefaults,
+            currentDefaultsOverride: currentDefaults,
+            legacyDefaultsOverride: legacyDefaults)
+
+        #expect(result.status == .noChangesNeeded)
+        #expect(result.copiedDefaults == 0)
+        #expect(!currentDefaults.bool(forKey: "debugDisableKeychainAccess"))
+        #expect(currentDefaults.string(forKey: "widgetSelectedProvider") == UsageProvider.codex.rawValue)
     }
 }

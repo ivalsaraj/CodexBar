@@ -11,34 +11,38 @@ read_when:
 ## Snapshot pipeline
 - `WidgetSnapshotStore` writes compact JSON snapshots to the app-group container.
 - Widgets read the snapshot and render usage/credits/history states.
-- Codex dashboard snapshots carry the OpenAI subscription renewal timestamp when the page exposes it; the menu renders
-  that date below Codex token-cost lines.
-- Provider extra-usage snapshots include their renewal metadata so medium, large, switcher, and history widgets can show
-  a muted line such as `Monthly · renews in 6 days` under the related cost value when a renewal date is known.
-- OpenCode snapshots can now contain multiple saved workspace entries for the same provider.
-- Cursor legacy-plan snapshots can include recent request details with the usage range, model, time, tokens, and numeric
-  request count. WidgetKit renders a bounded subset with `+N more` instead of a scrollable table.
-- `WidgetSnapshot.CursorRequestDetail` also carries optional `compactModel` (e.g. `Opus 4.8 · xhigh`) and `estimateText`
-  (e.g. `Est. $12.34`). Both are optional, so older snapshot JSON without them still decodes; non-Cursor
-  providers never gain these fields.
-- Cursor request rows survive into the snapshot when they have at least one request, even with zero tokens; rows with no
-  model or with neither tokens nor requests are dropped.
-- Cursor medium/large widgets can show billing-cycle token totals (`Cycle`) plus a bounded list of recent request rows
-  for legacy request-plan accounts. The cycle row includes a summed local request estimate when priced breakdowns are
-  available (`Est. $X` via `sessionCostUSD`) or an approximate range (`Approx. $low-$high` via `sessionCostText`) when
-  any stored row is total-only (e.g. Composer 2.5 without input/output split). WidgetKit never shows approximate ranges as
-  exact numeric costs. Each request row renders the compact model label, local time, `Req N`, token spend, and the
-  optional estimate (`Est.` or `Approx.` — only when available; unknown models never show a fabricated dollar value).
-  WidgetKit has no hover or row expansion; expanded per-request detail is available in the macOS menu only. Up to 30 rows
-  are stored in the snapshot; the widget renders the newest subset with a `+N more` line when additional rows exist.
-- `WidgetSnapshot.TokenUsageSummary.sessionCostText` is an optional display override for approximate cycle totals.
-  Older snapshots without the field still decode and render from `sessionCostUSD` alone.
+- `WidgetSnapshot.ProviderEntry` has optional `accountID` and `accountLabel` fields for provider-scoped entries; older
+  snapshots without those fields remain decodable.
+- OpenCode snapshots contain one display-safe entry per saved workspace. The switcher widget and compact widget show
+  workspace chips when more than one workspace is available; selecting a chip validates the canonical account ID against
+  the current snapshot before saving it. A missing or stale selection falls back to the first workspace entry.
+- Cursor snapshots can carry optional range metadata and bounded request details (model, token count, raw row count,
+  optional weighted request cost, compact label, estimate text, and a presentation-ready exact/approximate total).
+  Existing snapshots without those optional fields still decode normally.
+- The selected Cursor `Cycle` or `30d` range is persisted by the app and controls the Cursor summary written to the
+  widget snapshot. The snapshot stores the actual diagnostic date range and the full aggregate summary; the visible
+  request list is capped at 30 rows and never determines the total. All relevant widget families render the selected
+  range label/date period, and medium/large widgets render up to three recent Cursor rows.
+- Cursor widget estimates are explicitly exact, approximate-range, or approximate-lower-bound text based on available
+  token coverage; they are local diagnostics and do not replace Cursor's request-based quota or billing statement.
+- The app writes snapshots after the main refresh pipeline and token-usage refreshes; narrow single-provider refresh paths may wait for the next snapshot write.
+- If no snapshot is available, widgets fall back to preview/empty data.
 
 ## Extension
 - `Sources/CodexBarWidget` contains timeline + views.
 - Keep data shape in sync with `WidgetSnapshot` in the main app.
-- When the selected provider is OpenCode and multiple saved workspaces exist, the switcher widget exposes a workspace
-  chip row so you can flip between workspace balances without reopening the app.
+
+## Widget types
+- **CodexBar Switcher** (`CodexBarSwitcherWidget`): static provider switcher widget, small/medium/large.
+- **CodexBar Usage** (`CodexBarUsageWidget`): configurable provider usage widget, small/medium/large.
+- **CodexBar History** (`CodexBarHistoryWidget`): configurable usage-history chart, medium/large.
+- **CodexBar Metric** (`CodexBarCompactWidget`): compact credits/today-cost/30-day-cost widget, small only.
+
+## Provider picker support
+The configurable provider widgets currently expose:
+Codex, Claude, Cursor, Gemini, Alibaba, Antigravity, z.ai, Copilot, MiniMax, Kilo, OpenCode, and OpenCode Go.
+
+Providers without a `ProviderChoice` case can still be present in the app snapshot, but they are not selectable from the widget configuration UI yet.
 
 ## Visibility troubleshooting (macOS 14+)
 When widgets do not appear in the gallery at all, the issue is almost always
@@ -48,6 +52,7 @@ registration, signing, or daemon caching (not SwiftUI code).
 ```
 APP="/Applications/CodexBar.app"
 WAPPEX="$APP/Contents/PlugIns/CodexBarWidget.appex"
+WIDGET_ID="com.steipete.codexbar.widget" # debug builds use com.steipete.codexbar.debug.widget
 
 ls -la "$WAPPEX" "$WAPPEX/Contents" "$WAPPEX/Contents/MacOS"
 ```
@@ -55,18 +60,18 @@ ls -la "$WAPPEX" "$WAPPEX/Contents" "$WAPPEX/Contents/MacOS"
 ### 2) PlugInKit registration (pkd)
 ```
 pluginkit -m -p com.apple.widgetkit-extension -v | grep -i codexbar || true
-pluginkit -m -p com.apple.widgetkit-extension -i com.steipete.codexbar.widget -vv
+pluginkit -m -p com.apple.widgetkit-extension -i "$WIDGET_ID" -vv
 ```
 Notes:
 - `+` = elected to use, `-` = ignored (PlugInKit elections).
 - If missing or ignored, force-add and re-elect:
 ```
 pluginkit -a "$WAPPEX"
-pluginkit -e use -p com.apple.widgetkit-extension -i com.steipete.codexbar.widget
+pluginkit -e use -p com.apple.widgetkit-extension -i "$WIDGET_ID"
 ```
 - Check for duplicates (old installs or version precedence):
 ```
-pluginkit -m -D -p com.apple.widgetkit-extension -i com.steipete.codexbar.widget -vv
+pluginkit -m -D -p com.apple.widgetkit-extension -i "$WIDGET_ID" -vv
 ```
 If multiple paths appear, delete older installs and bump `CFBundleVersion`.
 
@@ -92,7 +97,7 @@ log stream --style compact --predicate '(process == "pkd" OR process == "chronod
 ```
 
 ### 6) Packaging sanity checks
-- Widget bundle id should be `com.steipete.codexbar.widget`.
+- Widget bundle id should be `com.steipete.codexbar.widget` for release and `com.steipete.codexbar.debug.widget` for debug.
 - `NSExtensionPointIdentifier` must be `com.apple.widgetkit-extension`.
 - Bundle folder name should match: `CodexBarWidget.appex`.
 

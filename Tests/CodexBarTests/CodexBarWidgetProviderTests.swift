@@ -11,29 +11,38 @@ struct CodexBarWidgetProviderTests {
     }
 
     @Test
-    func `provider choice supports cursor`() {
-        #expect(ProviderChoice(provider: .cursor) == .cursor)
-        #expect(ProviderChoice.cursor.provider == .cursor)
-    }
-
-    @Test
     func `provider choice supports opencode go`() {
         #expect(ProviderChoice(provider: .opencodego) == .opencodego)
         #expect(ProviderChoice.opencodego.provider == .opencodego)
     }
 
     @Test
-    func `provider cost period line includes renewal when available`() {
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let resetAt = now.addingTimeInterval(6 * 24 * 60 * 60)
-        let cost = WidgetSnapshot.ProviderCostSummary(
-            used: 12,
-            limit: 200,
-            currencyCode: "USD",
-            period: "Monthly",
-            resetsAt: resetAt)
+    func `provider choice supports cursor`() {
+        let choice = ProviderChoice(rawValue: "cursor")
 
-        #expect(WidgetFormat.providerCostPeriodLine(cost, now: now) == "Monthly · renews in 6 days")
+        #expect(choice?.provider == .cursor)
+        #expect(ProviderChoice(provider: .cursor)?.provider == .cursor)
+
+        let entry = WidgetSnapshot.ProviderEntry(
+            provider: .cursor,
+            updatedAt: Date(),
+            primary: nil,
+            secondary: nil,
+            tertiary: nil,
+            creditsRemaining: nil,
+            codeReviewRemainingPercent: nil,
+            tokenUsage: nil,
+            dailyUsage: [])
+        let snapshot = WidgetSnapshot(entries: [entry], enabledProviders: [.cursor], generatedAt: Date())
+
+        #expect(CodexBarSwitcherTimelineProvider.supportedProviders(from: snapshot) == [.cursor])
+    }
+
+    @Test
+    func `supported providers fall back to codex when snapshot is empty`() {
+        let snapshot = WidgetSnapshot(entries: [], enabledProviders: [], generatedAt: Date())
+
+        #expect(CodexBarSwitcherTimelineProvider.supportedProviders(from: snapshot) == [.codex])
     }
 
     @Test
@@ -52,6 +61,38 @@ struct CodexBarWidgetProviderTests {
         let snapshot = WidgetSnapshot(entries: [entry], enabledProviders: [.alibaba], generatedAt: now)
 
         #expect(CodexBarSwitcherTimelineProvider.supportedProviders(from: snapshot) == [.alibaba])
+    }
+
+    @Test
+    func `open code widget selection follows the stored workspace account`() throws {
+        let firstID = try OpenCodeWorkspaceAccount.canonicalID(
+            tokenAccountID: #require(UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")),
+            workspaceID: "wrk_FIRST")
+        let secondID = try OpenCodeWorkspaceAccount.canonicalID(
+            tokenAccountID: #require(UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")),
+            workspaceID: "wrk_SECOND")
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let entries = [firstID, secondID].map { accountID in
+            WidgetSnapshot.ProviderEntry(
+                provider: .opencode,
+                updatedAt: now,
+                primary: nil,
+                secondary: nil,
+                tertiary: nil,
+                accountID: accountID,
+                accountLabel: accountID == firstID ? "First" : "Second",
+                creditsRemaining: nil,
+                codeReviewRemainingPercent: nil,
+                tokenUsage: nil,
+                dailyUsage: [])
+        }
+        let snapshot = WidgetSnapshot(entries: entries, generatedAt: now)
+        WidgetSelectionStore.saveSelectedOpenCodeWorkspaceAccountID(secondID)
+
+        #expect(
+            CodexBarSwitcherTimelineProvider.selectedOpenCodeWorkspaceAccountID(
+                provider: .opencode,
+                snapshot: snapshot) == secondID)
     }
 
     @Test
@@ -106,11 +147,7 @@ struct CodexBarWidgetProviderTests {
             secondary: RateWindow(usedPercent: 25, windowMinutes: 10080, resetsAt: nil, resetDescription: nil),
             tertiary: nil,
             usageRows: [
-                WidgetSnapshot.WidgetUsageRowSnapshot(
-                    id: "weekly",
-                    title: "Weekly",
-                    percentLeft: 75,
-                    detailText: "7 days window"),
+                WidgetSnapshot.WidgetUsageRowSnapshot(id: "weekly", title: "Weekly", percentLeft: 75),
             ],
             creditsRemaining: nil,
             codeReviewRemainingPercent: nil,
@@ -119,143 +156,16 @@ struct CodexBarWidgetProviderTests {
 
         let rows = WidgetUsageRow.rows(for: entry)
 
-        #expect(rows == [WidgetUsageRow(id: "weekly", title: "Weekly", percentLeft: 75, detailText: "7 days window")])
+        #expect(rows == [WidgetUsageRow(id: "weekly", title: "Weekly", percentLeft: 75)])
     }
 
     @Test
-    func `cursor request presentation limits medium widget rows`() {
-        let details = (0..<10).map { index in
-            WidgetSnapshot.CursorRequestDetail(
-                timestamp: Date(timeIntervalSince1970: Double(index)),
-                model: "model-\(index)",
-                tokens: 100,
-                requests: 1)
-        }
+    func `widget configuration intents default to codex and credits`() {
+        let providerIntent = ProviderSelectionIntent()
+        let compactIntent = CompactMetricSelectionIntent()
 
-        let selection = CursorWidgetRequestPresentation.selection(
-            provider: .cursor,
-            details: details,
-            range: WidgetSnapshot.CursorRequestRange(
-                start: Date(timeIntervalSince1970: 0),
-                end: Date(timeIntervalSince1970: 60)),
-            size: .medium)
-
-        #expect(selection?.visible.count == 3)
-        #expect(selection?.visible.map(\.model) == ["model-0", "model-1", "model-2"])
-        #expect(selection?.hiddenCount == 7)
-        #expect(selection?.range?.start == Date(timeIntervalSince1970: 0))
-    }
-
-    @Test
-    func `cursor request presentation limits large widget rows`() {
-        let details = (0..<10).map { index in
-            WidgetSnapshot.CursorRequestDetail(
-                timestamp: Date(timeIntervalSince1970: Double(index)),
-                model: "model-\(index)",
-                tokens: 100,
-                requests: 1)
-        }
-
-        let selection = CursorWidgetRequestPresentation.selection(
-            provider: .cursor,
-            details: details,
-            size: .large)
-
-        #expect(selection?.visible.count == 5)
-        #expect(selection?.hiddenCount == 5)
-    }
-
-    @Test
-    func `cursor request presentation returns nil for non cursor providers`() {
-        let details = [
-            WidgetSnapshot.CursorRequestDetail(
-                timestamp: Date(),
-                model: "composer-2",
-                tokens: 100,
-                requests: 1),
-        ]
-
-        #expect(
-            CursorWidgetRequestPresentation.selection(
-                provider: .codex,
-                details: details,
-                size: .large) == nil)
-    }
-
-    @Test
-    func `cursor request rows use compact model text not raw model`() throws {
-        let details = [
-            WidgetSnapshot.CursorRequestDetail(
-                timestamp: Date(timeIntervalSince1970: 1_700_000_000),
-                model: "claude-opus-4-8-thinking-xhigh",
-                tokens: 35_000_000,
-                requests: 1,
-                compactModel: "Opus 4.8 · xhigh",
-                estimateText: "Est. $12.34"),
-        ]
-
-        let selection = try #require(CursorWidgetRequestPresentation.selection(
-            provider: .cursor,
-            details: details,
-            size: .medium))
-        let row = try #require(selection.rows.first)
-        #expect(row.modelText == "Opus 4.8 · xhigh")
-        #expect(!row.modelText.contains("claude-opus"))
-        #expect(row.tokenText == "35M")
-        #expect(row.metaText.contains("Req 1"))
-        #expect(row.estimateText == "Est. $12.34")
-    }
-
-    @Test
-    func `cursor request rows keep request count for zero token rows`() throws {
-        let details = [
-            WidgetSnapshot.CursorRequestDetail(
-                timestamp: Date(timeIntervalSince1970: 1_700_000_000),
-                model: "claude-opus-4-8-thinking-xhigh",
-                tokens: 0,
-                requests: 1,
-                compactModel: "Opus 4.8 · xhigh",
-                estimateText: nil),
-        ]
-
-        let selection = try #require(CursorWidgetRequestPresentation.selection(
-            provider: .cursor,
-            details: details,
-            size: .medium))
-        let row = try #require(selection.rows.first)
-        #expect(row.metaText.contains("Req 1"))
-        #expect(row.estimateText == nil)
-    }
-
-    @Test
-    func `cursor request rows fall back to raw model for legacy snapshots`() throws {
-        let details = [
-            WidgetSnapshot.CursorRequestDetail(
-                timestamp: Date(timeIntervalSince1970: 1_700_000_000),
-                model: "composer-2.5",
-                tokens: 100,
-                requests: 1),
-        ]
-
-        let selection = try #require(CursorWidgetRequestPresentation.selection(
-            provider: .cursor,
-            details: details,
-            size: .large))
-        let row = try #require(selection.rows.first)
-        #expect(row.modelText == "composer-2.5")
-        #expect(row.estimateText == nil)
-    }
-
-    @Test
-    func `widget selection store preserves opencode workspace account selection`() {
-        let bundleID = "com.steipete.codexbar.tests.widget-selection-\(UUID().uuidString)"
-        let accountID = UUID()
-
-        WidgetSelectionStore.saveSelectedProvider(.opencode, bundleID: bundleID)
-        WidgetSelectionStore.saveSelectedAccountID(accountID, for: .opencode, bundleID: bundleID)
-        WidgetSelectionStore.saveSelectedProvider(.codex, bundleID: bundleID)
-
-        #expect(WidgetSelectionStore.loadSelectedProvider(bundleID: bundleID) == .codex)
-        #expect(WidgetSelectionStore.loadSelectedAccountID(for: .opencode, bundleID: bundleID) == accountID)
+        #expect(providerIntent.provider == .codex)
+        #expect(compactIntent.provider == .codex)
+        #expect(compactIntent.metric == .credits)
     }
 }

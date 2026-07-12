@@ -72,39 +72,6 @@ main (your fork's stable branch)
 
 ---
 
-## Codex Baseline Before Upstream Integration
-
-### 2026-04-19 baseline snapshot
-
-- The current app-side Codex auto fetch route is `oauth -> cli`, not dashboard-first.
-- The OAuth path reads the Codex auth payload and calls `https://chatgpt.com/backend-api/wham/usage` by default.
-- The CLI path uses the Codex provider's CLI strategy and falls back through the existing RPC and PTY logic.
-- The OpenAI web dashboard path is separate from the main usage route and is used for dashboard-backed extras and authorized attachment behavior.
-
-### Why the dashboard can show data that the menu hides
-
-- Codex dashboard-backed extras are filtered through the fork's dashboard-attachment policy.
-- A dashboard snapshot can exist in store state while still being marked `displayOnly`.
-- When the snapshot is `displayOnly`, attached-only extras stay hidden from the menu and widget surfaces.
-- This is intentional trust-boundary behavior, not just a menu rendering issue.
-
-### Live usage payload findings
-
-- The live Codex usage payload currently reports `plan_type: "prolite"`.
-- The same payload includes a Spark-specific quota under `additional_rate_limits`.
-- The observed Spark quota entry is:
-  - `limit_name: "GPT-5.3-Codex-Spark"`
-  - `metered_feature: "codex_bengalfox"`
-  - its own `primary_window` and `secondary_window`
-- This means Spark quota exists in the backend response today, but the current app model does not yet surface it in the menu.
-
-### Upstream implications
-
-- Upstream commit `a1813708` is directly relevant because it teaches the Codex fetch stack to handle newer Pro Lite response shapes and fallback edge cases.
-- The current fork still needs a separate display decision for Spark quota, because the live payload exposes it as an additional rate limit rather than the primary plan window.
-
----
-
 ## 🔄 Workflow 1: Monitoring Upstream Changes
 
 ### Daily/Weekly Sync Check

@@ -14,18 +14,27 @@ extension UsageStore {
 
     func refreshProvider(_ provider: UsageProvider, allowDisabled: Bool = false) async {
         self.prepareRefreshState(for: provider)
+        if provider == .opencode {
+            self.settings.syncOpenCodeWorkspaceSelectionFromAppGroup()
+        }
         guard let spec = self.providerSpecs[provider] else { return }
-        let refreshGeneration = self.beginProviderRefreshGeneration(for: provider)
+        let expectedOpenCodeWorkspaceID = provider == .opencode
+            ? self.settings.opencodeSettingsSnapshot(tokenOverride: nil).workspaceAccountID
+            : nil
         let codexExpectedGuard = provider == .codex ? self.currentCodexAccountScopedRefreshGuard() : nil
 
         if !spec.isEnabled(), !allowDisabled {
             self.refreshingProviders.remove(provider)
             await MainActor.run {
                 self.snapshots.removeValue(forKey: provider)
+                self.lastKnownResetSnapshots.removeValue(forKey: provider)
                 self.errors[provider] = nil
                 self.lastSourceLabels.removeValue(forKey: provider)
                 self.lastFetchAttempts.removeValue(forKey: provider)
                 self.accountSnapshots.removeValue(forKey: provider)
+                if provider == .opencode {
+                    self.openCodeWorkspaceSnapshots.removeAll()
+                }
                 self.tokenSnapshots.removeValue(forKey: provider)
                 self.tokenErrors[provider] = nil
                 self.failureGates[provider]?.reset()
@@ -34,7 +43,6 @@ extension UsageStore {
                 self.lastKnownSessionRemaining.removeValue(forKey: provider)
                 self.lastKnownSessionWindowSource.removeValue(forKey: provider)
                 self.lastTokenFetchAt.removeValue(forKey: provider)
-                self.tokenAccountSnapshotCache.removeValue(forKey: provider)
             }
             return
         }
@@ -44,10 +52,7 @@ extension UsageStore {
 
         let tokenAccounts = self.tokenAccounts(for: provider)
         if self.shouldFetchAllTokenAccounts(provider: provider, accounts: tokenAccounts) {
-            await self.refreshTokenAccounts(
-                provider: provider,
-                accounts: tokenAccounts,
-                refreshGeneration: refreshGeneration)
+            await self.refreshTokenAccounts(provider: provider, accounts: tokenAccounts)
             return
         } else {
             _ = await MainActor.run {
@@ -67,13 +72,12 @@ extension UsageStore {
             }
             return await group.next()!
         }
-        guard self.isLatestProviderRefreshGeneration(refreshGeneration, for: provider) else { return }
-
         if provider == .claude,
            ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged()
         {
             await MainActor.run {
                 self.snapshots.removeValue(forKey: .claude)
+                self.lastKnownResetSnapshots.removeValue(forKey: .claude)
                 self.errors[.claude] = nil
                 self.lastSourceLabels.removeValue(forKey: .claude)
                 self.lastFetchAttempts.removeValue(forKey: .claude)
@@ -85,10 +89,19 @@ extension UsageStore {
                 self.lastTokenFetchAt.removeValue(forKey: .claude)
             }
         }
-        guard self.isLatestProviderRefreshGeneration(refreshGeneration, for: provider) else { return }
-
         await MainActor.run {
             self.lastFetchAttempts[provider] = outcome.attempts
+        }
+
+        if provider == .opencode,
+           !self.shouldApplyOpenCodeWorkspaceResult(expectedWorkspaceAccountID: expectedOpenCodeWorkspaceID)
+        {
+            if case let .success(result) = outcome.result,
+               let expectedOpenCodeWorkspaceID
+            {
+                self.openCodeWorkspaceSnapshots[expectedOpenCodeWorkspaceID] = result.usage.scoped(to: provider)
+            }
+            return
         }
 
         switch outcome.result {
@@ -100,43 +113,35 @@ extension UsageStore {
             {
                 return
             }
-            let selectedAccount = self.selectedTokenAccount(for: provider)
-            let displaySnapshot: UsageSnapshot = if let selectedAccount {
-                self.applyAccountLabel(scoped, provider: provider, account: selectedAccount)
-            } else {
-                scoped
-            }
-            await MainActor.run {
-                self.handleSessionQuotaTransition(provider: provider, snapshot: displaySnapshot)
-                self.snapshots[provider] = displaySnapshot
+            let backfilled = await MainActor.run {
+                let backfilled = scoped.backfillingResetTimes(from: self.lastKnownResetSnapshots[provider])
+                self.handleSessionQuotaTransition(provider: provider, snapshot: backfilled)
+                self.lastKnownResetSnapshots[provider] = backfilled
+                self.snapshots[provider] = backfilled
+                if provider == .opencode,
+                   let expectedOpenCodeWorkspaceID
+                {
+                    self.openCodeWorkspaceSnapshots[expectedOpenCodeWorkspaceID] = backfilled
+                }
                 self.lastSourceLabels[provider] = result.sourceLabel
                 self.errors[provider] = nil
                 self.failureGates[provider]?.recordSuccess()
-                self.recordUtilizationHistoryIfNeeded(provider: provider, snapshot: displaySnapshot)
-                if let selectedAccount {
-                    self.cacheTokenAccountSnapshot(
-                        displaySnapshot,
-                        for: provider,
-                        accountID: selectedAccount.id)
-                }
                 if provider == .codex {
                     self.rememberLiveSystemCodexEmailIfNeeded(scoped.accountEmail(for: .codex))
                     self.seedCodexAccountScopedRefreshGuard(accountEmail: scoped.accountEmail(for: .codex))
                 }
-            }
-            if provider == .codex, result.sourceLabel == "oauth" {
-                await self.syncActiveCodexAccountTokenFromDiskIfNeeded()
+                return backfilled
             }
             await self.recordPlanUtilizationHistorySample(
                 provider: provider,
-                snapshot: scoped)
+                snapshot: backfilled)
             if let runtime = self.providerRuntimes[provider] {
                 let context = ProviderRuntimeContext(
                     provider: provider, settings: self.settings, store: self)
                 runtime.providerDidRefresh(context: context, provider: provider)
             }
             if provider == .codex {
-                self.recordCodexHistoricalSampleIfNeeded(snapshot: scoped)
+                self.recordCodexHistoricalSampleIfNeeded(snapshot: backfilled)
             }
         case let .failure(error):
             if provider == .codex,
@@ -165,13 +170,8 @@ extension UsageStore {
         }
     }
 
-    func beginProviderRefreshGeneration(for provider: UsageProvider) -> Int {
-        let next = (self.providerRefreshGenerations[provider] ?? 0) + 1
-        self.providerRefreshGenerations[provider] = next
-        return next
-    }
-
-    func isLatestProviderRefreshGeneration(_ generation: Int, for provider: UsageProvider) -> Bool {
-        self.providerRefreshGenerations[provider] == generation
+    func shouldApplyOpenCodeWorkspaceResult(expectedWorkspaceAccountID: String?) -> Bool {
+        self.settings.opencodeSettingsSnapshot(tokenOverride: nil).workspaceAccountID ==
+            expectedWorkspaceAccountID
     }
 }

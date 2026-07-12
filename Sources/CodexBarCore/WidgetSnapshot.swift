@@ -5,28 +5,25 @@ public struct WidgetSnapshot: Codable, Sendable {
         public let id: String
         public let title: String
         public let percentLeft: Double?
-        public let detailText: String?
 
-        public init(id: String, title: String, percentLeft: Double?, detailText: String? = nil) {
+        public init(id: String, title: String, percentLeft: Double?) {
             self.id = id
             self.title = title
             self.percentLeft = percentLeft
-            self.detailText = detailText
         }
     }
 
     public struct ProviderEntry: Codable, Sendable {
         public let provider: UsageProvider
-        public let accountID: UUID?
-        public let accountLabel: String?
         public let updatedAt: Date
         public let primary: RateWindow?
         public let secondary: RateWindow?
         public let tertiary: RateWindow?
+        public let accountID: String?
+        public let accountLabel: String?
         public let usageRows: [WidgetUsageRowSnapshot]?
         public let creditsRemaining: Double?
         public let codeReviewRemainingPercent: Double?
-        public let providerCost: ProviderCostSummary?
         public let tokenUsage: TokenUsageSummary?
         public let cursorRequestRange: CursorRequestRange?
         public let cursorRequestDetails: [CursorRequestDetail]?
@@ -34,32 +31,30 @@ public struct WidgetSnapshot: Codable, Sendable {
 
         public init(
             provider: UsageProvider,
-            accountID: UUID? = nil,
-            accountLabel: String? = nil,
             updatedAt: Date,
             primary: RateWindow?,
             secondary: RateWindow?,
             tertiary: RateWindow?,
+            accountID: String? = nil,
+            accountLabel: String? = nil,
             usageRows: [WidgetUsageRowSnapshot]? = nil,
             creditsRemaining: Double?,
             codeReviewRemainingPercent: Double?,
-            providerCost: ProviderCostSummary? = nil,
             tokenUsage: TokenUsageSummary?,
             cursorRequestRange: CursorRequestRange? = nil,
             cursorRequestDetails: [CursorRequestDetail]? = nil,
             dailyUsage: [DailyUsagePoint])
         {
             self.provider = provider
-            self.accountID = accountID
-            self.accountLabel = accountLabel
             self.updatedAt = updatedAt
             self.primary = primary
             self.secondary = secondary
             self.tertiary = tertiary
+            self.accountID = accountID
+            self.accountLabel = accountLabel
             self.usageRows = usageRows
             self.creditsRemaining = creditsRemaining
             self.codeReviewRemainingPercent = codeReviewRemainingPercent
-            self.providerCost = providerCost
             self.tokenUsage = tokenUsage
             self.cursorRequestRange = cursorRequestRange
             self.cursorRequestDetails = cursorRequestDetails
@@ -67,25 +62,25 @@ public struct WidgetSnapshot: Codable, Sendable {
         }
     }
 
-    public struct ProviderCostSummary: Codable, Equatable, Sendable {
-        public let used: Double
-        public let limit: Double
-        public let currencyCode: String
-        public let period: String?
-        public let resetsAt: Date?
+    public struct TokenUsageSummary: Codable, Sendable {
+        public let sessionCostUSD: Double?
+        public let sessionTokens: Int?
+        public let last30DaysCostUSD: Double?
+        public let last30DaysTokens: Int?
+        public let sessionCostText: String?
 
         public init(
-            used: Double,
-            limit: Double,
-            currencyCode: String,
-            period: String?,
-            resetsAt: Date?)
+            sessionCostUSD: Double?,
+            sessionTokens: Int?,
+            last30DaysCostUSD: Double?,
+            last30DaysTokens: Int?,
+            sessionCostText: String? = nil)
         {
-            self.used = used
-            self.limit = limit
-            self.currencyCode = currencyCode
-            self.period = period
-            self.resetsAt = resetsAt
+            self.sessionCostUSD = sessionCostUSD
+            self.sessionTokens = sessionTokens
+            self.last30DaysCostUSD = last30DaysCostUSD
+            self.last30DaysTokens = last30DaysTokens
+            self.sessionCostText = sessionCostText
         }
     }
 
@@ -94,9 +89,8 @@ public struct WidgetSnapshot: Codable, Sendable {
         public let model: String
         public let tokens: Int
         public let requests: Int
-        /// Compact, normalized model label for display (e.g. `Opus 4.8 · xhigh`). `nil` for legacy payloads.
+        public let requestCost: Double?
         public let compactModel: String?
-        /// Optional short cost-estimate label (e.g. `Est. $12.34`). `nil` when no honest estimate exists.
         public let estimateText: String?
 
         public init(
@@ -104,6 +98,7 @@ public struct WidgetSnapshot: Codable, Sendable {
             model: String,
             tokens: Int,
             requests: Int,
+            requestCost: Double? = nil,
             compactModel: String? = nil,
             estimateText: String? = nil)
         {
@@ -111,6 +106,7 @@ public struct WidgetSnapshot: Codable, Sendable {
             self.model = model
             self.tokens = tokens
             self.requests = requests
+            self.requestCost = requestCost
             self.compactModel = compactModel
             self.estimateText = estimateText
         }
@@ -119,38 +115,12 @@ public struct WidgetSnapshot: Codable, Sendable {
     public struct CursorRequestRange: Codable, Equatable, Sendable {
         public let start: Date
         public let end: Date
+        public let label: String
 
-        public init(start: Date, end: Date) {
+        public init(start: Date, end: Date, label: String) {
             self.start = start
             self.end = end
-        }
-    }
-
-    public struct TokenUsageSummary: Codable, Sendable {
-        public let sessionCostUSD: Double?
-        public let sessionCostText: String?
-        public let sessionTokens: Int?
-        public let last30DaysCostUSD: Double?
-        public let last30DaysTokens: Int?
-        public let sessionLabel: String?
-        public let last30DaysLabel: String?
-
-        public init(
-            sessionCostUSD: Double?,
-            sessionCostText: String? = nil,
-            sessionTokens: Int?,
-            last30DaysCostUSD: Double?,
-            last30DaysTokens: Int?,
-            sessionLabel: String? = nil,
-            last30DaysLabel: String? = nil)
-        {
-            self.sessionCostUSD = sessionCostUSD
-            self.sessionCostText = sessionCostText
-            self.sessionTokens = sessionTokens
-            self.last30DaysCostUSD = last30DaysCostUSD
-            self.last30DaysTokens = last30DaysTokens
-            self.sessionLabel = sessionLabel
-            self.last30DaysLabel = last30DaysLabel
+            self.label = label
         }
     }
 
@@ -176,6 +146,15 @@ public struct WidgetSnapshot: Codable, Sendable {
         self.generatedAt = generatedAt
     }
 
+    public func entry(for provider: UsageProvider, accountID: String? = nil) -> ProviderEntry? {
+        if let accountID,
+           let entry = self.entries.first(where: { $0.provider == provider && $0.accountID == accountID })
+        {
+            return entry
+        }
+        return self.entries.first(where: { $0.provider == provider })
+    }
+
     private enum CodingKeys: String, CodingKey {
         case entries
         case enabledProviders
@@ -196,18 +175,18 @@ public struct WidgetSnapshot: Codable, Sendable {
         try container.encode(self.enabledProviders, forKey: .enabledProviders)
         try container.encode(self.generatedAt, forKey: .generatedAt)
     }
+}
 
-    public func entries(for provider: UsageProvider) -> [ProviderEntry] {
-        self.entries.filter { $0.provider == provider }
-    }
-
-    public func entry(for provider: UsageProvider, accountID: UUID? = nil) -> ProviderEntry? {
-        if let accountID {
-            return self.entries.first { entry in
-                entry.provider == provider && entry.accountID == accountID
-            }
+extension OpenCodeWorkspaceAccount {
+    public static func isCanonicalID(_ raw: String) -> Bool {
+        let parts = raw.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2,
+              let tokenAccountID = UUID(uuidString: parts[0]),
+              let workspaceID = Self.normalizeWorkspaceID(parts[1])
+        else {
+            return false
         }
-        return self.entries.first { $0.provider == provider }
+        return Self.canonicalID(tokenAccountID: tokenAccountID, workspaceID: workspaceID) == raw
     }
 }
 
@@ -253,7 +232,7 @@ public enum WidgetSnapshotStore {
 
 public enum WidgetSelectionStore {
     private static let selectedProviderKey = "widgetSelectedProvider"
-    private static let selectedAccountIDPrefix = "widgetSelectedAccountID."
+    private static let selectedOpenCodeWorkspaceAccountKey = "widget.selectedOpenCodeWorkspaceAccountID"
 
     public static func loadSelectedProvider(bundleID: String? = Bundle.main.bundleIdentifier) -> UsageProvider? {
         let defaults = self.sharedDefaults(bundleID: bundleID)
@@ -269,34 +248,21 @@ public enum WidgetSelectionStore {
         defaults.set(provider.rawValue, forKey: self.selectedProviderKey)
     }
 
-    public static func loadSelectedAccountID(
-        for provider: UsageProvider,
-        bundleID: String? = Bundle.main.bundleIdentifier) -> UUID?
+    public static func loadSelectedOpenCodeWorkspaceAccountID(
+        bundleID: String? = Bundle.main.bundleIdentifier) -> String?
     {
-        let defaults = self.sharedDefaults(bundleID: bundleID)
-        guard let raw = defaults.string(forKey: self.selectedAccountIDKey(for: provider)) else { return nil }
-        return UUID(uuidString: raw)
+        self.sharedDefaults(bundleID: bundleID).string(forKey: self.selectedOpenCodeWorkspaceAccountKey)
     }
 
-    public static func saveSelectedAccountID(
-        _ accountID: UUID?,
-        for provider: UsageProvider,
+    public static func saveSelectedOpenCodeWorkspaceAccountID(
+        _ accountID: String,
         bundleID: String? = Bundle.main.bundleIdentifier)
     {
-        let defaults = self.sharedDefaults(bundleID: bundleID)
-        let key = self.selectedAccountIDKey(for: provider)
-        if let accountID {
-            defaults.set(accountID.uuidString, forKey: key)
-        } else {
-            defaults.removeObject(forKey: key)
-        }
+        guard OpenCodeWorkspaceAccount.isCanonicalID(accountID) else { return }
+        self.sharedDefaults(bundleID: bundleID).set(accountID, forKey: self.selectedOpenCodeWorkspaceAccountKey)
     }
 
     private static func sharedDefaults(bundleID: String?) -> UserDefaults {
         AppGroupSupport.sharedDefaults(bundleID: bundleID) ?? .standard
-    }
-
-    private static func selectedAccountIDKey(for provider: UsageProvider) -> String {
-        "\(self.selectedAccountIDPrefix)\(provider.rawValue)"
     }
 }

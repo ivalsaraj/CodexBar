@@ -37,12 +37,12 @@ public enum OpenCodeCookieImporter {
         for browserSource in installedBrowsers {
             do {
                 let query = BrowserCookieQuery(domains: self.cookieDomains)
-                let sources = try Self.cookieClient.records(
+                let sources = try Self.cookieClient.codexBarRecords(
                     matching: query,
                     in: browserSource,
                     logger: log)
                 for source in sources where !source.records.isEmpty {
-                    let httpCookies = source.cookies(origin: query.origin)
+                    let httpCookies = BrowserCookieClient.makeHTTPCookies(source.records, origin: query.origin)
                     if !httpCookies.isEmpty {
                         let hasAuthCookie = httpCookies.contains { cookie in
                             cookie.name == "auth" || cookie.name == "__Host-auth"

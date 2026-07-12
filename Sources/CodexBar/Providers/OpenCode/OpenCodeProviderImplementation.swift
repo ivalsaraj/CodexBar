@@ -15,12 +15,11 @@ struct OpenCodeProviderImplementation: ProviderImplementation {
 
     @MainActor
     func observeSettings(_ settings: SettingsStore) {
-        settings.ensureOpenCodeWorkspaceAccountMigrationIfNeeded()
         _ = settings.opencodeCookieSource
         _ = settings.opencodeCookieHeader
         _ = settings.opencodeWorkspaceID
-        _ = settings.openCodeWorkspaceAccounts
-        _ = settings.selectedOpenCodeWorkspaceAccount
+        _ = settings.opencodeWorkspaceAccounts
+        _ = settings.activeOpenCodeWorkspaceAccount
     }
 
     @MainActor
@@ -29,8 +28,10 @@ struct OpenCodeProviderImplementation: ProviderImplementation {
     }
 
     @MainActor
-    func tokenAccountsVisibility(context _: ProviderSettingsContext, support _: TokenAccountSupport) -> Bool {
-        false
+    func tokenAccountsVisibility(context: ProviderSettingsContext, support: TokenAccountSupport) -> Bool {
+        guard support.requiresManualCookieSource else { return true }
+        if !context.settings.tokenAccounts(for: context.provider).isEmpty { return true }
+        return context.settings.opencodeCookieSource == .manual
     }
 
     @MainActor
@@ -56,7 +57,7 @@ struct OpenCodeProviderImplementation: ProviderImplementation {
                 source: context.settings.opencodeCookieSource,
                 keychainDisabled: context.settings.debugDisableKeychainAccess,
                 auto: "Automatic imports browser cookies from opencode.ai.",
-                manual: "Paste a Cookie header captured from an OpenCode workspace or Go dashboard page.",
+                manual: "Paste a Cookie header captured from the billing page.",
                 off: "OpenCode cookies are disabled.")
         }
 

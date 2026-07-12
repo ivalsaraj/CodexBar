@@ -1,7 +1,6 @@
 import Foundation
 
-/// Aggregated cycle-level cost summary across priced Cursor request rows.
-public struct CursorRequestCostSummary: Equatable, Sendable {
+public struct CursorRequestCostSummary: Codable, Equatable, Sendable {
     public let exactUSD: Decimal?
     public let lowerBoundUSD: Decimal?
     public let upperBoundUSD: Decimal?
@@ -20,11 +19,17 @@ public struct CursorRequestCostSummary: Equatable, Sendable {
     }
 }
 
-/// Best-effort, local-only model-cost estimate for a single Cursor request row.
-///
-/// This is diagnostic only. Cursor legacy plans bill by request count, so every explanation carries
-/// a disclaimer to that effect.
 public struct CursorRequestCostEstimate: Equatable, Sendable {
+    public enum Confidence: String, Equatable, Sendable {
+        case exactBreakdown
+        case approximateTotalOnly
+        case approximateLowerBound
+        case partialBreakdownUnavailable
+        case unknownModel
+        case missingPricing
+        case missingBreakdown
+    }
+
     public let usd: Decimal?
     public let lowerBoundUSD: Decimal?
     public let upperBoundUSD: Decimal?
@@ -32,17 +37,6 @@ public struct CursorRequestCostEstimate: Equatable, Sendable {
     public let pricingKey: String?
     public let pricingSource: String?
     public let explanation: String
-
-    public enum Confidence: String, Equatable, Sendable {
-        case exactBreakdown
-        case approximateTotalOnly
-        case partialMissingCacheWriteTier
-        case totalOnlyUnavailable
-        case partialBreakdownUnavailable
-        case unknownModel
-        case missingPricing
-        case missingBreakdown
-    }
 
     public init(
         usd: Decimal?,
@@ -64,273 +58,221 @@ public struct CursorRequestCostEstimate: Equatable, Sendable {
 }
 
 public enum CursorRequestCostEstimator {
-    /// Stable disclaimer reused in hover/help so the UI never implies Cursor bills the legacy plan by dollars.
     public static let legacyDisclaimer = "Model-cost estimate only. Cursor legacy quota is request-based."
     public static let claudeCacheAssumption = "Assumes Anthropic 5-minute cache-write pricing."
     public static let composerCacheCaveat =
         "Composer cache tokens count as input-equivalent; no separate Composer cache billing published."
-    private static let pricingSourceLabel = "CostUsagePricing local catalog (verified 2026-06-06)"
 
-    private struct CursorModelPricing: Equatable, Sendable {
+    private static let catalogSource = "CostUsagePricing local catalog (verified 2026-07-11)"
+
+    private struct CursorModelPricing {
         let inputUSDPerToken: Double
         let outputUSDPerToken: Double
-        let label: String
         let source: String
     }
 
     private static let cursorPricing: [String: CursorModelPricing] = [
         "composer-2.5-fast": .init(
-            inputUSDPerToken: 3.0 / 1_000_000,
-            outputUSDPerToken: 15.0 / 1_000_000,
-            label: "Composer 2.5 Fast",
-            source: "Cursor Composer 2.5 changelog, checked 2026-06-08"),
+            inputUSDPerToken: 3e-6,
+            outputUSDPerToken: 15e-6,
+            source: "Cursor Composer 2.5 changelog, checked 2026-07-11"),
         "composer-2.5-standard": .init(
-            inputUSDPerToken: 0.5 / 1_000_000,
-            outputUSDPerToken: 2.5 / 1_000_000,
-            label: "Composer 2.5 Standard",
-            source: "Cursor Composer 2.5 changelog, checked 2026-06-08"),
+            inputUSDPerToken: 0.5e-6,
+            outputUSDPerToken: 2.5e-6,
+            source: "Cursor Composer 2.5 changelog, checked 2026-07-11"),
     ]
 
     public static func estimate(for request: CursorRecentRequest) -> CursorRequestCostEstimate {
-        self.estimate(model: request.model, breakdown: request.tokenBreakdown)
+        self.estimate(model: request.model, tokens: request.tokens, breakdown: request.tokenBreakdown)
+    }
+
+    public static func summarizedEstimate(for requests: [CursorRecentRequest]) -> CursorRequestCostSummary? {
+        var exact = Decimal.zero
+        var lower = Decimal.zero
+        var upper = Decimal.zero
+        var hasContribution = false
+        var hasApproximation = false
+        var lowerOnly = false
+
+        for request in requests {
+            let estimate = self.estimate(for: request)
+            if let usd = estimate.usd {
+                exact += usd
+                lower += usd
+                upper += usd
+                hasContribution = true
+            } else if let estimateLower = estimate.lowerBoundUSD {
+                lower += estimateLower
+                if let estimateUpper = estimate.upperBoundUSD {
+                    upper += estimateUpper
+                } else {
+                    lowerOnly = true
+                }
+                hasApproximation = true
+                hasContribution = true
+            }
+        }
+
+        guard hasContribution else { return nil }
+        return CursorRequestCostSummary(
+            exactUSD: hasApproximation ? nil : exact,
+            lowerBoundUSD: lower,
+            upperBoundUSD: lowerOnly ? nil : upper,
+            containsApproximation: hasApproximation)
     }
 
     public static func summedUSD(for requests: [CursorRecentRequest]) -> Decimal? {
         self.summarizedEstimate(for: requests)?.exactUSD
     }
 
-    public static func summarizedEstimate(for requests: [CursorRecentRequest]) -> CursorRequestCostSummary? {
-        var exactUSD: Decimal = 0
-        var lowerBoundUSD: Decimal = 0
-        var upperBoundUSD: Decimal = 0
-        var hasContribution = false
-        var containsApproximation = false
-
-        for request in requests {
-            let estimate = self.estimate(for: request)
-            switch estimate.confidence {
-            case .exactBreakdown:
-                guard let usd = estimate.usd else { continue }
-                exactUSD += usd
-                lowerBoundUSD += usd
-                upperBoundUSD += usd
-                hasContribution = true
-            case .approximateTotalOnly:
-                guard let lower = estimate.lowerBoundUSD, let upper = estimate.upperBoundUSD else { continue }
-                lowerBoundUSD += lower
-                upperBoundUSD += upper
-                containsApproximation = true
-                hasContribution = true
-            default:
-                continue
-            }
-        }
-
-        guard hasContribution else { return nil }
-
-        return CursorRequestCostSummary(
-            exactUSD: containsApproximation ? nil : exactUSD,
-            lowerBoundUSD: lowerBoundUSD,
-            upperBoundUSD: upperBoundUSD,
-            containsApproximation: containsApproximation)
-    }
-
-    public static func estimate(
-        model rawModel: String,
+    private static func estimate(
+        model: String,
+        tokens: Int,
         breakdown: CursorRecentRequestTokenBreakdown?) -> CursorRequestCostEstimate
     {
-        let normalized = CursorModelNormalizer.normalize(rawModel)
-
-        guard let breakdown else {
-            return self.unavailable(
-                .missingBreakdown,
-                pricingKey: normalized.pricingKey,
-                reason: "No token breakdown was available, so no estimate is possible.")
-        }
+        let normalized = CursorModelNormalizer.normalize(model)
         guard let pricingKey = normalized.pricingKey else {
-            return self.unavailable(
-                .unknownModel,
-                pricingKey: nil,
-                reason: "This model has no known local pricing, so cost is unavailable.")
+            return self.unavailable(.unknownModel, model: model)
         }
 
-        switch breakdown.confidence {
-        case .empty:
-            return self.unavailable(
-                .missingBreakdown,
+        switch normalized.provider {
+        case .openai:
+            return self.estimateOpenAI(
                 pricingKey: pricingKey,
-                reason: "No token breakdown was available, so no estimate is possible.")
-        case .totalOnly:
-            if normalized.provider == .cursor, self.cursorPricing[pricingKey] != nil {
-                return self.pricedCursorTotalOnly(pricingKey: pricingKey, breakdown: breakdown)
-            }
-            return self.unavailable(
-                .totalOnlyUnavailable,
+                tokens: tokens,
+                breakdown: breakdown)
+        case .anthropic:
+            return self.estimateAnthropic(
                 pricingKey: pricingKey,
-                reason: "Only a total token count was available, so no breakdown-based estimate is possible.")
-        case .partialBreakdown:
-            if normalized.provider == .cursor,
-               self.cursorPricing[pricingKey] != nil,
-               self.composerHasPricedInputOutput(breakdown)
-            {
-                return self.pricedCursorExact(pricingKey: pricingKey, breakdown: breakdown)
-            }
-            return self.unavailable(
-                .partialBreakdownUnavailable,
+                tokens: tokens,
+                breakdown: breakdown)
+        case .cursor:
+            return self.estimateComposer(
                 pricingKey: pricingKey,
-                reason: "The token breakdown was incomplete, so no estimate is possible.")
-        case .exactBreakdown:
-            return self.priced(provider: normalized.provider, pricingKey: pricingKey, breakdown: breakdown)
+                tokens: tokens,
+                breakdown: breakdown)
+        default:
+            return self.unavailable(.missingPricing, model: model)
         }
     }
 
-    private static func priced(
-        provider: CursorModelProvider,
+    private static func estimateOpenAI(
         pricingKey: String,
-        breakdown: CursorRecentRequestTokenBreakdown) -> CursorRequestCostEstimate
+        tokens: Int,
+        breakdown: CursorRecentRequestTokenBreakdown?) -> CursorRequestCostEstimate
     {
-        let input = breakdown.inputTokens ?? 0
-        let output = breakdown.outputTokens ?? 0
-        let cacheRead = breakdown.cacheReadTokens ?? 0
-        let cacheWrite = breakdown.cacheWriteTokens ?? 0
-
-        switch provider {
-        case .anthropic:
-            guard let cost = CostUsagePricing.claudeCostUSD(
+        guard let capabilities = CostUsagePricing.codexPricingCapabilities(model: pricingKey) else {
+            return self.unavailable(.missingPricing, model: pricingKey)
+        }
+        if let breakdown,
+           let input = breakdown.inputTokens,
+           let output = breakdown.outputTokens,
+           let cacheRead = breakdown.cacheReadTokens
+        {
+            let cost = CostUsagePricing.codexCostUSD(
                 model: pricingKey,
                 inputTokens: input,
-                cacheReadInputTokens: cacheRead,
-                cacheCreationInputTokens: cacheWrite,
-                outputTokens: output)
-            else {
-                return self.missingPricing(pricingKey: pricingKey)
-            }
-            return CursorRequestCostEstimate(
-                usd: self.decimalUSD(cost),
-                confidence: .exactBreakdown,
-                pricingKey: pricingKey,
-                pricingSource: self.pricingSourceLabel,
-                explanation: [self.legacyDisclaimer, self.claudeCacheAssumption].joined(separator: " "))
-
-        case .openai:
-            // OpenAI prices cache writes at zero and discounts cache reads as cached input.
-            guard let cost = CostUsagePricing.codexCostUSD(
-                model: pricingKey,
-                inputTokens: input + cacheRead,
                 cachedInputTokens: cacheRead,
                 outputTokens: output)
-            else {
-                return self.missingPricing(pricingKey: pricingKey)
-            }
-            return CursorRequestCostEstimate(
-                usd: self.decimalUSD(cost),
-                confidence: .exactBreakdown,
-                pricingKey: pricingKey,
-                pricingSource: self.pricingSourceLabel,
-                explanation: self.legacyDisclaimer)
-
-        case .cursor:
-            return self.pricedCursorExact(pricingKey: pricingKey, breakdown: breakdown)
-
-        case .google, .unknown:
-            return self.unavailable(
-                .unknownModel,
-                pricingKey: pricingKey,
-                reason: "This model has no known local pricing, so cost is unavailable.")
-        }
-    }
-
-    /// Composer can price when input and output are known; cache fields are optional and count as input-equivalent.
-    private static func composerHasPricedInputOutput(_ breakdown: CursorRecentRequestTokenBreakdown) -> Bool {
-        breakdown.inputTokens != nil && breakdown.outputTokens != nil
-    }
-
-    private static func pricedCursorExact(
-        pricingKey: String,
-        breakdown: CursorRecentRequestTokenBreakdown) -> CursorRequestCostEstimate
-    {
-        guard let pricing = self.cursorPricing[pricingKey] else {
-            return self.unavailable(
-                .unknownModel,
-                pricingKey: pricingKey,
-                reason: "This model has no known local pricing, so cost is unavailable.")
+            return self.exact(cost, pricingKey: pricingKey, source: self.catalogSource)
         }
 
-        let billableInput = (breakdown.inputTokens ?? 0)
-            + (breakdown.cacheReadTokens ?? 0)
-            + (breakdown.cacheWriteTokens ?? 0)
-        let billableOutput = breakdown.outputTokens ?? 0
-        let cost = Double(billableInput) * pricing.inputUSDPerToken
-            + Double(billableOutput) * pricing.outputUSDPerToken
-
-        var explanationParts = [
-            self.legacyDisclaimer,
-            "\(pricing.label) pricing.",
-            pricing.source,
-        ]
-        if (breakdown.cacheReadTokens ?? 0) > 0 || (breakdown.cacheWriteTokens ?? 0) > 0 {
-            explanationParts.append(self.composerCacheCaveat)
-        }
-
-        return CursorRequestCostEstimate(
-            usd: self.decimalUSD(cost),
-            confidence: .exactBreakdown,
-            pricingKey: pricingKey,
-            pricingSource: pricing.source,
-            explanation: explanationParts.joined(separator: " "))
-    }
-
-    private static func pricedCursorTotalOnly(
-        pricingKey: String,
-        breakdown: CursorRecentRequestTokenBreakdown) -> CursorRequestCostEstimate
-    {
-        guard let pricing = self.cursorPricing[pricingKey] else {
-            return self.unavailable(
-                .totalOnlyUnavailable,
-                pricingKey: pricingKey,
-                reason: "Only a total token count was available, so no breakdown-based estimate is possible.")
-        }
-
-        let total = breakdown.totalTokens
-        let lower = Double(total) * pricing.inputUSDPerToken
-        let upper = Double(total) * pricing.outputUSDPerToken
-
+        let cacheRead = breakdown?.cacheReadTokens ?? 0
+        let minimumRate = cacheRead > 0
+            ? (capabilities.cacheReadInputCostPerToken ?? capabilities.inputCostPerToken)
+            : capabilities.inputCostPerToken
+        let lower = Decimal(Double(max(tokens, 0)) * minimumRate)
+        let cacheContext = cacheRead > 0 ? "cache-read evidence" : "no cache-read evidence"
         return CursorRequestCostEstimate(
             usd: nil,
-            lowerBoundUSD: self.decimalUSD(lower),
-            upperBoundUSD: self.decimalUSD(upper),
+            lowerBoundUSD: lower,
+            confidence: .approximateLowerBound,
+            pricingKey: pricingKey,
+            pricingSource: self.catalogSource,
+            explanation: "Conservative lower-bound from \(cacheContext); Cursor did not expose a complete "
+                + "input/output/cache split. \(Self.legacyDisclaimer)")
+    }
+
+    private static func estimateAnthropic(
+        pricingKey: String,
+        tokens: Int,
+        breakdown: CursorRecentRequestTokenBreakdown?) -> CursorRequestCostEstimate
+    {
+        guard let capabilities = CostUsagePricing.claudePricingCapabilities(model: pricingKey) else {
+            return self.unavailable(.missingPricing, model: pricingKey)
+        }
+        if let breakdown,
+           breakdown.confidence == .exactBreakdown,
+           let input = breakdown.inputTokens,
+           let output = breakdown.outputTokens
+        {
+            let cost = CostUsagePricing.claudeCostUSD(
+                model: pricingKey,
+                inputTokens: input,
+                cacheReadInputTokens: breakdown.cacheReadTokens ?? 0,
+                cacheCreationInputTokens: breakdown.cacheWriteTokens ?? 0,
+                outputTokens: output)
+            return self.exact(cost, pricingKey: pricingKey, source: self.catalogSource)
+        }
+
+        let total = Double(max(tokens, 0))
+        return CursorRequestCostEstimate(
+            usd: nil,
+            lowerBoundUSD: Decimal(total * capabilities.inputCostPerToken),
+            upperBoundUSD: Decimal(total * capabilities.outputCostPerToken),
+            confidence: .approximateTotalOnly,
+            pricingKey: pricingKey,
+            pricingSource: self.catalogSource,
+            explanation: "Token split unavailable. \(Self.claudeCacheAssumption) \(Self.legacyDisclaimer)")
+    }
+
+    private static func estimateComposer(
+        pricingKey: String,
+        tokens: Int,
+        breakdown: CursorRecentRequestTokenBreakdown?) -> CursorRequestCostEstimate
+    {
+        guard let pricing = self.cursorPricing[pricingKey] else {
+            return self.unavailable(.missingPricing, model: pricingKey)
+        }
+        if let breakdown,
+           breakdown.confidence == .exactBreakdown,
+           let input = breakdown.inputTokens,
+           let output = breakdown.outputTokens
+        {
+            let inputEquivalent = input + (breakdown.cacheReadTokens ?? 0) + (breakdown.cacheWriteTokens ?? 0)
+            let cost = Double(inputEquivalent) * pricing.inputUSDPerToken + Double(output) * pricing.outputUSDPerToken
+            return self.exact(cost, pricingKey: pricingKey, source: pricing.source)
+        }
+        let total = Double(max(tokens, 0))
+        return CursorRequestCostEstimate(
+            usd: nil,
+            lowerBoundUSD: Decimal(total * pricing.inputUSDPerToken),
+            upperBoundUSD: Decimal(total * pricing.outputUSDPerToken),
             confidence: .approximateTotalOnly,
             pricingKey: pricingKey,
             pricingSource: pricing.source,
-            explanation: [
-                self.legacyDisclaimer,
-                "Approximate range from total tokens only.",
-                "\(pricing.label) pricing.",
-                pricing.source,
-            ].joined(separator: " "))
+            explanation: "Token split unavailable. \(Self.composerCacheCaveat) \(Self.legacyDisclaimer)")
     }
 
-    private static func missingPricing(pricingKey: String) -> CursorRequestCostEstimate {
-        self.unavailable(
-            .missingPricing,
+    private static func exact(_ cost: Double?, pricingKey: String, source: String) -> CursorRequestCostEstimate {
+        guard let cost else { return self.unavailable(.missingPricing, model: pricingKey) }
+        return CursorRequestCostEstimate(
+            usd: Decimal(cost),
+            confidence: .exactBreakdown,
             pricingKey: pricingKey,
-            reason: "No local pricing rule covers this model, so cost is unavailable.")
+            pricingSource: source,
+            explanation: Self.legacyDisclaimer)
     }
 
     private static func unavailable(
         _ confidence: CursorRequestCostEstimate.Confidence,
-        pricingKey: String?,
-        reason: String) -> CursorRequestCostEstimate
+        model: String) -> CursorRequestCostEstimate
     {
         CursorRequestCostEstimate(
             usd: nil,
             confidence: confidence,
-            pricingKey: pricingKey,
+            pricingKey: nil,
             pricingSource: nil,
-            explanation: self.legacyDisclaimer + " " + reason)
-    }
-
-    private static func decimalUSD(_ value: Double) -> Decimal {
-        Decimal(string: String(format: "%.6f", max(0, value))) ?? Decimal(max(0, value))
+            explanation: "No local price is available for \(model). \(self.legacyDisclaimer)")
     }
 }

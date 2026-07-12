@@ -4,11 +4,6 @@ import Testing
 
 @Suite(.serialized)
 struct OpenCodeUsageFetcherErrorTests {
-    private struct UsageRecord {
-        let timeCreated: String
-        let cost: Int
-    }
-
     private func makeSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [OpenCodeStubURLProtocol.self]
@@ -76,389 +71,83 @@ struct OpenCodeUsageFetcherErrorTests {
     }
 
     @Test
-    func `go dashboard api errors do not fall back to legacy usage parsing`() async throws {
+    func `subscription get null skips post and returns graceful error`() async throws {
         defer {
             OpenCodeStubURLProtocol.handler = nil
         }
 
-        var paths: [String] = []
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var methods: [String] = []
+        var urls: [URL] = []
+        var queries: [String] = []
+        var contentTypes: [String] = []
         OpenCodeStubURLProtocol.handler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
-            paths.append(url.path)
+            methods.append(request.httpMethod ?? "GET")
+            urls.append(url)
+            queries.append(url.query ?? "")
+            contentTypes.append(request.value(forHTTPHeaderField: "Content-Type") ?? "")
 
-            switch url.path {
-            case "/workspace/wrk_TEST123/go":
-                return Self.makeResponse(
-                    url: url,
-                    body: #"{"detail":"Go dashboard unavailable"}"#,
-                    statusCode: 500,
-                    contentType: "application/json")
-            case "/workspace/wrk_TEST123/usage":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.usagePageHTML(
-                        workspaceID: "wrk_TEST123",
-                        records: [
-                            UsageRecord(
-                                timeCreated: formatter.string(from: now.addingTimeInterval(-(60 * 60))),
-                                cost: 2_000_000),
-                        ]),
-                    statusCode: 200,
-                    contentType: "text/html")
-            case "/workspace/wrk_TEST123/billing":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.billingPageHTML(workspaceID: "wrk_TEST123", balance: 80_000_000),
-                    statusCode: 200,
-                    contentType: "text/html")
-            default:
-                Issue.record("Unexpected path: \(url.path)")
-                return Self.makeResponse(url: url, body: "unexpected", statusCode: 404, contentType: "text/plain")
+            if request.httpMethod?.uppercased() == "GET" {
+                return Self.makeResponse(url: url, body: "null", statusCode: 200, contentType: "application/json")
             }
+
+            let body = #"{"status":500,"unhandled":true,"message":"HTTPError"}"#
+            return Self.makeResponse(url: url, body: body, statusCode: 500, contentType: "application/json")
         }
 
         do {
             _ = try await OpenCodeUsageFetcher.fetchUsage(
                 cookieHeader: "auth=test",
                 timeout: 2,
-                now: now,
                 workspaceIDOverride: "wrk_TEST123",
                 session: self.makeSession())
             Issue.record("Expected OpenCodeUsageError.apiError")
         } catch let error as OpenCodeUsageError {
             switch error {
             case let .apiError(message):
-                #expect(message.contains("HTTP 500"))
-                #expect(message.contains("Go dashboard unavailable"))
+                #expect(message.contains("No subscription usage data"))
+                #expect(message.contains("wrk_TEST123"))
             default:
                 Issue.record("Expected apiError, got: \(error)")
             }
         }
 
-        #expect(paths == ["/workspace/wrk_TEST123/go"])
-    }
-
-    @Test
-    func `go dashboard invalid credentials fallback to legacy usage parsing for plain opencode`() async throws {
-        defer {
-            OpenCodeStubURLProtocol.handler = nil
-        }
-
-        var paths: [String] = []
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        OpenCodeStubURLProtocol.handler = { request in
-            guard let url = request.url else { throw URLError(.badURL) }
-            paths.append(url.path)
-
-            switch url.path {
-            case "/workspace/wrk_TEST123/go":
-                return Self.makeResponse(
-                    url: url,
-                    body: "<html><head><title>403 Forbidden</title></head><body>denied</body></html>",
-                    statusCode: 403,
-                    contentType: "text/html")
-            case "/workspace/wrk_TEST123/usage":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.usagePageHTML(
-                        workspaceID: "wrk_TEST123",
-                        records: [
-                            UsageRecord(
-                                timeCreated: formatter.string(from: now.addingTimeInterval(-(60 * 60))),
-                                cost: 2_000_000),
-                        ]),
-                    statusCode: 200,
-                    contentType: "text/html")
-            case "/workspace/wrk_TEST123/billing":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.billingPageHTML(workspaceID: "wrk_TEST123", balance: 8_000_000),
-                    statusCode: 200,
-                    contentType: "text/html")
-            default:
-                Issue.record("Unexpected path: \(url.path)")
-                return Self.makeResponse(url: url, body: "unexpected", statusCode: 404, contentType: "text/plain")
-            }
-        }
-
-        let snapshot = try await OpenCodeUsageFetcher.fetchUsage(
-            cookieHeader: "auth=test",
-            timeout: 2,
-            now: now,
-            workspaceIDOverride: "wrk_TEST123",
-            session: self.makeSession())
-
-        #expect(snapshot.rollingUsagePercent == 20)
-        #expect(snapshot.weeklyUsagePercent == 20)
-        #expect(snapshot.rollingResetInSec == 4 * 60 * 60)
-        #expect(snapshot.weeklyResetInSec == 6 * 24 * 60 * 60 + 23 * 60 * 60)
-        #expect(paths == [
-            "/workspace/wrk_TEST123/go",
-            "/workspace/wrk_TEST123/usage",
-            "/workspace/wrk_TEST123/billing",
-        ])
-    }
-
-    @Test
-    func `usage and billing pages derive trailing spend windows from live loader shape`() async throws {
-        defer {
-            OpenCodeStubURLProtocol.handler = nil
-        }
-
-        var methods: [String] = []
-        var paths: [String] = []
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let records = [
-            UsageRecord(timeCreated: formatter.string(from: now.addingTimeInterval(-(60 * 60))), cost: 2_000_000),
-            UsageRecord(timeCreated: formatter.string(from: now.addingTimeInterval(-(4 * 60 * 60))), cost: 2_000_000),
-            UsageRecord(
-                timeCreated: formatter.string(from: now.addingTimeInterval(-(3 * 24 * 60 * 60))),
-                cost: 6_000_000),
-            UsageRecord(
-                timeCreated: formatter.string(from: now.addingTimeInterval(-(9 * 24 * 60 * 60))),
-                cost: 10_000_000),
-        ]
-        OpenCodeStubURLProtocol.handler = { request in
-            guard let url = request.url else { throw URLError(.badURL) }
-            methods.append(request.httpMethod ?? "GET")
-            paths.append(url.path)
-
-            switch url.path {
-            case "/workspace/wrk_TEST123/usage":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.usagePageHTML(workspaceID: "wrk_TEST123", records: records),
-                    statusCode: 200,
-                    contentType: "text/html")
-            case "/workspace/wrk_TEST123/billing":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.billingPageHTML(workspaceID: "wrk_TEST123", balance: 80_000_000),
-                    statusCode: 200,
-                    contentType: "text/html")
-            default:
-                Issue.record("Unexpected path: \(url.path)")
-                return Self.makeResponse(url: url, body: "unexpected", statusCode: 404, contentType: "text/plain")
-            }
-        }
-
-        let snapshot = try await OpenCodeUsageFetcher.fetchUsage(
-            cookieHeader: "auth=test",
-            timeout: 2,
-            now: now,
-            workspaceIDOverride: "wrk_TEST123",
-            session: self.makeSession())
-
-        #expect(snapshot.rollingUsagePercent == 4)
-        #expect(snapshot.weeklyUsagePercent == 10)
-        #expect(snapshot.rollingResetInSec == 3600)
-        #expect(snapshot.weeklyResetInSec == 4 * 24 * 60 * 60)
-        #expect(methods == ["GET", "GET"])
-        #expect(paths == ["/workspace/wrk_TEST123/usage", "/workspace/wrk_TEST123/billing"])
-    }
-
-    @Test
-    func `usage and billing pages allow spacing changes around loader payloads and numeric fields`() async throws {
-        defer {
-            OpenCodeStubURLProtocol.handler = nil
-        }
-
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        var paths: [String] = []
-
-        OpenCodeStubURLProtocol.handler = { request in
-            guard let url = request.url else { throw URLError(.badURL) }
-            paths.append(url.path)
-
-            switch url.path {
-            case "/workspace/wrk_TEST123/go":
-                return Self.makeResponse(
-                    url: url,
-                    body: #"{"detail":"missing"}"#,
-                    statusCode: 404,
-                    contentType: "application/json")
-            case "/workspace/wrk_TEST123/usage":
-                let usagePage = """
-                <!DOCTYPE html>
-                <html>
-                <body>
-                <script>
-                window._$HY = window._$HY || { r: {} };
-                self.$R = self.$R || [];
-                _$HY.r["usage.list    [\\"wrk_TEST123\\",0]"] = $R[22] = ($R[2] = r => (
-                    r.p = new Promise((s, f) => { r.s = s, r.f = f })
-                ))($R[23] = { p: 0, s: 0, f: 0 });
-                ($R[16] = (r, d) => { r.s(d), r.p.s = 1, r.p.v = d })($R[23], $R[26] = [{
-                    id:"usg_0",workspaceID:"wrk_TEST123",
-                    timeCreated:$R[28]=new Date("\(formatter.string(from: now.addingTimeInterval(-(30 * 60))))"),
-                    timeUpdated:$R[29]=new Date("\(formatter.string(from: now.addingTimeInterval(-(30 * 60))))"),
-                    timeDeleted:null,model:"glm-5.1",provider:"deepinfra",inputTokens:1,outputTokens:1,
-                    reasoningTokens:null,cacheReadTokens:0,cacheWrite5mTokens:null,cacheWrite1hTokens:null,
-                    cost:1000000,keyID:"key_redacted",sessionID:"",enrichment:$R[30]={plan:"lite"}
-                }]);
-                </script>
-                </body>
-                </html>
-                """
-                return Self.makeResponse(
-                    url: url,
-                    body: usagePage,
-                    statusCode: 200,
-                    contentType: "text/html")
-            case "/workspace/wrk_TEST123/billing":
-                let billingPage = """
-                <!DOCTYPE html>
-                <html>
-                <body>
-                <script>
-                window._$HY = window._$HY || { r: {} };
-                self.$R = self.$R || [];
-                _$HY.r["billing.get    [\\"wrk_TEST123\\"]"] = $R[15] = ($R[2] = r => (
-                    r.p = new Promise((s, f) => { r.s = s, r.f = f })
-                ))($R[16] = { p: 0, s: 0, f: 0 });
-                ($R[22] = (r, d) => { r.s(d), r.p.s = 1, r.p.v = d })(
-                    $R[16],
-                    $R[23] = {
-                        balance : 9000000,
-                        monthlyLimit : null,
-                        monthlyUsage : 0
-                    }
-                );
-                </script>
-                </body>
-                </html>
-                """
-                return Self.makeResponse(
-                    url: url,
-                    body: billingPage,
-                    statusCode: 200,
-                    contentType: "text/html")
-            default:
-                Issue.record("Unexpected path: \(url.path)")
-                return Self.makeResponse(url: url, body: "unexpected", statusCode: 404, contentType: "text/plain")
-            }
-        }
-
-        let snapshot = try await OpenCodeUsageFetcher.fetchUsage(
-            cookieHeader: "auth=test",
-            timeout: 2,
-            now: now,
-            workspaceIDOverride: "wrk_TEST123",
-            session: self.makeSession())
-
-        #expect(snapshot.rollingUsagePercent == 10)
-        #expect(snapshot.weeklyUsagePercent == 10)
-        #expect(snapshot.rollingResetInSec == 4 * 60 * 60 + 30 * 60)
-        #expect(snapshot.weeklyResetInSec == 6 * 24 * 60 * 60 + 23 * 60 * 60 + 30 * 60)
-        #expect(paths == [
-            "/workspace/wrk_TEST123/go",
-            "/workspace/wrk_TEST123/usage",
-            "/workspace/wrk_TEST123/billing",
-        ])
-    }
-
-    @Test
-    func `usage page missing loader payload returns parse failed without server fallback`() async throws {
-        defer {
-            OpenCodeStubURLProtocol.handler = nil
-        }
-
-        var methods: [String] = []
-        var paths: [String] = []
-        OpenCodeStubURLProtocol.handler = { request in
-            guard let url = request.url else { throw URLError(.badURL) }
-            methods.append(request.httpMethod ?? "GET")
-            paths.append(url.path)
-
-            return Self.makeResponse(
-                url: url,
-                body: "<html><body><p>Usage loader unavailable.</p></body></html>",
-                statusCode: 200,
-                contentType: "text/html")
-        }
-
-        do {
-            _ = try await OpenCodeUsageFetcher.fetchUsage(
-                cookieHeader: "auth=test",
-                timeout: 2,
-                workspaceIDOverride: "wrk_TEST123",
-                session: self.makeSession())
-            Issue.record("Expected OpenCodeUsageError.parseFailed")
-        } catch let error as OpenCodeUsageError {
-            switch error {
-            case let .parseFailed(message):
-                #expect(message.contains("Missing usage records"))
-            default:
-                Issue.record("Expected parseFailed, got: \(error)")
-            }
-        }
-
         #expect(methods == ["GET"])
-        #expect(paths == ["/workspace/wrk_TEST123/usage"])
+        #expect(queries[0].contains("id="))
+        #expect(queries[0].contains("wrk_TEST123"))
+        #expect(urls[0].path == "/_server")
+        #expect(contentTypes[0].isEmpty)
     }
 
     @Test
-    func `empty usage page with billing data returns zero usage snapshot`() async throws {
+    func `subscription get payload does not fallback to post`() async throws {
         defer {
             OpenCodeStubURLProtocol.handler = nil
         }
 
-        var paths: [String] = []
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var methods: [String] = []
         OpenCodeStubURLProtocol.handler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
-            paths.append(url.path)
+            methods.append(request.httpMethod ?? "GET")
 
-            switch url.path {
-            case "/workspace/wrk_TEST123/go":
-                return Self.makeResponse(
-                    url: url,
-                    body: "<html><body><p>Not subscribed to Go.</p></body></html>",
-                    statusCode: 404,
-                    contentType: "text/html")
-            case "/workspace/wrk_TEST123/usage":
-                return Self.makeResponse(
-                    url: url,
-                    body: "<html><body><p>No usage data available for the selected period.</p></body></html>",
-                    statusCode: 200,
-                    contentType: "text/html")
-            case "/workspace/wrk_TEST123/billing":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.billingPageHTML(workspaceID: "wrk_TEST123", balance: 80_000_000),
-                    statusCode: 200,
-                    contentType: "text/html")
-            default:
-                Issue.record("Unexpected path: \(url.path)")
-                return Self.makeResponse(url: url, body: "unexpected", statusCode: 404, contentType: "text/plain")
+            let body = """
+            {
+              "rollingUsage": { "usagePercent": 17, "resetInSec": 600 },
+              "weeklyUsage": { "usagePercent": 75, "resetInSec": 7200 }
             }
+            """
+            return Self.makeResponse(url: url, body: body, statusCode: 200, contentType: "application/json")
         }
 
         let snapshot = try await OpenCodeUsageFetcher.fetchUsage(
             cookieHeader: "auth=test",
             timeout: 2,
-            now: now,
             workspaceIDOverride: "wrk_TEST123",
             session: self.makeSession())
 
-        #expect(snapshot.rollingUsagePercent == 0)
-        #expect(snapshot.weeklyUsagePercent == 0)
-        #expect(snapshot.rollingResetInSec == 0)
-        #expect(snapshot.weeklyResetInSec == 0)
-        #expect(paths == [
-            "/workspace/wrk_TEST123/go",
-            "/workspace/wrk_TEST123/usage",
-            "/workspace/wrk_TEST123/billing",
-        ])
+        #expect(snapshot.rollingUsagePercent == 17)
+        #expect(snapshot.weeklyUsagePercent == 75)
+        #expect(methods == ["GET"])
     }
 
     @Test
@@ -503,114 +192,46 @@ struct OpenCodeUsageFetcherErrorTests {
     }
 
     @Test
-    func `billing page missing balance data returns parse failed after usage succeeds`() async throws {
+    func `subscription get missing fields falls back to post`() async throws {
         defer {
             OpenCodeStubURLProtocol.handler = nil
         }
 
         var methods: [String] = []
-        var paths: [String] = []
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         OpenCodeStubURLProtocol.handler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
             methods.append(request.httpMethod ?? "GET")
-            paths.append(url.path)
 
-            switch url.path {
-            case "/workspace/wrk_TEST123/usage":
+            if request.httpMethod?.uppercased() == "GET" {
                 return Self.makeResponse(
                     url: url,
-                    body: Self.usagePageHTML(
-                        workspaceID: "wrk_TEST123",
-                        records: [
-                            UsageRecord(
-                                timeCreated: formatter.string(from: now.addingTimeInterval(-(60 * 60))),
-                                cost: 2_000_000),
-                        ]),
+                    body: #"{"ok":true}"#,
                     statusCode: 200,
-                    contentType: "text/html")
-            case "/workspace/wrk_TEST123/billing":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.billingPageHTML(workspaceID: "wrk_TEST123", balance: nil),
-                    statusCode: 200,
-                    contentType: "text/html")
-            default:
-                Issue.record("Unexpected path: \(url.path)")
-                return Self.makeResponse(url: url, body: "unexpected", statusCode: 404, contentType: "text/plain")
+                    contentType: "application/json")
             }
-        }
 
-        do {
-            _ = try await OpenCodeUsageFetcher.fetchUsage(
-                cookieHeader: "auth=test",
-                timeout: 2,
-                now: now,
-                workspaceIDOverride: "wrk_TEST123",
-                session: self.makeSession())
-            Issue.record("Expected OpenCodeUsageError.parseFailed")
-        } catch let error as OpenCodeUsageError {
-            switch error {
-            case let .parseFailed(message):
-                #expect(message.contains("Missing billing balance"))
-            default:
-                Issue.record("Expected parseFailed, got: \(error)")
+            let body = """
+            {
+              "rollingUsage": { "usagePercent": 22, "resetInSec": 300 },
+              "weeklyUsage": { "usagePercent": 44, "resetInSec": 3600 }
             }
+            """
+            return Self.makeResponse(
+                url: url,
+                body: body,
+                statusCode: 200,
+                contentType: "application/json")
         }
 
-        #expect(methods == ["GET", "GET"])
-        #expect(paths == ["/workspace/wrk_TEST123/usage", "/workspace/wrk_TEST123/billing"])
-    }
-
-    @Test
-    func `normalizes workspace override from URL into usage and billing paths`() async throws {
-        defer {
-            OpenCodeStubURLProtocol.handler = nil
-        }
-
-        var paths: [String] = []
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        OpenCodeStubURLProtocol.handler = { request in
-            guard let url = request.url else { throw URLError(.badURL) }
-            paths.append(url.path)
-
-            switch url.path {
-            case "/workspace/wrk_URL123/usage":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.usagePageHTML(
-                        workspaceID: "wrk_URL123",
-                        records: [
-                            UsageRecord(
-                                timeCreated: formatter.string(from: now.addingTimeInterval(-(30 * 60))),
-                                cost: 1_000_000),
-                        ]),
-                    statusCode: 200,
-                    contentType: "text/html")
-            case "/workspace/wrk_URL123/billing":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.billingPageHTML(workspaceID: "wrk_URL123", balance: 9_000_000),
-                    statusCode: 200,
-                    contentType: "text/html")
-            default:
-                Issue.record("Unexpected path: \(url.path)")
-                return Self.makeResponse(url: url, body: "unexpected", statusCode: 404, contentType: "text/plain")
-            }
-        }
-
-        _ = try await OpenCodeUsageFetcher.fetchUsage(
+        let snapshot = try await OpenCodeUsageFetcher.fetchUsage(
             cookieHeader: "auth=test",
             timeout: 2,
-            now: now,
-            workspaceIDOverride: "https://opencode.ai/workspace/wrk_URL123/billing",
+            workspaceIDOverride: "wrk_TEST123",
             session: self.makeSession())
 
-        #expect(paths == ["/workspace/wrk_URL123/usage", "/workspace/wrk_URL123/billing"])
+        #expect(snapshot.rollingUsagePercent == 22)
+        #expect(snapshot.weeklyUsagePercent == 44)
+        #expect(methods == ["GET", "POST"])
     }
 
     @Test
@@ -619,112 +240,27 @@ struct OpenCodeUsageFetcherErrorTests {
             OpenCodeStubURLProtocol.handler = nil
         }
 
-        var observedCookies: [String] = []
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var observedCookie: String?
         OpenCodeStubURLProtocol.handler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
-            observedCookies.append(request.value(forHTTPHeaderField: "Cookie") ?? "")
+            observedCookie = request.value(forHTTPHeaderField: "Cookie")
 
-            switch url.path {
-            case "/workspace/wrk_TEST123/usage":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.usagePageHTML(
-                        workspaceID: "wrk_TEST123",
-                        records: [
-                            UsageRecord(
-                                timeCreated: formatter.string(from: now.addingTimeInterval(-(30 * 60))),
-                                cost: 1_000_000),
-                        ]),
-                    statusCode: 200,
-                    contentType: "text/html")
-            case "/workspace/wrk_TEST123/billing":
-                return Self.makeResponse(
-                    url: url,
-                    body: Self.billingPageHTML(workspaceID: "wrk_TEST123", balance: 9_000_000),
-                    statusCode: 200,
-                    contentType: "text/html")
-            default:
-                Issue.record("Unexpected path: \(url.path)")
-                return Self.makeResponse(url: url, body: "unexpected", statusCode: 404, contentType: "text/plain")
+            let body = """
+            {
+              "rollingUsage": { "usagePercent": 17, "resetInSec": 600 },
+              "weeklyUsage": { "usagePercent": 75, "resetInSec": 7200 }
             }
+            """
+            return Self.makeResponse(url: url, body: body, statusCode: 200, contentType: "application/json")
         }
 
         _ = try await OpenCodeUsageFetcher.fetchUsage(
             cookieHeader: "provider=google; auth=test",
             timeout: 2,
-            now: now,
             workspaceIDOverride: "wrk_TEST123",
             session: self.makeSession())
 
-        #expect(observedCookies == ["auth=test", "auth=test"])
-    }
-
-    private static func usagePageHTML(workspaceID: String, records: [UsageRecord]) -> String {
-        let recordText = records.enumerated().map { index, record in
-            self.usageRecordHTML(index: index, workspaceID: workspaceID, record: record)
-        }
-        .joined(separator: ",")
-
-        return """
-        <!DOCTYPE html>
-        <html>
-        <body>
-        <script>
-        window._$HY = window._$HY || { r: {} };
-        self.$R = self.$R || [];
-        _$HY.r["usage.list[\\"\(workspaceID)\\",0]"] = $R[22] = ($R[2] = r => (
-            r.p = new Promise((s, f) => { r.s = s, r.f = f })
-        ))($R[23] = { p: 0, s: 0, f: 0 });
-        ($R[16] = (r, d) => { r.s(d), r.p.s = 1, r.p.v = d })($R[23], $R[26] = [\(recordText)]);
-        </script>
-        <div data-component="empty-state"><p>No usage data available for the selected period.</p></div>
-        </body>
-        </html>
-        """
-    }
-
-    private static func billingPageHTML(workspaceID: String, balance: Int?) -> String {
-        let balanceLiteral = balance.map(String.init) ?? "null"
-        return """
-        <!DOCTYPE html>
-        <html>
-        <body>
-        <script>
-        window._$HY = window._$HY || { r: {} };
-        self.$R = self.$R || [];
-        _$HY.r["billing.get[\\"\(workspaceID)\\"]"] = $R[15] = ($R[2] = r => (
-            r.p = new Promise((s, f) => { r.s = s, r.f = f })
-        ))($R[16] = { p: 0, s: 0, f: 0 });
-        ($R[22] = (r, d) => { r.s(d), r.p.s = 1, r.p.v = d })(
-            $R[16],
-            $R[23] = {
-                balance:\(balanceLiteral),
-                monthlyLimit:null,
-                monthlyUsage:0,
-                subscription:null,
-                lite:$R[25] = {},
-                liteSubscriptionID:"sub_redacted"
-            }
-        );
-        </script>
-        </body>
-        </html>
-        """
-    }
-
-    private static func usageRecordHTML(index: Int, workspaceID: String, record: UsageRecord) -> String {
-        let base = index * 5
-        return [
-            #"{id:"usg_\#(index)",workspaceID:"\#(workspaceID)","#,
-            #"timeCreated:$R[\#(base + 28)]=new Date("\#(record.timeCreated)"),"#,
-            #"timeUpdated:$R[\#(base + 29)]=new Date("\#(record.timeCreated)"),timeDeleted:null,"#,
-            #"model:"glm-5.1",provider:"deepinfra",inputTokens:1,outputTokens:1,reasoningTokens:null,"#,
-            #"cacheReadTokens:0,cacheWrite5mTokens:null,cacheWrite1hTokens:null,cost:\#(record.cost),"#,
-            #"keyID:"key_redacted",sessionID:"",enrichment:$R[\#(base + 30)]={plan:"lite"}}"#,
-        ].joined()
+        #expect(observedCookie == "auth=test")
     }
 
     private static func makeResponse(

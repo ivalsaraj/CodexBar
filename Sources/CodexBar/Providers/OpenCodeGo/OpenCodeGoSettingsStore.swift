@@ -34,8 +34,7 @@ extension SettingsStore {
     }
 
     var opencodegoDashboardURL: URL {
-        let override = ProcessInfo.processInfo.environment["CODEXBAR_OPENCODEGO_WORKSPACE_ID"]
-        return OpenCodeGoUsageFetcher.dashboardURL(workspaceID: override ?? self.opencodegoWorkspaceID)
+        OpenCodeGoUsageFetcher.dashboardURL(workspaceID: self.opencodegoWorkspaceID)
     }
 
     func ensureOpenCodeGoCookieLoaded() {}

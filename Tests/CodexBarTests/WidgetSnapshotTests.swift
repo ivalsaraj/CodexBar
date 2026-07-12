@@ -4,6 +4,81 @@ import Testing
 
 struct WidgetSnapshotTests {
     @Test
+    func `widget snapshot decodes legacy entry without Cursor request details`() throws {
+        let json = #"""
+        {
+          "entries": [{
+            "provider": "cursor",
+            "updatedAt": "2026-07-01T00:00:00Z",
+            "primary": null,
+            "secondary": null,
+            "tertiary": null,
+            "creditsRemaining": null,
+            "codeReviewRemainingPercent": null,
+            "tokenUsage": null,
+            "dailyUsage": []
+          }],
+          "enabledProviders": ["cursor"],
+          "generatedAt": "2026-07-01T00:00:00Z"
+        }
+        """#
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let snapshot = try decoder.decode(WidgetSnapshot.self, from: Data(json.utf8))
+
+        #expect(snapshot.entries.first?.cursorRequestRange == nil)
+        #expect(snapshot.entries.first?.cursorRequestDetails == nil)
+    }
+
+    @Test
+    func `widget snapshot preserves selected Cursor range and request detail shape`() throws {
+        let timestamp = Date(timeIntervalSince1970: 1_772_000_000)
+        let entry = WidgetSnapshot.ProviderEntry(
+            provider: .cursor,
+            updatedAt: timestamp,
+            primary: nil,
+            secondary: nil,
+            tertiary: nil,
+            creditsRemaining: nil,
+            codeReviewRemainingPercent: nil,
+            tokenUsage: WidgetSnapshot.TokenUsageSummary(
+                sessionCostUSD: nil,
+                sessionTokens: 1000,
+                last30DaysCostUSD: nil,
+                last30DaysTokens: 1000,
+                sessionCostText: "Approx. $4.10+"),
+            cursorRequestRange: WidgetSnapshot.CursorRequestRange(
+                start: timestamp.addingTimeInterval(-3600),
+                end: timestamp,
+                label: "Cycle"),
+            cursorRequestDetails: [
+                WidgetSnapshot.CursorRequestDetail(
+                    timestamp: timestamp,
+                    model: "gpt-5.5-extra-high",
+                    tokens: 1000,
+                    requests: 1,
+                    requestCost: 2,
+                    compactModel: "GPT-5.5 · extra-high",
+                    estimateText: "Approx. $0.01+"),
+            ],
+            dailyUsage: [])
+        let snapshot = WidgetSnapshot(entries: [entry], generatedAt: timestamp)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let decoded = try decoder.decode(WidgetSnapshot.self, from: encoder.encode(snapshot))
+        let decodedEntry = try #require(decoded.entries.first)
+
+        #expect(decodedEntry.cursorRequestRange?.label == "Cycle")
+        #expect(decodedEntry.cursorRequestDetails?.first?.requestCost == 2)
+        #expect(decodedEntry.cursorRequestDetails?.first?.compactModel == "GPT-5.5 · extra-high")
+        #expect(decodedEntry.tokenUsage?.sessionCostText == "Approx. $4.10+")
+    }
+
+    @Test
     func `widget snapshot round trip`() throws {
         let entry = WidgetSnapshot.ProviderEntry(
             provider: .codex,
@@ -12,11 +87,7 @@ struct WidgetSnapshotTests {
             secondary: RateWindow(usedPercent: 20, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
             tertiary: nil,
             usageRows: [
-                WidgetSnapshot.WidgetUsageRowSnapshot(
-                    id: "session",
-                    title: "Session",
-                    percentLeft: 90,
-                    detailText: "5 hours window"),
+                WidgetSnapshot.WidgetUsageRowSnapshot(id: "session", title: "Session", percentLeft: 90),
                 WidgetSnapshot.WidgetUsageRowSnapshot(id: "weekly", title: "Weekly", percentLeft: 80),
             ],
             creditsRemaining: 123.4,
@@ -47,81 +118,7 @@ struct WidgetSnapshotTests {
         #expect(decoded.entries.first?.provider == .codex)
         #expect(decoded.entries.first?.tokenUsage?.sessionTokens == 1200)
         #expect(decoded.entries.first?.usageRows?.map(\.id) == ["session", "weekly"])
-        #expect(decoded.entries.first?.usageRows?.first?.detailText == "5 hours window")
         #expect(decoded.enabledProviders == [.codex, .claude])
-    }
-
-    @Test
-    func `widget snapshot round trip preserves token labels`() throws {
-        let entry = WidgetSnapshot.ProviderEntry(
-            provider: .cursor,
-            updatedAt: Date(),
-            primary: nil,
-            secondary: nil,
-            tertiary: nil,
-            creditsRemaining: nil,
-            codeReviewRemainingPercent: nil,
-            tokenUsage: WidgetSnapshot.TokenUsageSummary(
-                sessionCostUSD: nil,
-                sessionTokens: 86_684_822,
-                last30DaysCostUSD: nil,
-                last30DaysTokens: nil,
-                sessionLabel: "Cycle",
-                last30DaysLabel: nil),
-            dailyUsage: [])
-
-        let snapshot = WidgetSnapshot(
-            entries: [entry],
-            enabledProviders: [.cursor],
-            generatedAt: Date())
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(snapshot)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(WidgetSnapshot.self, from: data)
-
-        #expect(decoded.entries.first?.tokenUsage?.sessionLabel == "Cycle")
-        #expect(decoded.entries.first?.tokenUsage?.last30DaysLabel == nil)
-    }
-
-    @Test
-    func `widget snapshot round trip preserves provider cost period`() throws {
-        let resetDate = Date(timeIntervalSince1970: 1_777_680_000)
-        let entry = WidgetSnapshot.ProviderEntry(
-            provider: .claude,
-            updatedAt: Date(),
-            primary: nil,
-            secondary: nil,
-            tertiary: nil,
-            creditsRemaining: nil,
-            codeReviewRemainingPercent: nil,
-            providerCost: WidgetSnapshot.ProviderCostSummary(
-                used: 12,
-                limit: 200,
-                currencyCode: "USD",
-                period: "Monthly",
-                resetsAt: resetDate),
-            tokenUsage: nil,
-            dailyUsage: [])
-
-        let snapshot = WidgetSnapshot(
-            entries: [entry],
-            enabledProviders: [.claude],
-            generatedAt: Date())
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(snapshot)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(WidgetSnapshot.self, from: data)
-
-        #expect(decoded.entries.first?.providerCost?.period == "Monthly")
-        #expect(decoded.entries.first?.providerCost?.resetsAt == resetDate)
     }
 
     @Test
@@ -205,161 +202,6 @@ struct WidgetSnapshotTests {
     }
 
     @Test
-    func `widget snapshot round trip preserves cursor request details`() throws {
-        let timestamp = Date(timeIntervalSince1970: 1_779_888_240)
-        let entry = WidgetSnapshot.ProviderEntry(
-            provider: .cursor,
-            updatedAt: Date(),
-            primary: nil,
-            secondary: nil,
-            tertiary: nil,
-            creditsRemaining: nil,
-            codeReviewRemainingPercent: nil,
-            tokenUsage: WidgetSnapshot.TokenUsageSummary(
-                sessionCostUSD: nil,
-                sessionTokens: 86_684_822,
-                last30DaysCostUSD: nil,
-                last30DaysTokens: nil,
-                sessionLabel: "Cycle",
-                last30DaysLabel: nil),
-            cursorRequestRange: WidgetSnapshot.CursorRequestRange(
-                start: timestamp,
-                end: timestamp.addingTimeInterval(3600)),
-            cursorRequestDetails: [
-                WidgetSnapshot.CursorRequestDetail(
-                    timestamp: timestamp,
-                    model: "claude-opus-4-7-thinking-xhigh",
-                    tokens: 1000,
-                    requests: 1),
-            ],
-            dailyUsage: [])
-
-        let snapshot = WidgetSnapshot(
-            entries: [entry],
-            enabledProviders: [.cursor],
-            generatedAt: Date())
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(snapshot)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(WidgetSnapshot.self, from: data)
-
-        let detail = try #require(decoded.entries.first?.cursorRequestDetails?.first)
-        #expect(detail.model == "claude-opus-4-7-thinking-xhigh")
-        #expect(detail.tokens == 1000)
-        #expect(detail.requests == 1)
-        #expect(detail.timestamp == timestamp)
-        #expect(decoded.entries.first?.cursorRequestRange?.start == timestamp)
-        #expect(decoded.entries.first?.cursorRequestRange?.end == timestamp.addingTimeInterval(3600))
-    }
-
-    @Test
-    func `widget snapshot round trip preserves session cost text override`() throws {
-        let entry = WidgetSnapshot.ProviderEntry(
-            provider: .cursor,
-            updatedAt: Date(),
-            primary: nil,
-            secondary: nil,
-            tertiary: nil,
-            creditsRemaining: nil,
-            codeReviewRemainingPercent: nil,
-            tokenUsage: WidgetSnapshot.TokenUsageSummary(
-                sessionCostUSD: nil,
-                sessionCostText: "Approx. $6.00-$30.00",
-                sessionTokens: 2_000_000,
-                last30DaysCostUSD: nil,
-                last30DaysTokens: nil,
-                sessionLabel: "Cycle",
-                last30DaysLabel: nil),
-            dailyUsage: [])
-
-        let snapshot = WidgetSnapshot(
-            entries: [entry],
-            enabledProviders: [.cursor],
-            generatedAt: Date())
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(snapshot)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(WidgetSnapshot.self, from: data)
-
-        #expect(decoded.entries.first?.tokenUsage?.sessionCostText == "Approx. $6.00-$30.00")
-        #expect(decoded.entries.first?.tokenUsage?.sessionCostUSD == nil)
-    }
-
-    @Test
-    func `widget snapshot decodes legacy payload without session cost text`() throws {
-        let json = """
-        {
-          "entries": [
-            {
-              "provider": "cursor",
-              "updatedAt": "2026-04-04T06:30:00Z",
-              "primary": null,
-              "secondary": null,
-              "tertiary": null,
-              "creditsRemaining": null,
-              "codeReviewRemainingPercent": null,
-              "tokenUsage": {
-                "sessionCostUSD": 18,
-                "sessionTokens": 2000000,
-                "sessionLabel": "Cycle"
-              },
-              "dailyUsage": []
-            }
-          ],
-          "enabledProviders": ["cursor"],
-          "generatedAt": "2026-04-04T06:30:00Z"
-        }
-        """
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(WidgetSnapshot.self, from: Data(json.utf8))
-
-        #expect(decoded.entries.first?.tokenUsage?.sessionCostUSD == 18)
-        #expect(decoded.entries.first?.tokenUsage?.sessionCostText == nil)
-    }
-
-    @Test
-    func `widget snapshot decodes legacy payload without cursor request details`() throws {
-        let json = """
-        {
-          "entries": [
-            {
-              "provider": "cursor",
-              "updatedAt": "2026-04-04T06:30:00Z",
-              "primary": null,
-              "secondary": null,
-              "tertiary": null,
-              "creditsRemaining": null,
-              "codeReviewRemainingPercent": null,
-              "tokenUsage": {
-                "sessionTokens": 100,
-                "sessionLabel": "Cycle"
-              },
-              "dailyUsage": []
-            }
-          ],
-          "enabledProviders": ["cursor"],
-          "generatedAt": "2026-04-04T06:30:00Z"
-        }
-        """
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(WidgetSnapshot.self, from: Data(json.utf8))
-
-        #expect(decoded.entries.first?.cursorRequestDetails == nil)
-    }
-
-    @Test
     func `widget snapshot decodes legacy payload without usage rows`() throws {
         let json = """
         {
@@ -393,87 +235,5 @@ struct WidgetSnapshotTests {
         #expect(decoded.entries.count == 1)
         #expect(decoded.entries.first?.usageRows == nil)
         #expect(decoded.entries.first?.secondary?.usedPercent == 25)
-    }
-
-    @Test
-    func `widget snapshot round trip preserves cursor request compact details`() throws {
-        let timestamp = Date(timeIntervalSince1970: 1_779_888_240)
-        let entry = WidgetSnapshot.ProviderEntry(
-            provider: .cursor,
-            updatedAt: Date(),
-            primary: nil,
-            secondary: nil,
-            tertiary: nil,
-            creditsRemaining: nil,
-            codeReviewRemainingPercent: nil,
-            tokenUsage: nil,
-            cursorRequestDetails: [
-                WidgetSnapshot.CursorRequestDetail(
-                    timestamp: timestamp,
-                    model: "claude-opus-4-8-thinking-xhigh",
-                    tokens: 34_972_000,
-                    requests: 1,
-                    compactModel: "Opus 4.8 · xhigh",
-                    estimateText: "Est. $18.95"),
-            ],
-            dailyUsage: [])
-
-        let snapshot = WidgetSnapshot(entries: [entry], enabledProviders: [.cursor], generatedAt: Date())
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(snapshot)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(WidgetSnapshot.self, from: data)
-
-        let detail = try #require(decoded.entries.first?.cursorRequestDetails?.first)
-        #expect(detail.model == "claude-opus-4-8-thinking-xhigh")
-        #expect(detail.tokens == 34_972_000)
-        #expect(detail.requests == 1)
-        #expect(detail.compactModel == "Opus 4.8 · xhigh")
-        #expect(detail.estimateText == "Est. $18.95")
-    }
-
-    @Test
-    func `widget snapshot decodes legacy cursor request detail without compact fields`() throws {
-        let json = """
-        {
-          "entries": [
-            {
-              "provider": "cursor",
-              "updatedAt": "2026-04-04T06:30:00Z",
-              "primary": null,
-              "secondary": null,
-              "tertiary": null,
-              "creditsRemaining": null,
-              "codeReviewRemainingPercent": null,
-              "tokenUsage": null,
-              "cursorRequestDetails": [
-                {
-                  "timestamp": "2026-02-04T13:42:00Z",
-                  "model": "claude-opus-4-7-thinking-xhigh",
-                  "tokens": 1000,
-                  "requests": 1
-                }
-              ],
-              "dailyUsage": []
-            }
-          ],
-          "enabledProviders": ["cursor"],
-          "generatedAt": "2026-04-04T06:30:00Z"
-        }
-        """
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(WidgetSnapshot.self, from: Data(json.utf8))
-
-        let detail = try #require(decoded.entries.first?.cursorRequestDetails?.first)
-        #expect(detail.tokens == 1000)
-        #expect(detail.requests == 1)
-        #expect(detail.compactModel == nil)
-        #expect(detail.estimateText == nil)
     }
 }

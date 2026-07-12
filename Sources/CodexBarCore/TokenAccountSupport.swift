@@ -3,9 +3,6 @@ import Foundation
 public enum TokenAccountInjection: Sendable {
     case cookieHeader
     case environment(key: String)
-    /// Writes the stored auth.json content directly to ~/.codex/auth.json at switch time.
-    /// Parallel fetching uses per-account temp CODEX_HOME directories instead.
-    case codexOAuth
 }
 
 public struct TokenAccountSupport: Sendable {
@@ -51,10 +48,6 @@ public enum TokenAccountSupportCatalog {
             {
                 return [ClaudeOAuthCredentialsStore.environmentTokenKey: accessToken]
             }
-            return nil
-        case .codexOAuth:
-            // File write happens at switch time via CodexAccountSwitcher.switchToAccount().
-            // For parallel fetching, ProviderRegistry.makeEnvironment handles temp CODEX_HOME.
             return nil
         }
     }

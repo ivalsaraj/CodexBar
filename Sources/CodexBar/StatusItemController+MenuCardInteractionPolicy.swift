@@ -1,4 +1,4 @@
-import Foundation
+import CodexBarCore
 
 extension StatusItemController {
     struct MenuCardInteractionPolicy: Equatable {

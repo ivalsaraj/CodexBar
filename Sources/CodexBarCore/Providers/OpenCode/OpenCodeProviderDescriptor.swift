@@ -12,8 +12,8 @@ public enum OpenCodeProviderDescriptor {
                 displayName: "OpenCode",
                 sessionLabel: "5-hour",
                 weeklyLabel: "Weekly",
-                opusLabel: "Monthly",
-                supportsOpus: true,
+                opusLabel: nil,
+                supportsOpus: false,
                 supportsCredits: false,
                 creditsHint: "",
                 toggleTitle: "Show OpenCode usage",
@@ -50,8 +50,8 @@ struct OpenCodeUsageFetchStrategy: ProviderFetchStrategy {
     }
 
     func fetch(_ context: ProviderFetchContext) async throws -> ProviderFetchResult {
-        let workspaceOverride = context.env["CODEXBAR_OPENCODE_WORKSPACE_ID"]
-            ?? context.settings?.opencode?.workspaceID
+        let workspaceOverride = context.settings?.opencode?.workspaceID
+            ?? context.env["CODEXBAR_OPENCODE_WORKSPACE_ID"]
         let cookieSource = context.settings?.opencode?.cookieSource ?? .auto
         do {
             let cookieHeader = try Self.resolveCookieHeader(context: context, allowCached: true)
@@ -95,11 +95,11 @@ struct OpenCodeUsageFetchStrategy: ProviderFetchStrategy {
     }
 }
 
-enum OpenCodeSettingsError: LocalizedError {
+public enum OpenCodeSettingsError: LocalizedError {
     case missingCookie
     case invalidCookie
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .missingCookie:
             "No OpenCode session cookies found in browsers."

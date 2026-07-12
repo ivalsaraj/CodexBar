@@ -28,4 +28,10 @@ struct CodexPlanFormattingTests {
                 == "Self Serve Business Usage Based")
         #expect(CodexPlanFormatting.displayName("k12") == "K12")
     }
+
+    @Test
+    func `preserves already readable plan text`() {
+        #expect(CodexPlanFormatting.displayName("Enterprise") == "Enterprise")
+        #expect(CodexPlanFormatting.displayName("Pro Lite") == "Pro Lite")
+    }
 }

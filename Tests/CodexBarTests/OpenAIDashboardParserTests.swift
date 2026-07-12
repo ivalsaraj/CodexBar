@@ -85,6 +85,17 @@ struct OpenAIDashboardParserTests {
     }
 
     @Test
+    func `parses spaced five hour limit label`() {
+        let body = """
+        Limite 5 h
+        72 % restant
+        """
+        let limits = OpenAIDashboardParser.parseRateLimits(bodyText: body)
+        #expect(abs((limits.primary?.usedPercent ?? 0) - 28) < 0.001)
+        #expect(limits.primary?.windowMinutes == 300)
+    }
+
+    @Test
     func `parses plan from client bootstrap`() {
         let html = """
         <html>
@@ -99,30 +110,17 @@ struct OpenAIDashboardParserTests {
     }
 
     @Test
-    func `parses subscription renewal date from dashboard text`() throws {
-        let calendar = Calendar(identifier: .gregorian)
-        let now = try #require(calendar.date(from: DateComponents(
-            calendar: calendar,
-            timeZone: TimeZone.current,
-            year: 2026,
-            month: 4,
-            day: 24,
-            hour: 12)))
-        let body = """
-        Plan
-        ChatGPT Pro
-        Renews Apr 28, 2026 at 11:49 PM
-        Usage limits
-        Weekly limit
-        68% remaining
-        Resets Apr 28, 2026 at 11:49 PM
+    func `parses prolite plan from client bootstrap`() {
+        let html = """
+        <html>
+        <body>
+        <script type="application/json" id="client-bootstrap">
+        {"session":{"user":{"email":"user@example.com"}},"planType":"prolite"}
+        </script>
+        </body>
+        </html>
         """
-
-        let renewal = try #require(OpenAIDashboardParser.parseSubscriptionRenewalDate(bodyText: body, now: now))
-
-        #expect(calendar.component(.year, from: renewal) == 2026)
-        #expect(calendar.component(.month, from: renewal) == 4)
-        #expect(calendar.component(.day, from: renewal) == 28)
+        #expect(OpenAIDashboardParser.parsePlanFromHTML(html: html) == "Pro Lite")
     }
 
     @Test
@@ -137,6 +135,26 @@ struct OpenAIDashboardParserTests {
         #expect(abs((events.first?.creditsUsed ?? 0) - 397.205) < 0.0001)
         #expect(events.last?.service == "GitHub Code Review")
         #expect(abs((events.last?.creditsUsed ?? 0) - 506.235) < 0.0001)
+    }
+
+    @Test
+    func `parses credit event amount with localized credit label`() {
+        let rows: [[String]] = [
+            ["Dec 18, 2025", "CLI", "397,205 crédits"],
+        ]
+        let events = OpenAIDashboardParser.parseCreditEvents(rows: rows)
+        #expect(events.count == 1)
+        #expect(abs((events.first?.creditsUsed ?? 0) - 397.205) < 0.0001)
+    }
+
+    @Test
+    func `parses credit event amount with english comma thousands`() {
+        let rows: [[String]] = [
+            ["Dec 18, 2025", "CLI", "1,234 credits"],
+        ]
+        let events = OpenAIDashboardParser.parseCreditEvents(rows: rows)
+        #expect(events.count == 1)
+        #expect(events.first?.creditsUsed == 1234)
     }
 
     @Test
