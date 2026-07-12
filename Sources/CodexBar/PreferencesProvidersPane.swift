@@ -374,6 +374,12 @@ struct ProvidersPane: View {
         do {
             let session = try await self.openCodeWorkspaceFlow.importSession(
                 browserDetection: self.store.browserDetection)
+            let discovered = try await self.openCodeWorkspaceFlow.discoverWorkspaces(
+                cookieHeader: session.cookieHeader)
+            guard !discovered.isEmpty else {
+                return self.finishOpenCodeAccountAction(.failure(
+                    "No OpenCode workspaces were discovered for this login."))
+            }
             guard let tokenAccount = self.settings.saveOrReuseOpenCodeCredential(
                 label: "OpenCode (\(session.sourceLabel))",
                 token: session.cookieHeader)
@@ -384,7 +390,8 @@ struct ProvidersPane: View {
             return await self.discoverAndSaveOpenCodeWorkspaces(
                 tokenAccount: tokenAccount,
                 successAction: "imported",
-                selectsImportedWorkspace: true)
+                selectsImportedWorkspace: true,
+                discoveredWorkspaces: discovered)
         } catch {
             return self.finishOpenCodeAccountAction(.failure(error.localizedDescription))
         }
@@ -457,51 +464,12 @@ struct ProvidersPane: View {
             })
     }
 
-    private func finishOpenCodeAccountAction(_ result: OpenCodeAccountSaveResult) -> OpenCodeAccountSaveResult {
+    func finishOpenCodeAccountAction(_ result: OpenCodeAccountSaveResult) -> OpenCodeAccountSaveResult {
         self.openCodeAccountsNotice = result.notice
         return result
     }
 
-    private func discoverAndSaveOpenCodeWorkspaces(
-        tokenAccount: ProviderTokenAccount,
-        successAction: String,
-        selectsImportedWorkspace: Bool = false) async -> OpenCodeAccountSaveResult
-    {
-        do {
-            let discovered = try await self.openCodeWorkspaceFlow.discoverWorkspaces(cookieHeader: tokenAccount.token)
-            guard !discovered.isEmpty else {
-                return self.finishOpenCodeAccountAction(.failure(
-                    "No OpenCode workspaces were discovered for this login."))
-            }
-            guard let summary = self.settings.bulkSaveOpenCodeWorkspaceAccounts(
-                tokenAccountID: tokenAccount.id,
-                discoveredWorkspaces: discovered)
-            else {
-                return self.finishOpenCodeAccountAction(.failure(
-                    "CodexBar could not save the discovered OpenCode workspaces."))
-            }
-            if selectsImportedWorkspace,
-               let importedAccountID = summary.accountIDs.first
-            {
-                _ = self.settings.setActiveOpenCodeWorkspaceAccount(id: importedAccountID)
-            } else if let selectedAccountID = self.settings.selectedOpenCodeWorkspaceAccount?.id {
-                _ = self.settings.setActiveOpenCodeWorkspaceAccount(id: selectedAccountID)
-            } else if let firstAccountID = summary.accountIDs.first {
-                _ = self.settings.setActiveOpenCodeWorkspaceAccount(id: firstAccountID)
-            }
-            await self.refreshOpenCodeProvider()
-            if summary.addedCount == 0 {
-                return self.finishOpenCodeAccountAction(.noChange("All discovered workspaces are already saved."))
-            }
-            let importedCount = summary.accountIDs.count
-            let noun = importedCount == 1 ? "workspace" : "workspaces"
-            return self.finishOpenCodeAccountAction(.success("\(importedCount) \(noun) \(successAction)."))
-        } catch {
-            return self.finishOpenCodeAccountAction(.failure(error.localizedDescription))
-        }
-    }
-
-    private func refreshOpenCodeProvider() async {
+    func refreshOpenCodeProvider() async {
         await ProviderInteractionContext.$current.withValue(.userInitiated) {
             await self.store.refreshProvider(.opencode, allowDisabled: true)
         }

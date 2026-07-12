@@ -203,6 +203,31 @@ struct ProvidersPaneCoverageTests {
     }
 
     @Test
+    func `failed OpenCode import does not persist the first time credential`() async throws {
+        let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-import-failure")
+        let store = Self.makeUsageStore(settings: settings)
+        let cookie = try #require(Self.makeCookie(name: "auth", value: "failed-cookie"))
+        let pane = ProvidersPane(
+            settings: settings,
+            store: store,
+            openCodeWorkspaceFlow: FakeOpenCodeWorkspaceFlow(
+                sessionInfo: OpenCodeCookieImporter.SessionInfo(
+                    cookies: [cookie],
+                    sourceLabel: "Chrome"),
+                discoveredWorkspaces: [],
+                shouldFailDiscovery: true))
+
+        let result = await pane._test_importOpenCodeCurrentLogin()
+
+        guard case .failure = result else {
+            Issue.record("Expected failed OpenCode import")
+            return
+        }
+        #expect(settings.tokenAccounts(for: .opencode).isEmpty)
+        #expect(settings.openCodeWorkspaceAccounts.isEmpty)
+    }
+
+    @Test
     func `opencode manual add reuses saved credential and only needs workspace id`() async {
         let settings = Self.makeSettingsStore(suite: "ProvidersPaneCoverageTests-opencode-manual-add")
         let store = Self.makeUsageStore(settings: settings)
@@ -357,12 +382,26 @@ struct ProvidersPaneCoverageTests {
 private struct FakeOpenCodeWorkspaceFlow: OpenCodeWorkspaceFlowing {
     let sessionInfo: OpenCodeCookieImporter.SessionInfo
     let discoveredWorkspaces: [OpenCodeDiscoveredWorkspace]
+    let shouldFailDiscovery: Bool
+
+    init(
+        sessionInfo: OpenCodeCookieImporter.SessionInfo,
+        discoveredWorkspaces: [OpenCodeDiscoveredWorkspace],
+        shouldFailDiscovery: Bool = false)
+    {
+        self.sessionInfo = sessionInfo
+        self.discoveredWorkspaces = discoveredWorkspaces
+        self.shouldFailDiscovery = shouldFailDiscovery
+    }
 
     func importSession(browserDetection _: BrowserDetection) async throws -> OpenCodeCookieImporter.SessionInfo {
         self.sessionInfo
     }
 
     func discoverWorkspaces(cookieHeader _: String) async throws -> [OpenCodeDiscoveredWorkspace] {
-        self.discoveredWorkspaces
+        if self.shouldFailDiscovery {
+            throw URLError(.badServerResponse)
+        }
+        return self.discoveredWorkspaces
     }
 }
