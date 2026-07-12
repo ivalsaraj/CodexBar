@@ -39,9 +39,7 @@ struct MenuCardInteractionPolicyTests {
                 title: "Tokens",
                 sessionLine: "Cycle: 10M tokens",
                 monthLine: "Requests: 6 / 500",
-                cursorRequestDetails: self.cursorRequests(
-                    count: CursorMenuRequestDetailPresentation.maxVisibleRequestRows,
-                    now: now),
+                cursorRequestDetails: [],
                 cursorRequestNow: now,
                 renewalLine: nil,
                 hintLine: nil,
@@ -61,6 +59,27 @@ struct MenuCardInteractionPolicyTests {
 
         #expect(StatusItemController.menuCardInteractionPolicy(for: cursorModel) == .default)
         #expect(StatusItemController.menuCardInteractionPolicy(for: codexModel) == .default)
+    }
+
+    @Test
+    func `one expanded cursor request remains scrollable`() {
+        let model = self.menuCardModel(
+            provider: .cursor,
+            tokenUsage: .init(
+                title: "Tokens",
+                sessionLine: "Cycle: 10M tokens",
+                monthLine: "Requests: 1 / 500",
+                cursorRequestDetails: self.cursorRequests(count: 1, now: Date(timeIntervalSince1970: 1_700_000_000)),
+                cursorRequestNow: Date(timeIntervalSince1970: 1_700_000_000),
+                renewalLine: nil,
+                hintLine: nil,
+                errorLine: nil,
+                errorCopyText: nil))
+
+        let policy = StatusItemController.menuCardInteractionPolicy(for: model)
+
+        #expect(policy.allowsHighlight == false)
+        #expect(policy.forwardsScrollToEmbeddedScrollView)
     }
 
     private func cursorRequests(count: Int, now: Date) -> [CursorRecentRequest] {
