@@ -70,6 +70,8 @@ public enum ClaudeProviderDescriptor {
 
     private static func makePlanningInput(context: ProviderFetchContext) async -> ClaudeSourcePlanningInput {
         let webExtrasEnabled = context.settings?.claude?.webExtrasEnabled ?? false
+        let needsOAuthAvailability = context.runtime == .app && context.sourceMode == .auto
+
         return ClaudeSourcePlanningInput(
             runtime: context.runtime,
             selectedDataSource: Self.sourceDataSource(from: context.sourceMode),
@@ -78,7 +80,7 @@ public enum ClaudeProviderDescriptor {
                 context: context,
                 browserDetection: context.browserDetection),
             hasCLI: ClaudeCLIResolver.isAvailable(environment: context.env),
-            hasOAuthCredentials: ClaudeOAuthPlanningAvailability.isAvailable(
+            hasOAuthCredentials: needsOAuthAvailability && ClaudeOAuthPlanningAvailability.isAvailable(
                 runtime: context.runtime,
                 sourceMode: context.sourceMode,
                 environment: context.env))
@@ -181,7 +183,9 @@ struct ClaudeOAuthFetchStrategy: ProviderFetchStrategy {
 
     private func loadNonInteractiveCredentialRecord(environment: [String: String]) -> ClaudeOAuthCredentialRecord? {
         #if DEBUG
-        if let override = Self.nonInteractiveCredentialRecordOverride { return override }
+        if let override = Self.nonInteractiveCredentialRecordOverride {
+            return override
+        }
         #endif
 
         return try? ClaudeOAuthCredentialsStore.loadRecord(
@@ -193,7 +197,9 @@ struct ClaudeOAuthFetchStrategy: ProviderFetchStrategy {
 
     private func isClaudeCLIAvailable(environment: [String: String]) -> Bool {
         #if DEBUG
-        if let override = Self.claudeCLIAvailableOverride { return override }
+        if let override = Self.claudeCLIAvailableOverride {
+            return override
+        }
         #endif
         return ClaudeCLIResolver.isAvailable(environment: environment)
     }
@@ -203,6 +209,13 @@ struct ClaudeOAuthFetchStrategy: ProviderFetchStrategy {
         sourceMode: ProviderSourceMode,
         environment: [String: String]) -> Bool
     {
+        let hasEnvironmentOAuthToken = !(environment[ClaudeOAuthCredentialsStore.environmentTokenKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty ?? true)
+        if hasEnvironmentOAuthToken {
+            return true
+        }
+
         let strategy = ClaudeOAuthFetchStrategy()
         let nonInteractiveRecord = strategy.loadNonInteractiveCredentialRecord(environment: environment)
         let nonInteractiveCredentials = nonInteractiveRecord?.credentials
@@ -211,14 +224,7 @@ struct ClaudeOAuthFetchStrategy: ProviderFetchStrategy {
             return true
         }
 
-        let hasEnvironmentOAuthToken = !(environment[ClaudeOAuthCredentialsStore.environmentTokenKey]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty ?? true)
         let claudeCLIAvailable = strategy.isClaudeCLIAvailable(environment: environment)
-
-        if hasEnvironmentOAuthToken {
-            return true
-        }
 
         if let nonInteractiveRecord, hasRequiredScopeWithoutPrompt, nonInteractiveRecord.credentials.isExpired {
             switch nonInteractiveRecord.owner {
@@ -241,16 +247,16 @@ struct ClaudeOAuthFetchStrategy: ProviderFetchStrategy {
 
         guard sourceMode == .auto else { return true }
 
+        let fallbackPromptMode = ClaudeOAuthKeychainPromptPreference.securityFrameworkFallbackMode()
         let promptPolicyApplicable = ClaudeOAuthKeychainPromptPreference.isApplicable()
-        if promptPolicyApplicable, ProviderInteractionContext.current == .userInitiated {
+        if ProviderInteractionContext.current == .userInitiated {
             _ = ClaudeOAuthKeychainAccessGate.clearDenied()
         }
 
-        let shouldAllowStartupBootstrap = promptPolicyApplicable &&
-            runtime == .app &&
+        let shouldAllowStartupBootstrap = runtime == .app &&
             ProviderRefreshContext.current == .startup &&
             ProviderInteractionContext.current == .background &&
-            ClaudeOAuthKeychainPromptPreference.current() == .onlyOnUserAction &&
+            fallbackPromptMode == .onlyOnUserAction &&
             !ClaudeOAuthCredentialsStore.hasCachedCredentials(environment: environment)
         if shouldAllowStartupBootstrap {
             return ClaudeOAuthKeychainAccessGate.shouldAllowPrompt()
@@ -303,6 +309,7 @@ struct ClaudeOAuthFetchStrategy: ProviderFetchStrategy {
             primary: usage.primary,
             secondary: usage.secondary,
             tertiary: usage.opus,
+            extraRateWindows: usage.extraRateWindows.isEmpty ? nil : usage.extraRateWindows,
             providerCost: usage.providerCost,
             updatedAt: usage.updatedAt,
             identity: identity)

@@ -43,6 +43,7 @@ enum MenuBarMetricPreference: String, CaseIterable, Identifiable {
     case primary
     case secondary
     case tertiary
+    case extraUsage
     case average
 
     var id: String {
@@ -55,6 +56,7 @@ enum MenuBarMetricPreference: String, CaseIterable, Identifiable {
         case .primary: "Primary"
         case .secondary: "Secondary"
         case .tertiary: "Tertiary"
+        case .extraUsage: "Extra usage"
         case .average: "Average"
         }
     }
@@ -67,9 +69,15 @@ final class SettingsStore {
     static let mergedOverviewProviderLimit = 3
     static let isRunningTests: Bool = {
         let env = ProcessInfo.processInfo.environment
-        if env["XCTestConfigurationFilePath"] != nil { return true }
-        if env["TESTING_LIBRARY_VERSION"] != nil { return true }
-        if env["SWIFT_TESTING"] != nil { return true }
+        if env["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+        if env["TESTING_LIBRARY_VERSION"] != nil {
+            return true
+        }
+        if env["SWIFT_TESTING"] != nil {
+            return true
+        }
         return NSClassFromString("XCTestCase") != nil
     }()
 
@@ -85,9 +93,15 @@ final class SettingsStore {
     var providerEnablement: [UsageProvider: Bool] = [:]
 
     static func shouldBridgeSharedDefaults(for userDefaults: UserDefaults) -> Bool {
-        if !self.isRunningTests { return true }
-        if userDefaults === UserDefaults.standard { return true }
-        if let shared = sharedDefaults, userDefaults === shared { return true }
+        if !self.isRunningTests {
+            return true
+        }
+        if userDefaults === UserDefaults.standard {
+            return true
+        }
+        if let shared = sharedDefaults, userDefaults === shared {
+            return true
+        }
         return false
     }
 
@@ -135,9 +149,12 @@ final class SettingsStore {
                     "sharedDefaultsAvailable": sharedDefaultsAvailable ? "1" : "0",
                     "migrationStatus": appGroupMigration.status.rawValue,
                     "migratedSnapshot": appGroupMigration.copiedSnapshot ? "1" : "0",
+                    "migratedDefaults": "\(appGroupMigration.copiedDefaults)",
                 ])
         }
 
+        let hasStoredOpenAIWebAccessPreference = userDefaults.object(forKey: "openAIWebAccessEnabled") != nil
+        let hadExistingConfig = (try? configStore.load()) != nil
         let legacyStores = CodexBarConfigMigrator.LegacyStores(
             zaiTokenStore: zaiTokenStore,
             syntheticTokenStore: syntheticTokenStore,
@@ -172,8 +189,16 @@ final class SettingsStore {
         self.runInitialProviderDetectionIfNeeded()
         self.ensureAlibabaProviderAutoEnabledIfNeeded()
         self.applyTokenCostDefaultIfNeeded()
-        if self.claudeUsageDataSource != .cli { self.claudeWebExtrasEnabled = false }
-        self.openAIWebAccessEnabled = self.codexCookieSource.isEnabled
+        if self.claudeUsageDataSource != .cli {
+            self.claudeWebExtrasEnabled = false
+        }
+        if hasStoredOpenAIWebAccessPreference {
+            self.openAIWebAccessEnabled = self.defaultsState.openAIWebAccessEnabled
+        } else {
+            self.openAIWebAccessEnabled = Self.inferredInitialOpenAIWebAccessEnabled(
+                config: config,
+                hadExistingConfig: hadExistingConfig)
+        }
         if Self.shouldBridgeSharedDefaults(for: userDefaults) {
             Self.sharedDefaults?.set(self.debugDisableKeychainAccess, forKey: "debugDisableKeychainAccess")
         }
@@ -182,6 +207,20 @@ final class SettingsStore {
 }
 
 extension SettingsStore {
+    private static func inferredInitialOpenAIWebAccessEnabled(
+        config: CodexBarConfig,
+        hadExistingConfig: Bool) -> Bool
+    {
+        guard let codex = config.providerConfig(for: .codex) else { return false }
+        if let cookieSource = codex.cookieSource {
+            return cookieSource.isEnabled
+        }
+        if codex.sanitizedCookieHeader != nil {
+            return true
+        }
+        return hadExistingConfig
+    }
+
     private static func loadDefaultsState(userDefaults: UserDefaults) -> SettingsDefaultsState {
         let refreshDefault = userDefaults.string(forKey: "refreshFrequency")
             .flatMap(RefreshFrequency.init(rawValue:))
@@ -236,16 +275,33 @@ extension SettingsStore {
         let costUsageEnabled = userDefaults.object(forKey: "tokenCostUsageEnabled") as? Bool ?? false
         let hidePersonalInfo = userDefaults.object(forKey: "hidePersonalInfo") as? Bool ?? false
         let randomBlinkEnabled = userDefaults.object(forKey: "randomBlinkEnabled") as? Bool ?? false
+        let confettiOnWeeklyLimitResetsEnabled = userDefaults.object(
+            forKey: "confettiOnWeeklyLimitResetsEnabled") as? Bool ?? false
         let menuBarShowsHighestUsage = userDefaults.object(forKey: "menuBarShowsHighestUsage") as? Bool ?? false
         let claudeOAuthKeychainPromptModeRaw = userDefaults.string(forKey: "claudeOAuthKeychainPromptMode")
         let claudeOAuthKeychainReadStrategyRaw = userDefaults.string(forKey: "claudeOAuthKeychainReadStrategy")
         let claudeWebExtrasEnabledRaw = userDefaults.object(forKey: "claudeWebExtrasEnabled") as? Bool ?? false
+        let claudePeakHoursEnabled = userDefaults.object(forKey: "claudePeakHoursEnabled") as? Bool ?? true
         let creditsExtrasDefault = userDefaults.object(forKey: "showOptionalCreditsAndExtraUsage") as? Bool
         let showOptionalCreditsAndExtraUsage = creditsExtrasDefault ?? true
-        if creditsExtrasDefault == nil { userDefaults.set(true, forKey: "showOptionalCreditsAndExtraUsage") }
+        if creditsExtrasDefault == nil {
+            userDefaults.set(true, forKey: "showOptionalCreditsAndExtraUsage")
+        }
         let openAIWebAccessDefault = userDefaults.object(forKey: "openAIWebAccessEnabled") as? Bool
-        let openAIWebAccessEnabled = openAIWebAccessDefault ?? true
-        if openAIWebAccessDefault == nil { userDefaults.set(true, forKey: "openAIWebAccessEnabled") }
+        let openAIWebAccessEnabled = openAIWebAccessDefault ?? false
+        if openAIWebAccessDefault == nil {
+            userDefaults.set(false, forKey: "openAIWebAccessEnabled")
+        }
+        let openAIWebBatterySaverDefault = userDefaults.object(forKey: "openAIWebBatterySaverEnabled") as? Bool
+        let openAIWebBatterySaverEnabled = openAIWebBatterySaverDefault ?? false
+        if openAIWebBatterySaverDefault == nil {
+            userDefaults.set(false, forKey: "openAIWebBatterySaverEnabled")
+        }
+        let providerStorageFootprintsDefault = userDefaults.object(forKey: "providerStorageFootprintsEnabled") as? Bool
+        let providerStorageFootprintsEnabled = providerStorageFootprintsDefault ?? false
+        if providerStorageFootprintsDefault == nil {
+            userDefaults.set(false, forKey: "providerStorageFootprintsEnabled")
+        }
         let jetbrainsIDEBasePath = userDefaults.string(forKey: "jetbrainsIDEBasePath") ?? ""
         let mergeIcons = userDefaults.object(forKey: "mergeIcons") as? Bool ?? true
         let switcherShowsIcons = userDefaults.object(forKey: "switcherShowsIcons") as? Bool ?? true
@@ -254,6 +310,13 @@ extension SettingsStore {
         let mergedOverviewSelectedProvidersRaw = userDefaults.array(
             forKey: "mergedOverviewSelectedProviders") as? [String] ?? []
         let selectedMenuProviderRaw = userDefaults.string(forKey: "selectedMenuProvider")
+        let cursorUsageRangeKindRaw = userDefaults.string(forKey: "cursorUsageRangeKind")
+            ?? CursorUsageRangeKind.billingCycle.rawValue
+        if CursorUsageRangeKind(rawValue: cursorUsageRangeKindRaw) == nil {
+            userDefaults.set(CursorUsageRangeKind.billingCycle.rawValue, forKey: "cursorUsageRangeKind")
+        } else if userDefaults.string(forKey: "cursorUsageRangeKind") == nil {
+            userDefaults.set(cursorUsageRangeKindRaw, forKey: "cursorUsageRangeKind")
+        }
         let providerDetectionCompleted = userDefaults.object(forKey: "providerDetectionCompleted") as? Bool ?? false
 
         return SettingsDefaultsState(
@@ -277,18 +340,23 @@ extension SettingsStore {
             costUsageEnabled: costUsageEnabled,
             hidePersonalInfo: hidePersonalInfo,
             randomBlinkEnabled: randomBlinkEnabled,
+            confettiOnWeeklyLimitResetsEnabled: confettiOnWeeklyLimitResetsEnabled,
             menuBarShowsHighestUsage: menuBarShowsHighestUsage,
             claudeOAuthKeychainPromptModeRaw: claudeOAuthKeychainPromptModeRaw,
             claudeOAuthKeychainReadStrategyRaw: claudeOAuthKeychainReadStrategyRaw,
             claudeWebExtrasEnabledRaw: claudeWebExtrasEnabledRaw,
+            claudePeakHoursEnabled: claudePeakHoursEnabled,
             showOptionalCreditsAndExtraUsage: showOptionalCreditsAndExtraUsage,
             openAIWebAccessEnabled: openAIWebAccessEnabled,
+            openAIWebBatterySaverEnabled: openAIWebBatterySaverEnabled,
+            providerStorageFootprintsEnabled: providerStorageFootprintsEnabled,
             jetbrainsIDEBasePath: jetbrainsIDEBasePath,
             mergeIcons: mergeIcons,
             switcherShowsIcons: switcherShowsIcons,
             mergedMenuLastSelectedWasOverview: mergedMenuLastSelectedWasOverview,
             mergedOverviewSelectedProvidersRaw: mergedOverviewSelectedProvidersRaw,
             selectedMenuProviderRaw: selectedMenuProviderRaw,
+            cursorUsageRangeKindRaw: cursorUsageRangeKindRaw,
             providerDetectionCompleted: providerDetectionCompleted)
     }
 }
@@ -348,6 +416,9 @@ extension SettingsStore {
             metadata: ["provider": provider.rawValue, "enabled": "\(enabled)"])
         self.updateProviderConfig(provider: provider) { entry in
             entry.enabled = enabled
+        }
+        if !enabled, self.selectedMenuProvider == provider {
+            self.selectedMenuProvider = nil
         }
     }
 

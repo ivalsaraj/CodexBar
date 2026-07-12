@@ -49,7 +49,9 @@ struct ConsecutiveFailureGate {
     /// Returns true when the caller should surface the error to the UI.
     mutating func shouldSurfaceError(onFailureWithPriorData hadPriorData: Bool) -> Bool {
         self.streak += 1
-        if hadPriorData, self.streak == 1 { return false }
+        if hadPriorData, self.streak == 1 {
+            return false
+        }
         return true
     }
 }

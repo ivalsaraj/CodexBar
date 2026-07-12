@@ -3,6 +3,7 @@ import Testing
 @testable import CodexBar
 @testable import CodexBarCore
 
+// swiftlint:disable:next type_body_length
 struct ClaudeUsageTests {
     private actor AsyncCounter {
         private var value = 0
@@ -303,15 +304,23 @@ struct ClaudeUsageTests {
         }
 
         do {
-            _ = try await ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
-                try await ProviderInteractionContext.$current.withValue(.background) {
-                    try await ClaudeUsageFetcher.$delegatedRefreshAttemptOverride.withValue(delegatedOverride) {
-                        try await ClaudeUsageFetcher.$loadOAuthCredentialsOverride.withValue(loadCredsOverride) {
-                            try await fetcher.loadLatestUsage(model: "sonnet")
+            _ = try await ClaudeOAuthKeychainReadStrategyPreference.withTaskOverrideForTesting(
+                .securityFramework,
+                operation: {
+                    try await ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
+                        try await ProviderInteractionContext.$current.withValue(.background) {
+                            try await ClaudeUsageFetcher.$delegatedRefreshAttemptOverride.withValue(
+                                delegatedOverride)
+                            {
+                                try await ClaudeUsageFetcher.$loadOAuthCredentialsOverride.withValue(
+                                    loadCredsOverride)
+                                {
+                                    try await fetcher.loadLatestUsage(model: "sonnet")
+                                }
+                            }
                         }
                     }
-                }
-            }
+                })
             Issue.record("Expected delegated refresh to be suppressed in background")
         } catch let error as ClaudeUsageError {
             guard case let .oauthFailed(message) = error else {
@@ -355,15 +364,23 @@ struct ClaudeUsageTests {
         }
 
         do {
-            _ = try await ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.never) {
-                try await ProviderInteractionContext.$current.withValue(.background) {
-                    try await ClaudeUsageFetcher.$delegatedRefreshAttemptOverride.withValue(delegatedOverride) {
-                        try await ClaudeUsageFetcher.$loadOAuthCredentialsOverride.withValue(loadCredsOverride) {
-                            try await fetcher.loadLatestUsage(model: "sonnet")
+            _ = try await ClaudeOAuthKeychainReadStrategyPreference.withTaskOverrideForTesting(
+                .securityFramework,
+                operation: {
+                    try await ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.never) {
+                        try await ProviderInteractionContext.$current.withValue(.background) {
+                            try await ClaudeUsageFetcher.$delegatedRefreshAttemptOverride.withValue(
+                                delegatedOverride)
+                            {
+                                try await ClaudeUsageFetcher.$loadOAuthCredentialsOverride.withValue(
+                                    loadCredsOverride)
+                                {
+                                    try await fetcher.loadLatestUsage(model: "sonnet")
+                                }
+                            }
                         }
                     }
-                }
-            }
+                })
             Issue.record("Expected delegated refresh to be suppressed for prompt policy 'never'")
         } catch let error as ClaudeUsageError {
             guard case let .oauthFailed(message) = error else {
@@ -383,6 +400,7 @@ struct ClaudeUsageTests {
     func `oauth bootstrap only on user action background startup allows interactive read when no cache`() async throws {
         final class FlagBox: @unchecked Sendable {
             var allowKeychainPromptFlags: [Bool] = []
+            var allowBackgroundPromptBootstrapFlags: [Bool] = []
         }
 
         let flags = FlagBox()
@@ -400,6 +418,7 @@ struct ClaudeUsageTests {
             Bool,
             Bool) async throws -> ClaudeOAuthCredentials)? = { _, allowKeychainPrompt, _ in
             flags.allowKeychainPromptFlags.append(allowKeychainPrompt)
+            flags.allowBackgroundPromptBootstrapFlags.append(ClaudeOAuthCredentialsStore.allowBackgroundPromptBootstrap)
             return ClaudeOAuthCredentials(
                 accessToken: "fresh-token",
                 refreshToken: "refresh-token",
@@ -423,6 +442,7 @@ struct ClaudeUsageTests {
         }
 
         #expect(flags.allowKeychainPromptFlags == [true])
+        #expect(flags.allowBackgroundPromptBootstrapFlags == [true])
         #expect(snapshot.primary.usedPercent == 7)
     }
 
@@ -554,8 +574,12 @@ struct ClaudeUsageTests {
                 "session_5h": ["pct_used": 0, "resets": ""],
                 "week_all_models": ["pct_used": 0, "resets": ""],
             ] as [String: Any]
-            if let email = entry["email"] { payload["account_email"] = email }
-            if let org = entry["org"] { payload["account_org"] = org }
+            if let email = entry["email"] {
+                payload["account_email"] = email
+            }
+            if let org = entry["org"] {
+                payload["account_org"] = org
+            }
             let data = try JSONSerialization.data(withJSONObject: payload)
             let snap = ClaudeUsageFetcher.parse(json: data)
             let emailRaw: String? = entry["email"] ?? String?.none
@@ -616,7 +640,9 @@ struct ClaudeUsageTests {
 
         try process.run()
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-            if process.isRunning { process.terminate() }
+            if process.isRunning {
+                process.terminate()
+            }
         }
         process.waitUntilExit()
 
@@ -863,6 +889,47 @@ struct ClaudeUsageTests {
     }
 }
 
+struct ClaudeOAuthUsageMappingTests {
+    @Test
+    func `oauth usage falls back to weekly window when five hour is absent`() throws {
+        let json = """
+        {
+          "seven_day": { "utilization": 42, "resets_at": "2025-12-29T23:00:00.000Z" },
+          "seven_day_sonnet": { "utilization": 17, "resets_at": "2025-12-29T23:00:00.000Z" }
+        }
+        """
+        let snapshot = try ClaudeUsageFetcher._mapOAuthUsageForTesting(Data(json.utf8))
+
+        #expect(snapshot.primary.usedPercent == 42)
+        #expect(snapshot.primary.windowMinutes == 7 * 24 * 60)
+        #expect(snapshot.secondary?.usedPercent == 42)
+        #expect(snapshot.opus?.usedPercent == 17)
+    }
+
+    @Test
+    func `oauth usage falls back when five hour has no utilization`() throws {
+        let json = """
+        {
+          "five_hour": { "resets_at": "2025-12-23T16:00:00.000Z" },
+          "seven_day": { "utilization": 9, "resets_at": "2025-12-29T23:00:00.000Z" }
+        }
+        """
+        let snapshot = try ClaudeUsageFetcher._mapOAuthUsageForTesting(Data(json.utf8))
+
+        #expect(snapshot.primary.usedPercent == 9)
+        #expect(snapshot.primary.windowMinutes == 7 * 24 * 60)
+    }
+
+    @Test
+    func `oauth usage throws when no usable windows are present`() {
+        let json = "{}"
+
+        #expect(throws: ClaudeUsageError.self) {
+            try ClaudeUsageFetcher._mapOAuthUsageForTesting(Data(json.utf8))
+        }
+    }
+}
+
 @Suite(.serialized)
 struct ClaudeAutoFetcherCharacterizationTests {
     private final class RequestLog: @unchecked Sendable {
@@ -969,7 +1036,7 @@ struct ClaudeAutoFetcherCharacterizationTests {
             return try await ClaudeOAuthCredentialsStore.withIsolatedMemoryCacheForTesting {
                 try await ClaudeOAuthCredentialsStore.withIsolatedCredentialsFileTrackingForTesting {
                     try await ClaudeOAuthCredentialsStore.withCredentialsURLOverrideForTesting(missingCredentialsURL) {
-                        try await ClaudeOAuthCredentialsStore.withKeychainAccessOverrideForTesting(false) {
+                        try await ClaudeOAuthCredentialsStore.withKeychainAccessOverrideForTesting(true) {
                             try await ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
                                 data: nil,
                                 fingerprint: nil)

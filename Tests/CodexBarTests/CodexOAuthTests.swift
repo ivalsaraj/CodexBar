@@ -3,22 +3,6 @@ import Testing
 @testable import CodexBarCore
 
 struct CodexOAuthTests {
-    private func makeContext(env: [String: String]) -> ProviderFetchContext {
-        let browserDetection = BrowserDetection(cacheTTL: 0)
-        return ProviderFetchContext(
-            runtime: .app,
-            sourceMode: .oauth,
-            includeCredits: false,
-            webTimeout: 60,
-            webDebugDumpHTML: false,
-            verbose: false,
-            env: env,
-            settings: nil,
-            fetcher: UsageFetcher(),
-            claudeFetcher: ClaudeUsageFetcher(browserDetection: browserDetection),
-            browserDetection: browserDetection)
-    }
-
     @Test
     func `parses O auth credentials`() throws {
         let json = """
@@ -104,7 +88,7 @@ struct CodexOAuthTests {
     }
 
     @Test
-    func `decodes codex spark additional rate limit`() throws {
+    func `decodes prolite plan type without failing usage mapping`() throws {
         let json = """
         {
           "plan_type": "prolite",
@@ -114,26 +98,11 @@ struct CodexOAuthTests {
               "reset_at": 1766948068,
               "limit_window_seconds": 18000
             }
-          },
-          "additional_rate_limits": [
-            {
-              "limit_name": "GPT-5.3-Codex-Spark",
-              "metered_feature": "codex_bengalfox",
-              "rate_limit": {
-                "primary_window": {
-                  "used_percent": 35,
-                  "reset_at": 1766948068,
-                  "limit_window_seconds": 18000
-                }
-              }
-            }
-          ]
+          }
         }
         """
         let response = try CodexOAuthUsageFetcher._decodeUsageResponseForTesting(Data(json.utf8))
-        #expect(response.additionalRateLimits.count == 1)
-        #expect(response.additionalRateLimits.first?.limitName == "GPT-5.3-Codex-Spark")
-        #expect(response.additionalRateLimits.first?.meteredFeature == "codex_bengalfox")
+        #expect(response.planType?.rawValue == "prolite")
 
         let creds = CodexOAuthCredentials(
             accessToken: "access",
@@ -142,7 +111,7 @@ struct CodexOAuthTests {
             accountId: nil,
             lastRefresh: Date())
         let mapped = try CodexOAuthFetchStrategy._mapUsageForTesting(Data(json.utf8), credentials: creds)
-        #expect(mapped?.codexUsage?.sparkLimit?.remainingPercent == 65)
+        #expect(mapped?.primary?.usedPercent == 12)
     }
 
     @Test
@@ -364,9 +333,7 @@ struct CodexOAuthTests {
             idToken: nil,
             accountId: nil,
             lastRefresh: Date())
-
         let snapshot = try CodexOAuthFetchStrategy._mapUsageForTesting(Data(json.utf8), credentials: creds)
-
         #expect(snapshot?.primary?.usedPercent == 18)
         #expect(snapshot?.secondary == nil)
     }
@@ -437,6 +404,142 @@ struct CodexOAuthTests {
         #expect(result.usage.primary == nil)
         #expect(result.usage.secondary?.usedPercent == 43)
         #expect(result.usage.secondary?.windowMinutes == 10080)
+    }
+
+    @Test
+    func `auto mode preserves reversed session window when primary window is malformed`() throws {
+        let json = """
+        {
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": "bad",
+              "reset_at": 1767407914,
+              "limit_window_seconds": 604800
+            },
+            "secondary_window": {
+              "used_percent": 18,
+              "reset_at": 1766948068,
+              "limit_window_seconds": 18000
+            }
+          }
+        }
+        """
+        let creds = CodexOAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            idToken: nil,
+            accountId: nil,
+            lastRefresh: Date())
+
+        let result = try CodexOAuthFetchStrategy._mapResultForTesting(
+            Data(json.utf8),
+            credentials: creds,
+            sourceMode: .auto)
+
+        #expect(result.usage.primary?.usedPercent == 18)
+        #expect(result.usage.primary?.windowMinutes == 300)
+        #expect(result.usage.secondary == nil)
+    }
+
+    @Test
+    func `auto mode falls back when reversed session window is malformed in secondary`() throws {
+        let json = """
+        {
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 43,
+              "reset_at": 1767407914,
+              "limit_window_seconds": 604800
+            },
+            "secondary_window": {
+              "used_percent": "bad",
+              "reset_at": 1766948068,
+              "limit_window_seconds": 18000
+            }
+          }
+        }
+        """
+        let creds = CodexOAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            idToken: nil,
+            accountId: nil,
+            lastRefresh: Date())
+
+        #expect(throws: UsageError.noRateLimitsFound) {
+            _ = try CodexOAuthFetchStrategy._mapResultForTesting(
+                Data(json.utf8),
+                credentials: creds,
+                sourceMode: .auto)
+        }
+    }
+
+    @Test
+    func `explicit oauth keeps weekly window when reversed session window is malformed`() throws {
+        let json = """
+        {
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 43,
+              "reset_at": 1767407914,
+              "limit_window_seconds": 604800
+            },
+            "secondary_window": {
+              "used_percent": "bad",
+              "reset_at": 1766948068,
+              "limit_window_seconds": 18000
+            }
+          }
+        }
+        """
+        let creds = CodexOAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            idToken: nil,
+            accountId: nil,
+            lastRefresh: Date())
+
+        let result = try CodexOAuthFetchStrategy._mapResultForTesting(
+            Data(json.utf8),
+            credentials: creds,
+            sourceMode: .oauth)
+
+        #expect(result.usage.primary == nil)
+        #expect(result.usage.secondary?.usedPercent == 43)
+        #expect(result.usage.secondary?.windowMinutes == 10080)
+    }
+
+    @Test
+    func `ignores malformed credits payload while keeping usage`() throws {
+        let json = """
+        {
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 22,
+              "reset_at": 1766948068,
+              "limit_window_seconds": 18000
+            }
+          },
+          "credits": {
+            "has_credits": false,
+            "unlimited": false,
+            "balance": []
+          }
+        }
+        """
+        let response = try CodexOAuthUsageFetcher._decodeUsageResponseForTesting(Data(json.utf8))
+        #expect(response.credits?.hasCredits == false)
+        #expect(response.credits?.unlimited == false)
+        #expect(response.credits?.balance == nil)
+
+        let creds = CodexOAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            idToken: nil,
+            accountId: nil,
+            lastRefresh: Date())
+        let snapshot = try CodexOAuthFetchStrategy._mapUsageForTesting(Data(json.utf8), credentials: creds)
+        #expect(snapshot?.primary?.usedPercent == 22)
     }
 
     @Test
@@ -518,54 +621,5 @@ struct CodexOAuthTests {
         let config = "chatgpt_base_url = \"https://chat.openai.com\"\n"
         let url = CodexOAuthUsageFetcher._resolveUsageURLForTesting(configContents: config)
         #expect(url.absoluteString == "https://chat.openai.com/backend-api/wham/usage")
-    }
-
-    @Test
-    func credentialsStoreLoadRespectsProvidedCodexHomeEnv() throws {
-        let tempRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codex-oauth-test-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: tempRoot) }
-        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
-
-        let json = """
-        {
-          "tokens": {
-            "access_token": "preview-access-token",
-            "refresh_token": "preview-refresh-token"
-          }
-        }
-        """
-        try Data(json.utf8).write(to: tempRoot.appendingPathComponent("auth.json"), options: .atomic)
-
-        let creds = try CodexOAuthCredentialsStore.load(env: ["CODEX_HOME": tempRoot.path])
-        #expect(creds.accessToken == "preview-access-token")
-        #expect(creds.refreshToken == "preview-refresh-token")
-    }
-
-    @Test
-    func codexOAuthStrategyAvailabilityUsesContextEnv() async throws {
-        let tempRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codex-oauth-strategy-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: tempRoot) }
-        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
-
-        let json = """
-        {
-          "tokens": {
-            "access_token": "strategy-access-token",
-            "refresh_token": "strategy-refresh-token"
-          }
-        }
-        """
-        try Data(json.utf8).write(to: tempRoot.appendingPathComponent("auth.json"), options: .atomic)
-
-        let strategy = CodexOAuthFetchStrategy()
-        let validEnvContext = self.makeContext(env: ["CODEX_HOME": tempRoot.path])
-        let missingEnvContext = self.makeContext(env: ["CODEX_HOME": tempRoot.appendingPathComponent("missing").path])
-
-        let validAvailable = await strategy.isAvailable(validEnvContext)
-        let missingAvailable = await strategy.isAvailable(missingEnvContext)
-        #expect(validAvailable)
-        #expect(!missingAvailable)
     }
 }

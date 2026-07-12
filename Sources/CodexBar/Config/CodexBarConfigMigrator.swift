@@ -20,6 +20,8 @@ struct CodexBarConfigMigrator {
         let tokenAccountStore: any ProviderTokenAccountStoring
     }
 
+    private static let legacyMigrationCompletedKey = "codexbar.legacySecretsMigrationCompleted"
+
     private struct MigrationState {
         var didUpdate = false
         var sawLegacySecrets = false
@@ -36,13 +38,21 @@ struct CodexBarConfigMigrator {
         var config = (existing ?? CodexBarConfig.makeDefault()).normalized()
         var state = MigrationState()
 
-        if existing == nil {
-            self.applyLegacyOrderAndToggles(userDefaults: userDefaults, config: &config, state: &state)
-        }
-
+        // applyLegacyCookieSources reads only UserDefaults — cheap, runs unconditionally so
+        // newly-added cookie-source keys are picked up on every launch.
         self.applyLegacyCookieSources(userDefaults: userDefaults, config: &config, state: &state)
-        self.migrateLegacySecrets(userDefaults: userDefaults, stores: stores, config: &config, state: &state)
-        self.migrateLegacyAccounts(stores: stores, config: &config, state: &state)
+
+        let migrationCompleted = userDefaults.bool(forKey: Self.legacyMigrationCompletedKey)
+        if !migrationCompleted {
+            // Run once: migrate Keychain/file secrets then clear them. Using a completion flag rather
+            // than `existing == nil` ensures a crash between config-save and clearLegacyStores can
+            // finish cleanup on the next launch without re-doing the (already-saved) data migration.
+            if existing == nil {
+                self.applyLegacyOrderAndToggles(userDefaults: userDefaults, config: &config, state: &state)
+            }
+            self.migrateLegacySecrets(userDefaults: userDefaults, stores: stores, config: &config, state: &state)
+            self.migrateLegacyAccounts(stores: stores, config: &config, state: &state)
+        }
 
         if state.didUpdate {
             do {
@@ -53,7 +63,12 @@ struct CodexBarConfigMigrator {
         }
 
         if state.sawLegacySecrets || state.sawLegacyAccounts {
-            self.clearLegacyStores(stores: stores, sawAccounts: state.sawLegacyAccounts, log: log)
+            let cleared = self.clearLegacyStores(stores: stores, sawAccounts: state.sawLegacyAccounts, log: log)
+            if cleared {
+                userDefaults.set(true, forKey: Self.legacyMigrationCompletedKey)
+            }
+        } else if !migrationCompleted {
+            userDefaults.set(true, forKey: Self.legacyMigrationCompletedKey)
         }
 
         return config.normalized()
@@ -152,7 +167,9 @@ struct CodexBarConfigMigrator {
     {
         for (provider, loader) in providers {
             let token = try? loader()
-            if token != nil { state.sawLegacySecrets = true }
+            if token != nil {
+                state.sawLegacySecrets = true
+            }
             self.updateProvider(provider, config: &config, state: &state) { entry in
                 self.setIfEmpty(&entry.apiKey, token)
             }
@@ -166,7 +183,9 @@ struct CodexBarConfigMigrator {
     {
         for (provider, loader) in providers {
             let header = try? loader()
-            if header != nil { state.sawLegacySecrets = true }
+            if header != nil {
+                state.sawLegacySecrets = true
+            }
             self.updateProvider(provider, config: &config, state: &state) { entry in
                 self.setIfEmpty(&entry.cookieHeader, header)
             }
@@ -207,7 +226,9 @@ struct CodexBarConfigMigrator {
         if token?.isEmpty ?? true {
             token = userDefaults.string(forKey: "kimiManualCookieHeader")
         }
-        if token != nil { state.sawLegacySecrets = true }
+        if token != nil {
+            state.sawLegacySecrets = true
+        }
         self.updateProvider(.kimi, config: &config, state: &state) { entry in
             self.setIfEmpty(&entry.cookieHeader, token)
         }
@@ -220,7 +241,9 @@ struct CodexBarConfigMigrator {
         state: inout MigrationState)
     {
         let header = try? stores.opencodeCookieStore.loadCookieHeader()
-        if header != nil { state.sawLegacySecrets = true }
+        if header != nil {
+            state.sawLegacySecrets = true
+        }
         let workspaceID = userDefaults.string(forKey: "opencodeWorkspaceID")
         self.updateProvider(.opencode, config: &config, state: &state) { entry in
             var changed = false
@@ -274,11 +297,13 @@ struct CodexBarConfigMigrator {
         return false
     }
 
+    @discardableResult
     private static func clearLegacyStores(
         stores: LegacyStores,
         sawAccounts: Bool,
-        log: CodexBarLogger)
+        log: CodexBarLogger) -> Bool
     {
+        var success = true
         do {
             try stores.zaiTokenStore.storeToken(nil)
             try stores.syntheticTokenStore.storeToken(nil)
@@ -296,6 +321,7 @@ struct CodexBarConfigMigrator {
             try stores.ampCookieStore.storeCookieHeader(nil)
         } catch {
             log.error("Failed to clear legacy secrets: \(error)")
+            success = false
         }
 
         if sawAccounts {
@@ -304,6 +330,8 @@ struct CodexBarConfigMigrator {
                 try? FileManager.default.removeItem(at: legacyURL)
             }
         }
+
+        return success
     }
 
     private static func applyProviderOrder(_ raw: [String], config: CodexBarConfig) -> CodexBarConfig {

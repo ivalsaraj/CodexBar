@@ -9,6 +9,7 @@ import SweetCookieKit
 
 private let ollamaSessionCookieNames: Set<String> = [
     "session",
+    "__Secure-session",
     "ollama_session",
     "__Host-ollama_session",
     "__Secure-next-auth.session-token",
@@ -16,7 +17,9 @@ private let ollamaSessionCookieNames: Set<String> = [
 ]
 
 private func isRecognizedOllamaSessionCookieName(_ name: String) -> Bool {
-    if ollamaSessionCookieNames.contains(name) { return true }
+    if ollamaSessionCookieNames.contains(name) {
+        return true
+    }
     // next-auth can split tokens into chunked cookies: `<name>.0`, `<name>.1`, ...
     return name.hasPrefix("__Secure-next-auth.session-token.") ||
         name.hasPrefix("next-auth.session-token.")
@@ -199,7 +202,7 @@ public enum OllamaCookieImporter {
         for browserSource in browserSources {
             do {
                 let query = BrowserCookieQuery(domains: self.cookieDomains)
-                let sources = try Self.cookieClient.records(
+                let sources = try Self.cookieClient.codexBarRecords(
                     matching: query,
                     in: browserSource,
                     logger: logger)
@@ -528,7 +531,9 @@ public struct OllamaUsageFetcher: Sendable {
     }
 
     @MainActor private static func recordDump(_ text: String) {
-        if self.recentDumps.count >= 5 { self.recentDumps.removeFirst() }
+        if self.recentDumps.count >= 5 {
+            self.recentDumps.removeFirst()
+        }
         self.recentDumps.append(text)
     }
 
@@ -608,7 +613,9 @@ public struct OllamaUsageFetcher: Sendable {
 
     static func shouldAttachCookie(to url: URL?) -> Bool {
         guard let host = url?.host?.lowercased() else { return false }
-        if host == "ollama.com" || host == "www.ollama.com" { return true }
+        if host == "ollama.com" || host == "www.ollama.com" {
+            return true
+        }
         return host.hasSuffix(".ollama.com")
     }
 }

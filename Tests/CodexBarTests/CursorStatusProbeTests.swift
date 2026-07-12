@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import CodexBarCore
 
+@Suite(.serialized)
 struct CursorStatusProbeTests {
     // MARK: - Usage Summary Parsing
 
@@ -369,6 +370,7 @@ struct CursorStatusProbeTests {
         #expect(usageSnapshot.providerCost != nil)
         #expect(usageSnapshot.providerCost?.used == 0.0)
         #expect(usageSnapshot.providerCost?.limit == 75.0)
+        #expect(usageSnapshot.providerCost?.period == "Monthly")
     }
 
     @Test
@@ -545,44 +547,6 @@ struct CursorStatusProbeTests {
 
         #expect(snapshot.requestsUsed == 240)
         #expect(snapshot.requestsLimit == 500)
-        #expect(snapshot.legacyUsageMetric == .requests)
-    }
-
-    @Test
-    func `parse usage summary falls back to token quota when request quota missing`() {
-        let summary = CursorUsageSummary(
-            billingCycleStart: nil,
-            billingCycleEnd: nil,
-            membershipType: "enterprise",
-            limitType: nil,
-            isUnlimited: nil,
-            autoModelSelectedDisplayMessage: nil,
-            namedModelSelectedDisplayMessage: nil,
-            individualUsage: nil,
-            teamUsage: nil)
-        let requestUsage = CursorUsageResponse(
-            gpt4: CursorModelUsage(
-                numRequests: nil,
-                numRequestsTotal: nil,
-                numTokens: 123_456,
-                maxRequestUsage: nil,
-                maxTokenUsage: 1_000_000),
-            startOfMonth: nil)
-
-        let snapshot = CursorStatusProbe(browserDetection: BrowserDetection(cacheTTL: 0)).parseUsageSummary(
-            summary,
-            userInfo: nil,
-            rawJSON: nil,
-            requestUsage: requestUsage)
-        let usageSnapshot = snapshot.toUsageSnapshot()
-
-        #expect(snapshot.requestsUsed == 123_456)
-        #expect(snapshot.requestsLimit == 1_000_000)
-        #expect(snapshot.legacyUsageMetric == .tokens)
-        #expect(snapshot.isLegacyRequestPlan == true)
-        #expect(usageSnapshot.primary?.usedPercent == 12.3456)
-        #expect(usageSnapshot.cursorRequests?.metric == .tokens)
-        #expect(usageSnapshot.cursorRequests?.summaryText == "Tokens: 123K / 1M")
     }
 
     // MARK: - Imported Session Scanning
@@ -909,4 +873,594 @@ struct CursorStatusProbeTests {
         let cookie = HTTPCookie(properties: cookieProps)!
         return CursorCookieImporter.SessionInfo(cookies: [cookie], sourceLabel: sourceLabel)
     }
+}
+
+private func makeCursorStatusProbeSession() -> URLSession {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [CursorStatusProbeStubURLProtocol.self]
+    return URLSession(configuration: config)
+}
+
+private func makeCursorStatusProbeResponse(
+    url: URL,
+    body: String,
+    statusCode: Int,
+    contentType: String = "application/json") -> (HTTPURLResponse, Data)
+{
+    let response = HTTPURLResponse(
+        url: url,
+        statusCode: statusCode,
+        httpVersion: nil,
+        headerFields: ["Content-Type": contentType])!
+    return (response, Data(body.utf8))
+}
+
+extension CursorStatusProbeTests {
+    @Test
+    func `fetches complete Cursor usage events through the injected session`() async throws {
+        defer { CursorStatusProbeStubURLProtocol.reset() }
+        CursorStatusProbeStubURLProtocol.reset()
+
+        CursorStatusProbeStubURLProtocol.setHandler { request in
+            let requestURL = try #require(request.url)
+            switch requestURL.path {
+            case "/api/usage-summary":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: """
+                    {
+                      "billingCycleStart": "2026-06-01T00:00:00.000Z",
+                      "billingCycleEnd": "2026-07-01T00:00:00.000Z",
+                      "membershipType": "pro",
+                      "individualUsage": { "plan": { "used": 1, "limit": 100, "totalPercentUsed": 1 } }
+                    }
+                    """,
+                    statusCode: 200)
+            case "/api/auth/me":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"email":"user@example.com"}"#,
+                    statusCode: 200)
+            case "/api/dashboard/get-filtered-usage-events":
+                let body = try #require(request.httpBody)
+                let payload = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                let page = try #require(payload["page"] as? Int)
+                let event = page == 1
+                    ? """
+                    {"timestamp":"1781006400000","model":"gpt-5.5-extra-high","requestsCosts":1,
+                    "tokenUsage":{"totalTokens":1000}}
+                    """
+                    : """
+                    {"timestamp":"1781092800000","model":"composer-2.5","requestsCosts":2,
+                    "tokenUsage":{"totalTokens":2000}}
+                    """
+                let total = page == 1 ? #""totalUsageEventsCount":2,"# : ""
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: "{\(total)\"usageEventsDisplay\":[\(event)]}",
+                    statusCode: 200)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let baseURL = try #require(URL(string: "https://cursor.test"))
+        let snapshot = try await CursorStatusProbe(
+            baseURL: baseURL,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            urlSession: makeCursorStatusProbeSession()).fetchWithManualCookies("auth=test")
+
+        let eventBodies = CursorStatusProbeStubURLProtocol.requestBodies.compactMap { body in
+            (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        }.filter { $0["page"] != nil }
+        #expect(eventBodies.map { $0["page"] as? Int } == [1, 2])
+        #expect(eventBodies.allSatisfy { ($0["pageSize"] as? Int) == 200 })
+        #expect(snapshot.toUsageSnapshot().cursorRangeSummaries?.first?.requests == 2)
+        #expect(snapshot.toUsageSnapshot().cursorRangeSummaries?.first?.weightedRequestCost == 3)
+    }
+
+    @Test
+    func `usage-event pagination failure keeps primary quota and omits partial diagnostics`() async throws {
+        defer { CursorStatusProbeStubURLProtocol.reset() }
+        CursorStatusProbeStubURLProtocol.reset()
+
+        CursorStatusProbeStubURLProtocol.setHandler { request in
+            let requestURL = try #require(request.url)
+            switch requestURL.path {
+            case "/api/usage-summary":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: """
+                    {"billingCycleStart":"2026-06-01T00:00:00.000Z",
+                    "individualUsage":{"plan":{"used":25,"limit":100,"totalPercentUsed":25}}}
+                    """,
+                    statusCode: 200)
+            case "/api/auth/me":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"email":"user@example.com"}"#,
+                    statusCode: 200)
+            case "/api/dashboard/get-filtered-usage-events":
+                let body = try #require(request.httpBody)
+                let payload = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                let page = try #require(payload["page"] as? Int)
+                if page == 2 {
+                    return makeCursorStatusProbeResponse(
+                        url: requestURL,
+                        body: #"{"error":"unavailable"}"#,
+                        statusCode: 500)
+                }
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: """
+                    {"totalUsageEventsCount":2,"usageEventsDisplay":[
+                    {"timestamp":"1781006400000","model":"gpt-5.5","requestsCosts":1,
+                    "tokenUsage":{"totalTokens":1000}}]}
+                    """,
+                    statusCode: 200)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let baseURL = try #require(URL(string: "https://cursor.test"))
+        let snapshot = try await CursorStatusProbe(
+            baseURL: baseURL,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            urlSession: makeCursorStatusProbeSession()).fetchWithManualCookies("auth=test").toUsageSnapshot()
+
+        #expect(snapshot.primary?.usedPercent == 25)
+        #expect(snapshot.cursorRangeSummaries == nil)
+        #expect(snapshot.cursorRecentRequests == nil)
+    }
+
+    @Test
+    func `explicit zero request cost remains zero in the range summary`() async throws {
+        defer { CursorStatusProbeStubURLProtocol.reset() }
+        CursorStatusProbeStubURLProtocol.reset()
+
+        let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        CursorStatusProbeStubURLProtocol.setHandler { request in
+            let requestURL = try #require(request.url)
+            switch requestURL.path {
+            case "/api/usage-summary":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"individualUsage":{"plan":{"used":25,"limit":100,"totalPercentUsed":25}}}"#,
+                    statusCode: 200)
+            case "/api/auth/me":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"email":"user@example.com"}"#,
+                    statusCode: 200)
+            case "/api/dashboard/get-filtered-usage-events":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: """
+                    {"totalUsageEventsCount":1,"usageEventsDisplay":[
+                    {"timestamp":"\(timestamp)","model":"gpt-5.5","requestsCosts":0,
+                    "tokenUsage":{"totalTokens":1000}}]}
+                    """,
+                    statusCode: 200)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let baseURL = try #require(URL(string: "https://cursor.test"))
+        let summary = try await CursorStatusProbe(
+            baseURL: baseURL,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            urlSession: makeCursorStatusProbeSession()).fetchWithManualCookies("auth=test").toUsageSnapshot()
+
+        #expect(summary.cursorRangeSummaries?.first?.requests == 1)
+        #expect(summary.cursorRangeSummaries?.first?.weightedRequestCost == 0)
+        #expect(summary.cursorRangeSummaries?.first?.recentRequests.first?.requestCost == 0)
+    }
+
+    @Test
+    func `over-cap usage-event total omits diagnostics without requesting page 21`() async throws {
+        defer { CursorStatusProbeStubURLProtocol.reset() }
+        CursorStatusProbeStubURLProtocol.reset()
+
+        CursorStatusProbeStubURLProtocol.setHandler { request in
+            let requestURL = try #require(request.url)
+            switch requestURL.path {
+            case "/api/usage-summary":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"individualUsage":{"plan":{"used":25,"limit":100,"totalPercentUsed":25}}}"#,
+                    statusCode: 200)
+            case "/api/auth/me":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"email":"user@example.com"}"#,
+                    statusCode: 200)
+            case "/api/dashboard/get-filtered-usage-events":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"totalUsageEventsCount":4001,"usageEventsDisplay":[]}"#,
+                    statusCode: 200)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let baseURL = try #require(URL(string: "https://cursor.test"))
+        let snapshot = try await CursorStatusProbe(
+            baseURL: baseURL,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            urlSession: makeCursorStatusProbeSession()).fetchWithManualCookies("auth=test").toUsageSnapshot()
+        let pages = CursorStatusProbeStubURLProtocol.requestBodies.compactMap { body in
+            ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["page"] as? Int
+        }
+
+        #expect(snapshot.primary?.usedPercent == 25)
+        #expect(snapshot.cursorRangeSummaries == nil)
+        #expect(snapshot.cursorRecentRequests == nil)
+        #expect(pages == [1])
+    }
+
+    @Test
+    func `malformed usage event suppresses diagnostics without losing primary quota`() async throws {
+        defer { CursorStatusProbeStubURLProtocol.reset() }
+        CursorStatusProbeStubURLProtocol.reset()
+
+        CursorStatusProbeStubURLProtocol.setHandler { request in
+            let requestURL = try #require(request.url)
+            switch requestURL.path {
+            case "/api/usage-summary":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"individualUsage":{"plan":{"used":25,"limit":100,"totalPercentUsed":25}}}"#,
+                    statusCode: 200)
+            case "/api/auth/me":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"email":"user@example.com"}"#,
+                    statusCode: 200)
+            case "/api/dashboard/get-filtered-usage-events":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"totalUsageEventsCount":1,"usageEventsDisplay":[{"timestamp":"1781006400000"}]}"#,
+                    statusCode: 200)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let baseURL = try #require(URL(string: "https://cursor.test"))
+        let snapshot = try await CursorStatusProbe(
+            baseURL: baseURL,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            urlSession: makeCursorStatusProbeSession()).fetchWithManualCookies("auth=test").toUsageSnapshot()
+
+        #expect(snapshot.primary?.usedPercent == 25)
+        #expect(snapshot.cursorRangeSummaries == nil)
+        #expect(snapshot.cursorRecentRequests == nil)
+    }
+
+    @Test
+    func `conflicting usage-event totals suppress diagnostics without losing primary quota`() async throws {
+        defer { CursorStatusProbeStubURLProtocol.reset() }
+        CursorStatusProbeStubURLProtocol.reset()
+
+        CursorStatusProbeStubURLProtocol.setHandler { request in
+            let requestURL = try #require(request.url)
+            switch requestURL.path {
+            case "/api/usage-summary":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"individualUsage":{"plan":{"used":25,"limit":100,"totalPercentUsed":25}}}"#,
+                    statusCode: 200)
+            case "/api/auth/me":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"email":"user@example.com"}"#,
+                    statusCode: 200)
+            case "/api/dashboard/get-filtered-usage-events":
+                let body = try #require(request.httpBody)
+                let payload = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                let page = try #require(payload["page"] as? Int)
+                let total = page == 1 ? 2 : 3
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: """
+                    {"totalUsageEventsCount":\(total),"usageEventsDisplay":[
+                    {"timestamp":"1781006400000","model":"gpt-5.5","requestsCosts":1,
+                    "tokenUsage":{"totalTokens":1000}}]}
+                    """,
+                    statusCode: 200)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let baseURL = try #require(URL(string: "https://cursor.test"))
+        let snapshot = try await CursorStatusProbe(
+            baseURL: baseURL,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            urlSession: makeCursorStatusProbeSession()).fetchWithManualCookies("auth=test").toUsageSnapshot()
+
+        #expect(snapshot.primary?.usedPercent == 25)
+        #expect(snapshot.cursorRangeSummaries == nil)
+        #expect(snapshot.cursorRecentRequests == nil)
+    }
+
+    @Test
+    func `twentieth full usage-event page is the final attempt without an advertised total`() async throws {
+        defer { CursorStatusProbeStubURLProtocol.reset() }
+        CursorStatusProbeStubURLProtocol.reset()
+
+        let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        let event = """
+        {"timestamp":"\(timestamp)","model":"gpt-5.5","requestsCosts":1,"tokenUsage":{"totalTokens":1000}}
+        """
+        let pageEvents = Array(repeating: event, count: 200).joined(separator: ",")
+        CursorStatusProbeStubURLProtocol.setHandler { request in
+            let requestURL = try #require(request.url)
+            switch requestURL.path {
+            case "/api/usage-summary":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"individualUsage":{"plan":{"used":25,"limit":100,"totalPercentUsed":25}}}"#,
+                    statusCode: 200)
+            case "/api/auth/me":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"email":"user@example.com"}"#,
+                    statusCode: 200)
+            case "/api/dashboard/get-filtered-usage-events":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"usageEventsDisplay":[\#(pageEvents)]}"#,
+                    statusCode: 200)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let baseURL = try #require(URL(string: "https://cursor.test"))
+        let snapshot = try await CursorStatusProbe(
+            baseURL: baseURL,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            urlSession: makeCursorStatusProbeSession()).fetchWithManualCookies("auth=test").toUsageSnapshot()
+
+        let pages = CursorStatusProbeStubURLProtocol.requestBodies.compactMap { body in
+            ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["page"] as? Int
+        }
+        #expect(snapshot.primary?.usedPercent == 25)
+        #expect(snapshot.cursorRangeSummaries == nil)
+        #expect(pages == Array(1...20))
+    }
+
+    @Test
+    func `twentieth full usage-event page completes when the advertised total is reached`() async throws {
+        defer { CursorStatusProbeStubURLProtocol.reset() }
+        CursorStatusProbeStubURLProtocol.reset()
+
+        let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        let event = """
+        {"timestamp":"\(timestamp)","model":"gpt-5.5","requestsCosts":1,"tokenUsage":{"totalTokens":1000}}
+        """
+        let pageEvents = Array(repeating: event, count: 200).joined(separator: ",")
+        CursorStatusProbeStubURLProtocol.setHandler { request in
+            let requestURL = try #require(request.url)
+            switch requestURL.path {
+            case "/api/usage-summary":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"individualUsage":{"plan":{"used":25,"limit":100,"totalPercentUsed":25}}}"#,
+                    statusCode: 200)
+            case "/api/auth/me":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"email":"user@example.com"}"#,
+                    statusCode: 200)
+            case "/api/dashboard/get-filtered-usage-events":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"totalUsageEventsCount":4000,"usageEventsDisplay":[\#(pageEvents)]}"#,
+                    statusCode: 200)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let baseURL = try #require(URL(string: "https://cursor.test"))
+        let snapshot = try await CursorStatusProbe(
+            baseURL: baseURL,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            urlSession: makeCursorStatusProbeSession()).fetchWithManualCookies("auth=test").toUsageSnapshot()
+
+        let pages = CursorStatusProbeStubURLProtocol.requestBodies.compactMap { body in
+            ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["page"] as? Int
+        }
+        #expect(snapshot.cursorRangeSummaries?.first?.requests == 4000)
+        #expect(pages == Array(1...20))
+    }
+
+    @Test
+    func `fetch ignores user info failure when usage summary succeeds`() async throws {
+        defer {
+            CursorStatusProbeStubURLProtocol.reset()
+        }
+        CursorStatusProbeStubURLProtocol.reset()
+
+        CursorStatusProbeStubURLProtocol.setHandler { request in
+            let requestURL = try #require(request.url)
+
+            switch requestURL.path {
+            case "/api/usage-summary":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: """
+                    {
+                      "membershipType": "pro",
+                      "individualUsage": {
+                        "plan": {
+                          "used": 1500,
+                          "limit": 5000,
+                          "totalPercentUsed": 30.0
+                        }
+                      }
+                    }
+                    """,
+                    statusCode: 200)
+            case "/api/auth/me":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"error":"nope"}"#,
+                    statusCode: 500)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let baseURL = try #require(URL(string: "https://cursor.test"))
+        let snapshot = try await CursorStatusProbe(
+            baseURL: baseURL,
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            urlSession: makeCursorStatusProbeSession()).fetchWithManualCookies("auth=test")
+
+        #expect(snapshot.planPercentUsed == 30.0)
+        #expect(snapshot.accountEmail == nil)
+        #expect(CursorStatusProbeStubURLProtocol.requestCount == 3)
+    }
+
+    @Test
+    func `fetch fails cleanly when usage summary fails`() async {
+        defer {
+            CursorStatusProbeStubURLProtocol.reset()
+        }
+        CursorStatusProbeStubURLProtocol.reset()
+
+        CursorStatusProbeStubURLProtocol.setHandler { request in
+            let requestURL = try #require(request.url)
+
+            switch requestURL.path {
+            case "/api/usage-summary":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: #"{"error":"denied"}"#,
+                    statusCode: 500)
+            case "/api/auth/me":
+                return makeCursorStatusProbeResponse(
+                    url: requestURL,
+                    body: """
+                    {
+                      "email": "user@example.com",
+                      "email_verified": true,
+                      "name": "Test User",
+                      "sub": "auth0|12345"
+                    }
+                    """,
+                    statusCode: 200)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        do {
+            let baseURL = try #require(URL(string: "https://cursor.test"))
+            _ = try await CursorStatusProbe(
+                baseURL: baseURL,
+                browserDetection: BrowserDetection(cacheTTL: 0),
+                urlSession: makeCursorStatusProbeSession()).fetchWithManualCookies("auth=test")
+            Issue.record("Expected usage summary failure to be surfaced")
+        } catch let error as CursorStatusProbeError {
+            guard case let .networkError(message) = error else {
+                Issue.record("Expected networkError, got: \(error)")
+                return
+            }
+            #expect(message == "HTTP 500")
+            #expect(CursorStatusProbeStubURLProtocol.requestPaths.contains("/api/usage-summary"))
+        } catch {
+            Issue.record("Expected CursorStatusProbeError, got: \(error)")
+        }
+    }
+}
+
+final class CursorStatusProbeStubURLProtocol: URLProtocol {
+    private struct State {
+        var requests: [URLRequest] = []
+        var handler: (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
+    }
+
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var state = State()
+
+    static func setHandler(_ handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)) {
+        self.lock.lock()
+        self.state.handler = handler
+        self.lock.unlock()
+    }
+
+    static func reset() {
+        self.lock.lock()
+        self.state = State()
+        self.lock.unlock()
+    }
+
+    static var requestCount: Int {
+        lock.lock()
+        defer { Self.lock.unlock() }
+        return state.requests.count
+    }
+
+    static var requestPaths: [String] {
+        lock.lock()
+        defer { Self.lock.unlock() }
+        return state.requests.compactMap { $0.url?.path }
+    }
+
+    static var requestBodies: [Data] {
+        lock.lock()
+        defer { Self.lock.unlock() }
+        return state.requests.compactMap(\.httpBody)
+    }
+
+    override static func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        let handler: (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
+        var recordedRequest = self.request
+        if recordedRequest.httpBody == nil, let stream = recordedRequest.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var data = Data()
+            let bufferSize = 1024
+            var buffer = [UInt8](repeating: 0, count: bufferSize)
+            while stream.hasBytesAvailable {
+                let bytesRead = stream.read(&buffer, maxLength: bufferSize)
+                guard bytesRead > 0 else { break }
+                data.append(buffer, count: bytesRead)
+            }
+            recordedRequest.httpBody = data
+        }
+        Self.lock.lock()
+        Self.state.requests.append(recordedRequest)
+        handler = Self.state.handler
+        Self.lock.unlock()
+
+        do {
+            guard let handler else {
+                throw URLError(.cancelled)
+            }
+            let (response, data) = try handler(recordedRequest)
+            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: data)
+            self.client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            self.client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

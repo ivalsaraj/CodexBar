@@ -69,7 +69,9 @@ struct PerplexityWebFetchStrategy: ProviderFetchStrategy {
 
     func isAvailable(_ context: ProviderFetchContext) async -> Bool {
         guard context.settings?.perplexity?.cookieSource != .off else { return false }
-        if context.settings?.perplexity?.cookieSource == .manual { return true }
+        if context.settings?.perplexity?.cookieSource == .manual {
+            return true
+        }
 
         // Priority order mirrors resolveSessionCookie: manual override → cache → browser import → env var
         if PerplexityCookieHeader.resolveCookieOverride(context: context) != nil {
@@ -82,7 +84,9 @@ struct PerplexityWebFetchStrategy: ProviderFetchStrategy {
 
         #if os(macOS)
         if context.settings?.perplexity?.cookieSource != .off {
-            if PerplexityCookieImporter.hasSession() { return true }
+            if PerplexityCookieImporter.hasSession() {
+                return true
+            }
         }
         #endif
 
@@ -123,9 +127,15 @@ struct PerplexityWebFetchStrategy: ProviderFetchStrategy {
     }
 
     func shouldFallback(on error: Error, context: ProviderFetchContext) -> Bool {
-        if case PerplexityAPIError.missingToken = error { return false }
-        if case PerplexityAPIError.invalidCookie = error { return false }
-        if case PerplexityAPIError.invalidToken = error { return false }
+        if case PerplexityAPIError.missingToken = error {
+            return false
+        }
+        if case PerplexityAPIError.invalidCookie = error {
+            return false
+        }
+        if case PerplexityAPIError.invalidToken = error {
+            return false
+        }
         return true
     }
 

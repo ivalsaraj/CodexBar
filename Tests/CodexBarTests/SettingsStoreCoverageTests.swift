@@ -6,6 +6,60 @@ import Testing
 @MainActor
 struct SettingsStoreCoverageTests {
     @Test
+    func `open code workspace settings reuse one credential and resolve active snapshot`() throws {
+        let settings = Self.makeSettingsStore()
+        settings.addTokenAccount(provider: .opencode, label: "Shared", token: "auth=shared")
+        let tokenAccount = try #require(settings.selectedTokenAccount(for: .opencode))
+
+        let result = settings.addOpenCodeWorkspace(
+            tokenAccountID: tokenAccount.id,
+            workspaceID: "https://opencode.ai/workspace/wrk_ALPHA/billing",
+            label: "Alpha",
+            ownerLabel: "Alice")
+
+        #expect(result == .saved)
+        let account = try #require(settings.opencodeWorkspaceAccounts.accounts.first)
+        #expect(account.tokenAccountID == tokenAccount.id)
+        let selected = settings.setActiveOpenCodeWorkspace(id: account.id)
+        #expect(selected)
+        let snapshot = settings.opencodeSettingsSnapshot(tokenOverride: nil)
+        #expect(snapshot.workspaceID == "wrk_ALPHA")
+        #expect(snapshot.workspaceAccountID == account.id)
+        #expect(snapshot.manualCookieHeader == "auth=shared")
+        settings.removeTokenAccount(provider: .opencode, accountID: tokenAccount.id)
+        #expect(settings.opencodeWorkspaceAccounts.accounts.isEmpty)
+    }
+
+    @Test
+    func `widget workspace selection is consumed before later menu selection`() throws {
+        let settings = Self.makeSettingsStore(suiteName: "SettingsStoreCoverageTests-widget-selection")
+        settings.addTokenAccount(provider: .opencode, label: "Shared", token: "auth=shared")
+        let tokenAccount = try #require(settings.selectedTokenAccount(for: .opencode))
+        #expect(settings.addOpenCodeWorkspace(
+            tokenAccountID: tokenAccount.id,
+            workspaceID: "wrk_ALPHA",
+            label: "Alpha") == .saved)
+        #expect(settings.addOpenCodeWorkspace(
+            tokenAccountID: tokenAccount.id,
+            workspaceID: "wrk_BETA",
+            label: "Beta") == .saved)
+        let accounts = settings.opencodeWorkspaceAccounts.accounts
+        let first = try #require(accounts.first)
+        let second = try #require(accounts.last)
+        let defaults = try #require(AppGroupSupport.sharedDefaults())
+        defer { defaults.removeObject(forKey: SettingsStore.openCodeWidgetSelectionKey) }
+
+        #expect(settings.setActiveOpenCodeWorkspace(id: second.id))
+        WidgetSelectionStore.saveSelectedOpenCodeWorkspaceAccountID(first.id)
+        #expect(settings.syncOpenCodeWorkspaceSelectionFromAppGroup())
+        #expect(settings.activeOpenCodeWorkspaceAccount?.id == first.id)
+
+        #expect(settings.setActiveOpenCodeWorkspace(id: second.id))
+        #expect(!settings.syncOpenCodeWorkspaceSelectionFromAppGroup())
+        #expect(settings.activeOpenCodeWorkspaceAccount?.id == second.id)
+    }
+
+    @Test
     func `provider ordering and caching`() throws {
         let suite = "SettingsStoreCoverageTests-ordering"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -36,6 +90,21 @@ struct SettingsStoreCoverageTests {
     }
 
     @Test
+    func `disabling selected provider clears menu selection`() throws {
+        let settings = Self.makeSettingsStore()
+        let metadata = ProviderRegistry.shared.metadata
+
+        try settings.setProviderEnabled(provider: .codex, metadata: #require(metadata[.codex]), enabled: true)
+        try settings.setProviderEnabled(provider: .claude, metadata: #require(metadata[.claude]), enabled: true)
+        settings.selectedMenuProvider = .claude
+
+        try settings.setProviderEnabled(provider: .claude, metadata: #require(metadata[.claude]), enabled: false)
+
+        #expect(settings.selectedMenuProvider == nil)
+        #expect(settings.enabledProvidersOrdered(metadataByProvider: metadata) == [.codex])
+    }
+
+    @Test
     func `menu bar metric preferences and display modes`() {
         let settings = Self.makeSettingsStore()
 
@@ -47,7 +116,7 @@ struct SettingsStoreCoverageTests {
         #expect(settings.menuBarMetricSupportsAverage(for: .gemini))
 
         settings.setMenuBarMetricPreference(.secondary, for: .zai)
-        #expect(settings.menuBarMetricPreference(for: .zai) == .primary)
+        #expect(settings.menuBarMetricPreference(for: .zai) == .secondary)
 
         settings.menuBarDisplayMode = .pace
         #expect(settings.menuBarDisplayMode == .pace)
@@ -82,529 +151,83 @@ struct SettingsStoreCoverageTests {
     }
 
     @Test
-    func `opencode go token accounts force manual cookie routing`() {
-        let settings = Self.makeSettingsStore()
-        settings.addTokenAccount(provider: .opencodego, label: "Go", token: "auth=go-cookie")
-
-        let snapshot = settings.opencodegoSettingsSnapshot(tokenOverride: nil)
-
-        #expect(settings.opencodegoCookieSource == .manual)
-        #expect(snapshot.cookieSource == .manual)
-        #expect(snapshot.manualCookieHeader == "auth=go-cookie")
-    }
-
-    @Test
-    func `opencode go snapshot preserves nil workspace id when settings are unset`() {
+    func `token account update preserves identity and selection`() throws {
         let settings = Self.makeSettingsStore()
 
-        let snapshot = settings.opencodegoSettingsSnapshot(tokenOverride: nil)
+        settings.addTokenAccount(provider: .copilot, label: "Primary", token: "token-1")
+        settings.addTokenAccount(provider: .copilot, label: "Secondary", token: "token-2")
+        settings.setActiveTokenAccountIndex(0, for: .copilot)
 
-        #expect(settings.opencodegoWorkspaceID.isEmpty)
-        #expect(snapshot.workspaceID == nil)
+        let original = try #require(settings.selectedTokenAccount(for: .copilot))
+        settings.updateTokenAccount(
+            provider: .copilot,
+            accountID: original.id,
+            label: "Primary (Pro)",
+            token: "token-1b")
+
+        let updated = try #require(settings.selectedTokenAccount(for: .copilot))
+        #expect(updated.id == original.id)
+        #expect(updated.label == "Primary (Pro)")
+        #expect(updated.token == "token-1b")
+        #expect(settings.tokenAccounts(for: .copilot).count == 2)
     }
 
     @Test
-    func `opencode selected workspace account overrides legacy workspace id in snapshot and dashboard routing`()
-        throws
-    {
-        let suite = "SettingsStoreCoverageTests-opencode-workspace-account-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        let configStore = testConfigStore(suiteName: suite)
+    func `copilot token accounts clear legacy api key fallback`() throws {
+        let settings = Self.makeSettingsStore()
+        settings.copilotAPIToken = "legacy-token"
 
-        let tokenAccountID = UUID()
-        let workspaceAccountID = UUID()
-        let config = CodexBarConfig(providers: [
-            ProviderConfig(
-                id: .opencode,
-                workspaceID: "wrk_legacy",
-                tokenAccounts: ProviderTokenAccountData(
-                    version: 1,
-                    accounts: [
-                        ProviderTokenAccount(
-                            id: tokenAccountID,
-                            label: "Cookie",
-                            token: "auth=cookie",
-                            addedAt: 100,
-                            lastUsed: nil),
-                    ],
-                    activeIndex: 0),
-                openCodeWorkspaceAccounts: OpenCodeWorkspaceAccountData(
-                    version: 1,
-                    activeAccountID: workspaceAccountID,
-                    accounts: [
-                        OpenCodeWorkspaceAccount(
-                            id: workspaceAccountID,
-                            tokenAccountID: tokenAccountID,
-                            label: "Team",
-                            workspaceID: "wrk_selected",
-                            workspaceLabel: "Selected Workspace",
-                            discoveredOwnerLabel: nil,
-                            addedAt: 200,
-                            lastValidatedAt: nil),
-                    ])),
-        ])
-        try configStore.save(config)
+        settings.addTokenAccount(provider: .copilot, label: "Primary", token: "token-1")
 
-        let settings = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
-        let snapshot = settings.opencodeSettingsSnapshot(tokenOverride: nil)
+        #expect(settings.copilotAPIToken.isEmpty)
+        #expect(settings.copilotSettingsSnapshot(tokenOverride: nil).apiToken == "token-1")
 
-        #expect(settings.selectedOpenCodeWorkspaceAccount?.id == workspaceAccountID)
-        #expect(snapshot.workspaceID == "wrk_selected")
-        #expect(
-            settings.opencodeDashboardURLOverride?.absoluteString
-                == "https://opencode.ai/workspace/wrk_selected/go")
+        settings.copilotAPIToken = "legacy-token"
+        let account = try #require(settings.selectedTokenAccount(for: .copilot))
+        settings.removeTokenAccount(provider: .copilot, accountID: account.id)
+
+        #expect(settings.tokenAccounts(for: .copilot).isEmpty)
+        #expect(settings.copilotAPIToken.isEmpty)
+        #expect(settings.copilotSettingsSnapshot(tokenOverride: nil).apiToken == nil)
     }
 
     @Test
-    func `removing opencode token account prunes dependent workspace account`() throws {
-        let suite = "SettingsStoreCoverageTests-opencode-prune-\(UUID().uuidString)"
+    func `copilot enterprise host persists in provider config`() throws {
+        let suite = "SettingsStoreCoverageTests-copilot-enterprise-host"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defaults.removePersistentDomain(forName: suite)
         let configStore = testConfigStore(suiteName: suite)
+        let first = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
 
-        let tokenAccountID = UUID()
-        let workspaceAccountID = UUID()
-        let config = CodexBarConfig(providers: [
-            ProviderConfig(
-                id: .opencode,
-                tokenAccounts: ProviderTokenAccountData(
-                    version: 1,
-                    accounts: [
-                        ProviderTokenAccount(
-                            id: tokenAccountID,
-                            label: "Cookie",
-                            token: "auth=cookie",
-                            addedAt: 100,
-                            lastUsed: nil),
-                    ],
-                    activeIndex: 0),
-                openCodeWorkspaceAccounts: OpenCodeWorkspaceAccountData(
-                    version: 1,
-                    activeAccountID: workspaceAccountID,
-                    accounts: [
-                        OpenCodeWorkspaceAccount(
-                            id: workspaceAccountID,
-                            tokenAccountID: tokenAccountID,
-                            label: "Workspace",
-                            workspaceID: "wrk_selected",
-                            workspaceLabel: "Selected Workspace",
-                            discoveredOwnerLabel: nil,
-                            addedAt: 200,
-                            lastValidatedAt: nil),
-                    ])),
-        ])
-        try configStore.save(config)
+        first.copilotEnterpriseHost = "https://octocorp.ghe.com/login"
+        #expect(first.copilotEnterpriseHost == "https://octocorp.ghe.com/login")
+        #expect(first.copilotSettingsSnapshot(tokenOverride: nil).enterpriseHost == "octocorp.ghe.com")
 
-        let settings = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
-        settings.removeTokenAccount(provider: .opencode, accountID: tokenAccountID)
+        let second = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
+        #expect(second.copilotEnterpriseHost == "https://octocorp.ghe.com/login")
 
-        #expect(settings.tokenAccounts(for: .opencode).isEmpty)
-        #expect(settings.openCodeWorkspaceAccounts.isEmpty)
-        #expect(settings.selectedOpenCodeWorkspaceAccount == nil)
+        second.copilotEnterpriseHost = "github.com"
+        #expect(second.copilotEnterpriseHost == "github.com")
+        #expect(second.copilotSettingsSnapshot(tokenOverride: nil).enterpriseHost == nil)
     }
 
     @Test
-    func `opencode snapshot uses linked token account instead of generic active index`() throws {
-        let suite = "SettingsStoreCoverageTests-opencode-linked-token-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        let configStore = testConfigStore(suiteName: suite)
+    func `removing another token account preserves active selection`() throws {
+        let settings = Self.makeSettingsStore()
 
-        let firstTokenID = UUID()
-        let secondTokenID = UUID()
-        let workspaceAccountID = UUID()
-        let config = CodexBarConfig(providers: [
-            ProviderConfig(
-                id: .opencode,
-                tokenAccounts: ProviderTokenAccountData(
-                    version: 1,
-                    accounts: [
-                        ProviderTokenAccount(
-                            id: firstTokenID,
-                            label: "First",
-                            token: "auth=first-cookie",
-                            addedAt: 100,
-                            lastUsed: nil),
-                        ProviderTokenAccount(
-                            id: secondTokenID,
-                            label: "Second",
-                            token: "auth=second-cookie",
-                            addedAt: 200,
-                            lastUsed: nil),
-                    ],
-                    activeIndex: 0),
-                openCodeWorkspaceAccounts: OpenCodeWorkspaceAccountData(
-                    version: 1,
-                    activeAccountID: workspaceAccountID,
-                    accounts: [
-                        OpenCodeWorkspaceAccount(
-                            id: workspaceAccountID,
-                            tokenAccountID: secondTokenID,
-                            label: "Workspace",
-                            workspaceID: "wrk_selected",
-                            workspaceLabel: "Selected Workspace",
-                            discoveredOwnerLabel: nil,
-                            addedAt: 300,
-                            lastValidatedAt: nil),
-                    ])),
-        ])
-        try configStore.save(config)
+        settings.addTokenAccount(provider: .copilot, label: "A", token: "token-a")
+        settings.addTokenAccount(provider: .copilot, label: "B", token: "token-b")
+        settings.addTokenAccount(provider: .copilot, label: "C", token: "token-c")
+        settings.setActiveTokenAccountIndex(1, for: .copilot)
 
-        let settings = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
-        let snapshot = settings.opencodeSettingsSnapshot(tokenOverride: nil)
+        let activeBefore = try #require(settings.selectedTokenAccount(for: .copilot))
+        let accountToRemove = try #require(settings.tokenAccounts(for: .copilot).first)
+        settings.removeTokenAccount(provider: .copilot, accountID: accountToRemove.id)
 
-        #expect(snapshot.manualCookieHeader == "auth=second-cookie")
-    }
-
-    @Test
-    func `opencode snapshot preview override uses preview workspace account instead of active workspace`() throws {
-        let suite = "SettingsStoreCoverageTests-opencode-preview-workspace-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        let configStore = testConfigStore(suiteName: suite)
-
-        let tokenAccountID = UUID()
-        let activeWorkspaceAccountID = UUID()
-        let previewWorkspaceAccountID = UUID()
-        let config = CodexBarConfig(providers: [
-            ProviderConfig(
-                id: .opencode,
-                tokenAccounts: ProviderTokenAccountData(
-                    version: 1,
-                    accounts: [
-                        ProviderTokenAccount(
-                            id: tokenAccountID,
-                            label: "Cookie",
-                            token: "auth=cookie",
-                            addedAt: 100,
-                            lastUsed: nil),
-                    ],
-                    activeIndex: 0),
-                openCodeWorkspaceAccounts: OpenCodeWorkspaceAccountData(
-                    version: 1,
-                    activeAccountID: activeWorkspaceAccountID,
-                    accounts: [
-                        OpenCodeWorkspaceAccount(
-                            id: activeWorkspaceAccountID,
-                            tokenAccountID: tokenAccountID,
-                            label: "Alpha",
-                            workspaceID: "wrk_alpha",
-                            workspaceLabel: "Alpha Workspace",
-                            discoveredOwnerLabel: nil,
-                            addedAt: 200,
-                            lastValidatedAt: nil),
-                        OpenCodeWorkspaceAccount(
-                            id: previewWorkspaceAccountID,
-                            tokenAccountID: tokenAccountID,
-                            label: "Beta",
-                            workspaceID: "wrk_beta",
-                            workspaceLabel: "Beta Workspace",
-                            discoveredOwnerLabel: nil,
-                            addedAt: 300,
-                            lastValidatedAt: nil),
-                    ])),
-        ])
-        try configStore.save(config)
-
-        let settings = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
-        let override = TokenAccountOverride(
-            provider: .opencode,
-            account: ProviderTokenAccount(
-                id: previewWorkspaceAccountID,
-                label: "Beta",
-                token: "auth=cookie",
-                addedAt: 300,
-                lastUsed: nil))
-
-        let snapshot = settings.opencodeSettingsSnapshot(tokenOverride: override)
-
-        #expect(snapshot.workspaceID == "wrk_beta")
-        #expect(snapshot.manualCookieHeader == "auth=cookie")
-    }
-
-    @Test
-    func `opencode reports unbound legacy token accounts without inventing workspace bindings`() throws {
-        let suite = "SettingsStoreCoverageTests-opencode-unbound-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        let configStore = testConfigStore(suiteName: suite)
-
-        let firstTokenID = UUID()
-        let secondTokenID = UUID()
-        let config = CodexBarConfig(providers: [
-            ProviderConfig(
-                id: .opencode,
-                tokenAccounts: ProviderTokenAccountData(
-                    version: 1,
-                    accounts: [
-                        ProviderTokenAccount(
-                            id: firstTokenID,
-                            label: "First",
-                            token: "auth=first-cookie",
-                            addedAt: 100,
-                            lastUsed: nil),
-                        ProviderTokenAccount(
-                            id: secondTokenID,
-                            label: "Second",
-                            token: "auth=second-cookie",
-                            addedAt: 200,
-                            lastUsed: nil),
-                    ],
-                    activeIndex: 0)),
-        ])
-        try configStore.save(config)
-
-        let settings = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
-
-        #expect(settings.openCodeWorkspaceAccounts.isEmpty)
-        #expect(settings.selectedOpenCodeWorkspaceAccount == nil)
-        #expect(settings.unboundOpenCodeTokenAccounts.map(\.id) == [firstTokenID, secondTokenID])
-    }
-
-    @Test
-    func `opencode migrates one legacy token account plus workspace id into one saved workspace account`() throws {
-        let suite = "SettingsStoreCoverageTests-opencode-migrate-single-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        let configStore = testConfigStore(suiteName: suite)
-
-        let tokenAccountID = UUID()
-        let config = CodexBarConfig(providers: [
-            ProviderConfig(
-                id: .opencode,
-                workspaceID: "https://opencode.ai/workspace/wrk_LEGACY123/go",
-                tokenAccounts: ProviderTokenAccountData(
-                    version: 1,
-                    accounts: [
-                        ProviderTokenAccount(
-                            id: tokenAccountID,
-                            label: "Legacy Cookie",
-                            token: "auth=legacy-cookie",
-                            addedAt: 100,
-                            lastUsed: nil),
-                    ],
-                    activeIndex: 0)),
-        ])
-        try configStore.save(config)
-
-        let settings = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
-        settings.ensureOpenCodeWorkspaceAccountMigrationIfNeeded()
-
-        let account = try #require(settings.selectedOpenCodeWorkspaceAccount)
-        #expect(settings.openCodeWorkspaceAccounts.count == 1)
-        #expect(account.tokenAccountID == tokenAccountID)
-        #expect(account.workspaceID == "wrk_LEGACY123")
-        #expect(account.label == "Legacy Cookie")
-        #expect(account.workspaceLabel == "wrk_LEGACY123")
-        #expect(settings.unboundOpenCodeTokenAccounts.isEmpty)
-    }
-
-    @Test
-    func `opencode migration does not invent bindings for multiple legacy token accounts`() throws {
-        let suite = "SettingsStoreCoverageTests-opencode-migrate-multi-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        let configStore = testConfigStore(suiteName: suite)
-
-        let firstTokenID = UUID()
-        let secondTokenID = UUID()
-        let config = CodexBarConfig(providers: [
-            ProviderConfig(
-                id: .opencode,
-                workspaceID: "wrk_LEGACY123",
-                tokenAccounts: ProviderTokenAccountData(
-                    version: 1,
-                    accounts: [
-                        ProviderTokenAccount(
-                            id: firstTokenID,
-                            label: "First",
-                            token: "auth=first-cookie",
-                            addedAt: 100,
-                            lastUsed: nil),
-                        ProviderTokenAccount(
-                            id: secondTokenID,
-                            label: "Second",
-                            token: "auth=second-cookie",
-                            addedAt: 200,
-                            lastUsed: nil),
-                    ],
-                    activeIndex: 0)),
-        ])
-        try configStore.save(config)
-
-        let settings = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
-        settings.ensureOpenCodeWorkspaceAccountMigrationIfNeeded()
-
-        #expect(settings.openCodeWorkspaceAccounts.isEmpty)
-        #expect(settings.selectedOpenCodeWorkspaceAccount == nil)
-        #expect(settings.unboundOpenCodeTokenAccounts.map(\.id) == [firstTokenID, secondTokenID])
-    }
-
-    @Test
-    func `opencode bulk save imports multiple workspaces for one credential and preserves active selection`() throws {
-        let suite = "SettingsStoreCoverageTests-opencode-bulk-import-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        let configStore = testConfigStore(suiteName: suite)
-
-        let tokenAccountID = UUID()
-        let activeWorkspaceAccountID = UUID()
-        let config = CodexBarConfig(providers: [
-            ProviderConfig(
-                id: .opencode,
-                tokenAccounts: ProviderTokenAccountData(
-                    version: 1,
-                    accounts: [
-                        ProviderTokenAccount(
-                            id: tokenAccountID,
-                            label: "Chrome",
-                            token: "auth=cookie",
-                            addedAt: 100,
-                            lastUsed: nil),
-                    ],
-                    activeIndex: 0),
-                openCodeWorkspaceAccounts: OpenCodeWorkspaceAccountData(
-                    version: 1,
-                    activeAccountID: activeWorkspaceAccountID,
-                    accounts: [
-                        OpenCodeWorkspaceAccount(
-                            id: activeWorkspaceAccountID,
-                            tokenAccountID: tokenAccountID,
-                            label: "Alpha",
-                            workspaceID: "wrk_alpha",
-                            workspaceLabel: "Alpha Workspace",
-                            discoveredOwnerLabel: nil,
-                            addedAt: 200,
-                            lastValidatedAt: nil),
-                    ])),
-        ])
-        try configStore.save(config)
-
-        let settings = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
-        let summary = try #require(settings.bulkSaveOpenCodeWorkspaceAccounts(
-            tokenAccountID: tokenAccountID,
-            discoveredWorkspaces: [
-                OpenCodeDiscoveredWorkspace(
-                    workspaceID: "wrk_alpha",
-                    workspaceLabel: "Alpha Workspace",
-                    ownerLabel: "Team One"),
-                OpenCodeDiscoveredWorkspace(
-                    workspaceID: "wrk_beta",
-                    workspaceLabel: "Beta Workspace",
-                    ownerLabel: "Team Two"),
-            ]))
-
-        #expect(summary.addedCount == 1)
-        #expect(summary.updatedCount == 1)
-        #expect(summary.accountIDs.count == 2)
-        #expect(settings.openCodeWorkspaceAccounts.count == 2)
-        #expect(settings.selectedOpenCodeWorkspaceAccount?.id == activeWorkspaceAccountID)
-        #expect(
-            settings.openCodeWorkspaceAccounts.first(where: { $0.workspaceID == "wrk_alpha" })?
-                .discoveredOwnerLabel == "Team One")
-        #expect(settings.openCodeWorkspaceAccounts.contains(where: { $0.workspaceID == "wrk_beta" }))
-    }
-
-    @Test
-    func `opencode bulk save dedupes migration-created workspace accounts`() throws {
-        let suite = "SettingsStoreCoverageTests-opencode-bulk-dedupe-migration-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        let configStore = testConfigStore(suiteName: suite)
-
-        let tokenAccountID = UUID()
-        let config = CodexBarConfig(providers: [
-            ProviderConfig(
-                id: .opencode,
-                workspaceID: "wrk_legacy",
-                tokenAccounts: ProviderTokenAccountData(
-                    version: 1,
-                    accounts: [
-                        ProviderTokenAccount(
-                            id: tokenAccountID,
-                            label: "Legacy Cookie",
-                            token: "auth=legacy-cookie",
-                            addedAt: 100,
-                            lastUsed: nil),
-                    ],
-                    activeIndex: 0)),
-        ])
-        try configStore.save(config)
-
-        let settings = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
-        settings.ensureOpenCodeWorkspaceAccountMigrationIfNeeded()
-
-        let summary = try #require(settings.bulkSaveOpenCodeWorkspaceAccounts(
-            tokenAccountID: tokenAccountID,
-            discoveredWorkspaces: [
-                OpenCodeDiscoveredWorkspace(
-                    workspaceID: "wrk_legacy",
-                    workspaceLabel: "Legacy Workspace",
-                    ownerLabel: "Recovered"),
-            ]))
-
-        #expect(summary.addedCount == 0)
-        #expect(summary.updatedCount == 1)
-        #expect(settings.openCodeWorkspaceAccounts.count == 1)
-        #expect(settings.openCodeWorkspaceAccounts.first?.workspaceLabel == "Legacy Workspace")
-        #expect(settings.openCodeWorkspaceAccounts.first?.discoveredOwnerLabel == "Recovered")
-    }
-
-    @Test
-    func `opencode reusable credential prefers selected workspace token but falls back to any saved token`() throws {
-        let suite = "SettingsStoreCoverageTests-opencode-reusable-credential-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        let configStore = testConfigStore(suiteName: suite)
-
-        let firstTokenID = UUID()
-        let secondTokenID = UUID()
-        let secondWorkspaceAccountID = UUID()
-        let config = CodexBarConfig(providers: [
-            ProviderConfig(
-                id: .opencode,
-                tokenAccounts: ProviderTokenAccountData(
-                    version: 1,
-                    accounts: [
-                        ProviderTokenAccount(
-                            id: firstTokenID,
-                            label: "First",
-                            token: "auth=first-cookie",
-                            addedAt: 100,
-                            lastUsed: nil),
-                        ProviderTokenAccount(
-                            id: secondTokenID,
-                            label: "Second",
-                            token: "auth=second-cookie",
-                            addedAt: 200,
-                            lastUsed: nil),
-                    ],
-                    activeIndex: 0),
-                openCodeWorkspaceAccounts: OpenCodeWorkspaceAccountData(
-                    version: 1,
-                    activeAccountID: secondWorkspaceAccountID,
-                    accounts: [
-                        OpenCodeWorkspaceAccount(
-                            id: secondWorkspaceAccountID,
-                            tokenAccountID: secondTokenID,
-                            label: "Beta",
-                            workspaceID: "wrk_beta",
-                            workspaceLabel: "Beta Workspace",
-                            discoveredOwnerLabel: nil,
-                            addedAt: 300,
-                            lastValidatedAt: nil),
-                    ])),
-        ])
-        try configStore.save(config)
-
-        let settings = Self.makeSettingsStore(userDefaults: defaults, configStore: configStore)
-
-        #expect(settings.reusableOpenCodeCredential()?.id == secondTokenID)
-
-        settings.removeOpenCodeWorkspaceAccount(id: secondWorkspaceAccountID)
-
-        #expect(settings.reusableOpenCodeCredential()?.id == firstTokenID)
+        let activeAfter = try #require(settings.selectedTokenAccount(for: .copilot))
+        #expect(activeAfter.id == activeBefore.id)
+        #expect(activeAfter.label == "B")
+        #expect(settings.tokenAccounts(for: .copilot).map(\.label) == ["B", "C"])
     }
 
     @Test
@@ -655,6 +278,28 @@ struct SettingsStoreCoverageTests {
 
         #expect(snapshot.cookieSource == .manual)
         #expect(snapshot.manualCookieHeader?.isEmpty == true)
+    }
+
+    @Test
+    func `opencode go token accounts force manual cookie routing`() {
+        let settings = Self.makeSettingsStore()
+        settings.addTokenAccount(provider: .opencodego, label: "Go", token: "auth=go-cookie")
+
+        let snapshot = settings.opencodegoSettingsSnapshot(tokenOverride: nil)
+
+        #expect(settings.opencodegoCookieSource == .manual)
+        #expect(snapshot.cookieSource == .manual)
+        #expect(snapshot.manualCookieHeader == "auth=go-cookie")
+    }
+
+    @Test
+    func `opencode go snapshot preserves nil workspace id when settings are unset`() {
+        let settings = Self.makeSettingsStore()
+
+        let snapshot = settings.opencodegoSettingsSnapshot(tokenOverride: nil)
+
+        #expect(settings.opencodegoWorkspaceID.isEmpty)
+        #expect(snapshot.workspaceID == nil)
     }
 
     @Test
@@ -764,9 +409,9 @@ struct SettingsStoreCoverageTests {
     }
 
     @Test
-    func `claude keychain read strategy defaults to security framework`() {
+    func `claude keychain read strategy defaults to security CLI experimental`() {
         let settings = Self.makeSettingsStore()
-        #expect(settings.claudeOAuthKeychainReadStrategy == .securityFramework)
+        #expect(settings.claudeOAuthKeychainReadStrategy == .securityCLIExperimental)
     }
 
     @Test
@@ -801,13 +446,13 @@ struct SettingsStoreCoverageTests {
     @Test
     func `claude prompt free credentials toggle maps to read strategy`() {
         let settings = Self.makeSettingsStore()
-        #expect(settings.claudeOAuthPromptFreeCredentialsEnabled == false)
-
-        settings.claudeOAuthPromptFreeCredentialsEnabled = true
-        #expect(settings.claudeOAuthKeychainReadStrategy == .securityCLIExperimental)
+        #expect(settings.claudeOAuthPromptFreeCredentialsEnabled == true)
 
         settings.claudeOAuthPromptFreeCredentialsEnabled = false
         #expect(settings.claudeOAuthKeychainReadStrategy == .securityFramework)
+
+        settings.claudeOAuthPromptFreeCredentialsEnabled = true
+        #expect(settings.claudeOAuthKeychainReadStrategy == .securityCLIExperimental)
     }
 
     private static func makeSettingsStore(suiteName: String = "SettingsStoreCoverageTests") -> SettingsStore {

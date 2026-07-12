@@ -27,7 +27,12 @@ public enum UsageProvider: String, CaseIterable, Sendable, Codable {
     case synthetic
     case warp
     case openrouter
+    case windsurf
     case perplexity
+    case abacus
+    case mistral
+    case deepseek
+    case codebuff
 }
 
 // swiftformat:enable sortDeclarations
@@ -57,7 +62,12 @@ public enum IconStyle: Sendable, CaseIterable {
     case synthetic
     case warp
     case openrouter
+    case windsurf
     case perplexity
+    case abacus
+    case mistral
+    case deepseek
+    case codebuff
     case combined
 }
 
@@ -147,6 +157,17 @@ public enum ProviderBrowserCookieDefaults {
     public static var cursorCookieImportOrder: BrowserCookieImportOrder? {
         #if os(macOS)
         [.safari] + Browser.defaultImportOrder.filter { $0 != .safari }
+        #else
+        nil
+        #endif
+    }
+
+    /// Preserve the legacy Codex prompt behavior: prefer Safari/Chrome/Firefox before
+    /// probing additional Chromium variants that may trigger Safe Storage prompts.
+    public static var codexCookieImportOrder: BrowserCookieImportOrder? {
+        #if os(macOS)
+        let preferredPrefix: [Browser] = [.safari, .chrome, .firefox]
+        return preferredPrefix + Browser.defaultImportOrder.filter { !preferredPrefix.contains($0) }
         #else
         nil
         #endif

@@ -127,8 +127,12 @@ public struct CostUsageDailyReport: Sendable, Decodable {
                 (try? container.decodeIfPresent([String].self, forKey: key)).flatMap(\.self)
             }
 
-            if let modelsUsed = decodeStringList(.modelsUsed) { return modelsUsed }
-            if let models = decodeStringList(.models) { return models }
+            if let modelsUsed = decodeStringList(.modelsUsed) {
+                return modelsUsed
+            }
+            if let models = decodeStringList(.models) {
+                return models
+            }
 
             guard container.contains(.models) else { return nil }
 
@@ -232,6 +236,224 @@ public struct CostUsageDailyReport: Sendable, Decodable {
     public init(data: [Entry], summary: Summary?) {
         self.data = data
         self.summary = summary
+    }
+}
+
+extension CostUsageDailyReport {
+    private struct BreakdownAccumulator {
+        var totalTokens: Int = 0
+        var sawTotalTokens = false
+        var costUSD: Double = 0
+        var sawCost = false
+
+        mutating func add(_ breakdown: ModelBreakdown) {
+            if let totalTokens = breakdown.totalTokens {
+                self.totalTokens += totalTokens
+                self.sawTotalTokens = true
+            }
+            if let costUSD = breakdown.costUSD {
+                self.costUSD += costUSD
+                self.sawCost = true
+            }
+        }
+
+        func build(modelName: String) -> ModelBreakdown {
+            ModelBreakdown(
+                modelName: modelName,
+                costUSD: self.sawCost ? self.costUSD : nil,
+                totalTokens: self.sawTotalTokens ? self.totalTokens : nil)
+        }
+    }
+
+    private struct EntryAccumulator {
+        var inputTokens: Int = 0
+        var sawInputTokens = false
+        var cacheReadTokens: Int = 0
+        var sawCacheReadTokens = false
+        var cacheCreationTokens: Int = 0
+        var sawCacheCreationTokens = false
+        var outputTokens: Int = 0
+        var sawOutputTokens = false
+        var totalTokens: Int = 0
+        var sawTotalTokens = false
+        var derivedTotalTokensWithoutExplicitTotal: Int = 0
+        var costUSD: Double = 0
+        var sawCost = false
+        var modelsUsed: Set<String> = []
+        var breakdowns: [String: BreakdownAccumulator] = [:]
+
+        mutating func add(_ entry: Entry) {
+            let entryDerivedTotalTokens = (entry.inputTokens ?? 0)
+                + (entry.cacheReadTokens ?? 0)
+                + (entry.cacheCreationTokens ?? 0)
+                + (entry.outputTokens ?? 0)
+            if let inputTokens = entry.inputTokens {
+                self.inputTokens += inputTokens
+                self.sawInputTokens = true
+            }
+            if let cacheReadTokens = entry.cacheReadTokens {
+                self.cacheReadTokens += cacheReadTokens
+                self.sawCacheReadTokens = true
+            }
+            if let cacheCreationTokens = entry.cacheCreationTokens {
+                self.cacheCreationTokens += cacheCreationTokens
+                self.sawCacheCreationTokens = true
+            }
+            if let outputTokens = entry.outputTokens {
+                self.outputTokens += outputTokens
+                self.sawOutputTokens = true
+            }
+            if let totalTokens = entry.totalTokens {
+                self.totalTokens += totalTokens
+                self.sawTotalTokens = true
+            } else if entryDerivedTotalTokens > 0 {
+                self.derivedTotalTokensWithoutExplicitTotal += entryDerivedTotalTokens
+            }
+            if let costUSD = entry.costUSD {
+                self.costUSD += costUSD
+                self.sawCost = true
+            }
+            if let modelsUsed = entry.modelsUsed {
+                self.modelsUsed.formUnion(modelsUsed)
+            }
+            if let modelBreakdowns = entry.modelBreakdowns {
+                for breakdown in modelBreakdowns {
+                    var accumulator = self.breakdowns[breakdown.modelName] ?? BreakdownAccumulator()
+                    accumulator.add(breakdown)
+                    self.breakdowns[breakdown.modelName] = accumulator
+                    self.modelsUsed.insert(breakdown.modelName)
+                }
+            }
+        }
+
+        func build(date: String) -> Entry {
+            let derivedTotalTokens = self.inputTokens
+                + self.cacheReadTokens
+                + self.cacheCreationTokens
+                + self.outputTokens
+            let totalTokens: Int? = if self.sawTotalTokens {
+                self.totalTokens + self.derivedTotalTokensWithoutExplicitTotal
+            } else if derivedTotalTokens > 0 {
+                derivedTotalTokens
+            } else {
+                nil
+            }
+            let modelBreakdowns: [ModelBreakdown]? = {
+                guard !self.breakdowns.isEmpty else { return nil }
+                return CostUsageDailyReport.sortedModelBreakdowns(
+                    self.breakdowns
+                        .map { modelName, accumulator in
+                            accumulator.build(modelName: modelName)
+                        })
+            }()
+            let modelsUsed = self.modelsUsed.isEmpty ? nil : self.modelsUsed.sorted()
+            return Entry(
+                date: date,
+                inputTokens: self.sawInputTokens ? self.inputTokens : nil,
+                outputTokens: self.sawOutputTokens ? self.outputTokens : nil,
+                cacheReadTokens: self.sawCacheReadTokens ? self.cacheReadTokens : nil,
+                cacheCreationTokens: self.sawCacheCreationTokens ? self.cacheCreationTokens : nil,
+                totalTokens: totalTokens,
+                costUSD: self.sawCost ? self.costUSD : nil,
+                modelsUsed: modelsUsed,
+                modelBreakdowns: modelBreakdowns)
+        }
+    }
+
+    public func merged(with other: CostUsageDailyReport) -> CostUsageDailyReport {
+        Self.merged([self, other])
+    }
+
+    public static func merged(_ reports: [CostUsageDailyReport]) -> CostUsageDailyReport {
+        let entries = self.mergedEntries(from: reports)
+        guard !entries.isEmpty else { return CostUsageDailyReport(data: [], summary: nil) }
+        return CostUsageDailyReport(data: entries, summary: self.mergedSummary(from: entries))
+    }
+
+    private static func mergedEntries(from reports: [CostUsageDailyReport]) -> [Entry] {
+        var dayAccumulators: [String: EntryAccumulator] = [:]
+        for report in reports {
+            for entry in report.data {
+                var accumulator = dayAccumulators[entry.date] ?? EntryAccumulator()
+                accumulator.add(entry)
+                dayAccumulators[entry.date] = accumulator
+            }
+        }
+
+        return dayAccumulators
+            .keys
+            .sorted()
+            .map { date in
+                dayAccumulators[date, default: EntryAccumulator()].build(date: date)
+            }
+    }
+
+    private static func mergedSummary(from entries: [Entry]) -> Summary {
+        var totalInputTokens = 0
+        var sawTotalInputTokens = false
+        var totalOutputTokens = 0
+        var sawTotalOutputTokens = false
+        var totalCacheReadTokens = 0
+        var sawTotalCacheReadTokens = false
+        var totalCacheCreationTokens = 0
+        var sawTotalCacheCreationTokens = false
+        var totalTokens = 0
+        var sawTotalTokens = false
+        var totalCostUSD = 0.0
+        var sawTotalCostUSD = false
+
+        for entry in entries {
+            if let inputTokens = entry.inputTokens {
+                totalInputTokens += inputTokens
+                sawTotalInputTokens = true
+            }
+            if let outputTokens = entry.outputTokens {
+                totalOutputTokens += outputTokens
+                sawTotalOutputTokens = true
+            }
+            if let cacheReadTokens = entry.cacheReadTokens {
+                totalCacheReadTokens += cacheReadTokens
+                sawTotalCacheReadTokens = true
+            }
+            if let cacheCreationTokens = entry.cacheCreationTokens {
+                totalCacheCreationTokens += cacheCreationTokens
+                sawTotalCacheCreationTokens = true
+            }
+            if let entryTotalTokens = entry.totalTokens {
+                totalTokens += entryTotalTokens
+                sawTotalTokens = true
+            }
+            if let costUSD = entry.costUSD {
+                totalCostUSD += costUSD
+                sawTotalCostUSD = true
+            }
+        }
+
+        return Summary(
+            totalInputTokens: sawTotalInputTokens ? totalInputTokens : nil,
+            totalOutputTokens: sawTotalOutputTokens ? totalOutputTokens : nil,
+            cacheReadTokens: sawTotalCacheReadTokens ? totalCacheReadTokens : nil,
+            cacheCreationTokens: sawTotalCacheCreationTokens ? totalCacheCreationTokens : nil,
+            totalTokens: sawTotalTokens ? totalTokens : nil,
+            totalCostUSD: sawTotalCostUSD ? totalCostUSD : nil)
+    }
+
+    private static func sortedModelBreakdowns(_ breakdowns: [ModelBreakdown]) -> [ModelBreakdown] {
+        breakdowns.sorted { lhs, rhs in
+            let lhsCost = lhs.costUSD ?? -1
+            let rhsCost = rhs.costUSD ?? -1
+            if lhsCost != rhsCost {
+                return lhsCost > rhsCost
+            }
+
+            let lhsTokens = lhs.totalTokens ?? -1
+            let rhsTokens = rhs.totalTokens ?? -1
+            if lhsTokens != rhsTokens {
+                return lhsTokens > rhsTokens
+            }
+
+            return lhs.modelName > rhs.modelName
+        }
     }
 }
 
@@ -437,21 +659,29 @@ enum CostUsageDateParser {
 
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = iso.date(from: trimmed) { return d }
+        if let d = iso.date(from: trimmed) {
+            return d
+        }
         iso.formatOptions = [.withInternetDateTime]
-        if let d = iso.date(from: trimmed) { return d }
+        if let d = iso.date(from: trimmed) {
+            return d
+        }
 
         let day = DateFormatter()
         day.locale = Locale(identifier: "en_US_POSIX")
         day.timeZone = TimeZone.current
         day.dateFormat = "yyyy-MM-dd"
-        if let d = day.date(from: trimmed) { return d }
+        if let d = day.date(from: trimmed) {
+            return d
+        }
 
         let monthDayYear = DateFormatter()
         monthDayYear.locale = Locale(identifier: "en_US_POSIX")
         monthDayYear.timeZone = TimeZone.current
         monthDayYear.dateFormat = "MMM d, yyyy"
-        if let d = monthDayYear.date(from: trimmed) { return d }
+        if let d = monthDayYear.date(from: trimmed) {
+            return d
+        }
 
         return nil
     }
@@ -464,19 +694,25 @@ enum CostUsageDateParser {
         monthYear.locale = Locale(identifier: "en_US_POSIX")
         monthYear.timeZone = TimeZone.current
         monthYear.dateFormat = "MMM yyyy"
-        if let d = monthYear.date(from: trimmed) { return d }
+        if let d = monthYear.date(from: trimmed) {
+            return d
+        }
 
         let fullMonthYear = DateFormatter()
         fullMonthYear.locale = Locale(identifier: "en_US_POSIX")
         fullMonthYear.timeZone = TimeZone.current
         fullMonthYear.dateFormat = "MMMM yyyy"
-        if let d = fullMonthYear.date(from: trimmed) { return d }
+        if let d = fullMonthYear.date(from: trimmed) {
+            return d
+        }
 
         let ym = DateFormatter()
         ym.locale = Locale(identifier: "en_US_POSIX")
         ym.timeZone = TimeZone.current
         ym.dateFormat = "yyyy-MM"
-        if let d = ym.date(from: trimmed) { return d }
+        if let d = ym.date(from: trimmed) {
+            return d
+        }
 
         return nil
     }

@@ -74,10 +74,6 @@ extension ProvidersPane {
         self.codexAccountsSectionState(for: .codex)
     }
 
-    func _test_openCodeAccountsSectionState() -> OpenCodeAccountsSectionState? {
-        self.openCodeAccountsSectionState(for: .opencode)
-    }
-
     func _test_selectCodexVisibleAccount(id: String) async {
         await self.selectCodexVisibleAccount(id: id)
     }
@@ -92,18 +88,6 @@ extension ProvidersPane {
 
     func _test_requestCodexSystemVisibleAccount(id: String) async {
         await self.requestCodexSystemVisibleAccount(id: id)
-    }
-
-    func _test_importOpenCodeCurrentLogin() async -> OpenCodeAccountSaveResult {
-        await self.importOpenCodeCurrentLogin()
-    }
-
-    func _test_refreshOpenCodeWorkspaceAccounts() async -> OpenCodeAccountSaveResult {
-        await self.refreshOpenCodeWorkspaceAccounts()
-    }
-
-    func _test_saveOpenCodeAccount(_ draft: OpenCodeAccountDraft) async -> OpenCodeAccountSaveResult {
-        await self.saveOpenCodeAccount(draft)
     }
 }
 
@@ -264,6 +248,8 @@ enum ProvidersPaneTestHarness {
             setActiveIndex: { _ in },
             addAccount: { _, _ in },
             removeAccount: { _ in },
+            primaryAddActionTitle: nil,
+            primaryAddAction: nil,
             openConfigFile: {},
             reloadFromDisk: {})
 

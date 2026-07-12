@@ -177,6 +177,18 @@ public enum CodexBarConfigValidator {
                 message: "workspaceID is set but only opencode and opencodego support workspaceID."))
         }
 
+        if let enterpriseHost = entry.enterpriseHost,
+           !enterpriseHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           provider != .copilot
+        {
+            issues.append(CodexBarConfigIssue(
+                severity: .warning,
+                provider: provider,
+                field: "enterpriseHost",
+                code: "enterprise_host_unused",
+                message: "enterpriseHost is set but only copilot supports enterpriseHost."))
+        }
+
         if let tokenAccounts = entry.tokenAccounts, !tokenAccounts.accounts.isEmpty,
            TokenAccountSupportCatalog.support(for: provider) == nil
         {
@@ -186,17 +198,6 @@ public enum CodexBarConfigValidator {
                 field: "tokenAccounts",
                 code: "token_accounts_unused",
                 message: "tokenAccounts are set but \(provider.rawValue) does not support token accounts."))
-        }
-
-        if let workspaceAccounts = entry.openCodeWorkspaceAccounts, !workspaceAccounts.accounts.isEmpty,
-           provider != .opencode
-        {
-            issues.append(CodexBarConfigIssue(
-                severity: .warning,
-                provider: provider,
-                field: "openCodeWorkspaceAccounts",
-                code: "opencode_workspace_accounts_unused",
-                message: "openCodeWorkspaceAccounts are set but only opencode supports them."))
         }
     }
 }

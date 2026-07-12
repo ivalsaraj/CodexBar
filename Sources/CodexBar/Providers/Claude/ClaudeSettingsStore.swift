@@ -102,7 +102,9 @@ extension SettingsStore {
         if routing.isOAuth {
             return .off
         }
-        if self.tokenAccounts(for: .claude).isEmpty { return fallback }
+        if self.tokenAccounts(for: .claude).isEmpty {
+            return fallback
+        }
         return .manual
     }
 

@@ -2,21 +2,6 @@ import AppKit
 import CodexBarCore
 import SwiftUI
 
-protocol OpenCodeWorkspaceFlowing: Sendable {
-    func importSession(browserDetection: BrowserDetection) async throws -> OpenCodeCookieImporter.SessionInfo
-    func discoverWorkspaces(cookieHeader: String) async throws -> [OpenCodeDiscoveredWorkspace]
-}
-
-struct DefaultOpenCodeWorkspaceFlow: OpenCodeWorkspaceFlowing {
-    func importSession(browserDetection: BrowserDetection) async throws -> OpenCodeCookieImporter.SessionInfo {
-        try OpenCodeCookieImporter.importSession(browserDetection: browserDetection)
-    }
-
-    func discoverWorkspaces(cookieHeader: String) async throws -> [OpenCodeDiscoveredWorkspace] {
-        try await OpenCodeWorkspaceDiscovery.discoverWorkspaces(cookieHeader: cookieHeader, timeout: 15)
-    }
-}
-
 @MainActor
 struct ProvidersPane: View {
     @Bindable var settings: SettingsStore
@@ -24,16 +9,13 @@ struct ProvidersPane: View {
     let managedCodexAccountCoordinator: ManagedCodexAccountCoordinator
     let codexAccountPromotionCoordinator: CodexAccountPromotionCoordinator
     let codexAmbientLoginRunner: any CodexAmbientLoginRunning
-    let openCodeWorkspaceFlow: any OpenCodeWorkspaceFlowing
     @State private var expandedErrors: Set<UsageProvider> = []
     @State private var settingsStatusTextByID: [String: String] = [:]
     @State private var settingsLastAppActiveRunAtByID: [String: Date] = [:]
     @State private var activeConfirmation: ProviderSettingsConfirmationState?
     @State private var codexAccountsNotice: CodexAccountsSectionNotice?
-    @State private var openCodeAccountsNotice: String?
     @State private var isAuthenticatingLiveCodexAccount = false
     @State private var selectedProvider: UsageProvider?
-    @State private var codexSwitchError: String?
 
     private var providers: [UsageProvider] {
         self.settings.orderedProviders()
@@ -44,8 +26,7 @@ struct ProvidersPane: View {
         store: UsageStore,
         managedCodexAccountCoordinator: ManagedCodexAccountCoordinator = ManagedCodexAccountCoordinator(),
         codexAccountPromotionCoordinator: CodexAccountPromotionCoordinator? = nil,
-        codexAmbientLoginRunner: any CodexAmbientLoginRunning = DefaultCodexAmbientLoginRunner(),
-        openCodeWorkspaceFlow: any OpenCodeWorkspaceFlowing = DefaultOpenCodeWorkspaceFlow())
+        codexAmbientLoginRunner: any CodexAmbientLoginRunning = DefaultCodexAmbientLoginRunner())
     {
         self.settings = settings
         self.store = store
@@ -56,7 +37,6 @@ struct ProvidersPane: View {
                 usageStore: store,
                 managedAccountCoordinator: managedCodexAccountCoordinator)
         self.codexAmbientLoginRunner = codexAmbientLoginRunner
-        self.openCodeWorkspaceFlow = openCodeWorkspaceFlow
     }
 
     var body: some View {
@@ -86,21 +66,16 @@ struct ProvidersPane: View {
                     isErrorExpanded: self.expandedBinding(for: provider),
                     onCopyError: { text in self.copyToPasteboard(text) },
                     onRefresh: {
-                        Task { @MainActor in
-                            await ProviderInteractionContext.$current.withValue(.userInitiated) {
-                                if provider == .codex {
-                                    await self.store.refreshCodexAccountScopedState(allowDisabled: true)
-                                } else {
-                                    await self.store.refreshProvider(provider, allowDisabled: true)
-                                }
-                            }
-                        }
+                        self.triggerRefresh(for: provider)
                     },
-                    showsSupplementarySettingsContent:
-                    self.codexAccountsSectionState(for: provider) != nil ||
-                        self.openCodeAccountsSectionState(for: provider) != nil,
+                    showsSupplementarySettingsContent: provider == .opencode ||
+                        self.codexAccountsSectionState(for: provider) != nil,
                     supplementarySettingsContent: {
-                        if let state = self.codexAccountsSectionState(for: provider) {
+                        if provider == .opencode {
+                            OpenCodeAccountsSectionView(
+                                settings: self.settings,
+                                store: self.store)
+                        } else if let state = self.codexAccountsSectionState(for: provider) {
                             CodexAccountsSectionView(
                                 state: state,
                                 setActiveVisibleAccount: { visibleAccountID in
@@ -126,24 +101,6 @@ struct ProvidersPane: View {
                                         await self.addManagedCodexAccount()
                                     }
                                 })
-                        } else if let state = self.openCodeAccountsSectionState(for: provider) {
-                            OpenCodeAccountsSectionView(
-                                state: state,
-                                setActiveAccount: { accountID in
-                                    self.selectOpenCodeWorkspaceAccount(id: accountID)
-                                },
-                                importCurrentLogin: {
-                                    await self.importOpenCodeCurrentLogin()
-                                },
-                                refreshAccounts: {
-                                    await self.refreshOpenCodeWorkspaceAccounts()
-                                },
-                                saveAccount: { draft in
-                                    await self.saveOpenCodeAccount(draft)
-                                },
-                                removeAccount: { account in
-                                    self.requestOpenCodeWorkspaceAccountRemoval(account)
-                                })
                         }
                     })
             } else {
@@ -167,7 +124,9 @@ struct ProvidersPane: View {
             isPresented: Binding(
                 get: { self.activeConfirmation != nil },
                 set: { isPresented in
-                    if !isPresented { self.activeConfirmation = nil }
+                    if !isPresented {
+                        self.activeConfirmation = nil
+                    }
                 }),
             actions: {
                 if let active = self.activeConfirmation {
@@ -194,6 +153,18 @@ struct ProvidersPane: View {
             return
         }
         self.selectedProvider = self.providers.first
+    }
+
+    private func triggerRefresh(for provider: UsageProvider) {
+        Task { @MainActor in
+            await ProviderInteractionContext.$current.withValue(.userInitiated) {
+                if provider == .codex {
+                    await self.store.refreshCodexAccountScopedState(allowDisabled: true)
+                } else {
+                    await self.store.refreshProvider(provider, allowDisabled: true)
+                }
+            }
+        }
     }
 
     func binding(for provider: UsageProvider) -> Binding<Bool> {
@@ -253,16 +224,6 @@ struct ProvidersPane: View {
             isAuthenticatingLiveAccount: self.isAuthenticatingLiveCodexAccount,
             isPromotingSystemAccount: self.codexAccountPromotionCoordinator.isPromotingSystemAccount,
             notice: self.codexAccountsNotice ?? degradedNotice)
-    }
-
-    func openCodeAccountsSectionState(for provider: UsageProvider) -> OpenCodeAccountsSectionState? {
-        guard provider == .opencode else { return nil }
-        self.settings.ensureOpenCodeWorkspaceAccountMigrationIfNeeded()
-        return OpenCodeAccountsSectionState(
-            accounts: self.settings.openCodeWorkspaceAccounts,
-            activeAccountID: self.settings.selectedOpenCodeWorkspaceAccount?.id,
-            hasReusableCredential: self.settings.reusableOpenCodeCredential() != nil,
-            notice: self.openCodeAccountsNotice)
     }
 
     func selectCodexVisibleAccount(id: String) async {
@@ -359,122 +320,6 @@ struct ProvidersPane: View {
             })
     }
 
-    func selectOpenCodeWorkspaceAccount(id: UUID) {
-        self.openCodeAccountsNotice = nil
-        guard self.settings.setActiveOpenCodeWorkspaceAccount(id: id) else { return }
-        Task { @MainActor in
-            await ProviderInteractionContext.$current.withValue(.userInitiated) {
-                await self.store.refreshProvider(.opencode, allowDisabled: true)
-            }
-        }
-    }
-
-    func importOpenCodeCurrentLogin() async -> OpenCodeAccountSaveResult {
-        self.openCodeAccountsNotice = nil
-        do {
-            let session = try await self.openCodeWorkspaceFlow.importSession(
-                browserDetection: self.store.browserDetection)
-            let discovered = try await self.openCodeWorkspaceFlow.discoverWorkspaces(
-                cookieHeader: session.cookieHeader)
-            guard !discovered.isEmpty else {
-                return self.finishOpenCodeAccountAction(.failure(
-                    "No OpenCode workspaces were discovered for this login."))
-            }
-            guard let tokenAccount = self.settings.saveOrReuseOpenCodeCredential(
-                label: "OpenCode (\(session.sourceLabel))",
-                token: session.cookieHeader)
-            else {
-                return self.finishOpenCodeAccountAction(.failure(
-                    "CodexBar could not save the imported OpenCode login."))
-            }
-            return await self.discoverAndSaveOpenCodeWorkspaces(
-                tokenAccount: tokenAccount,
-                successAction: "imported",
-                selectsImportedWorkspace: true,
-                discoveredWorkspaces: discovered)
-        } catch {
-            return self.finishOpenCodeAccountAction(.failure(error.localizedDescription))
-        }
-    }
-
-    func refreshOpenCodeWorkspaceAccounts() async -> OpenCodeAccountSaveResult {
-        self.openCodeAccountsNotice = nil
-        guard let tokenAccount = self.settings.reusableOpenCodeCredential() else {
-            return self.finishOpenCodeAccountAction(.failure("Import your current OpenCode login first."))
-        }
-        return await self.discoverAndSaveOpenCodeWorkspaces(tokenAccount: tokenAccount, successAction: "synced")
-    }
-
-    func saveOpenCodeAccount(_ draft: OpenCodeAccountDraft) async -> OpenCodeAccountSaveResult {
-        self.openCodeAccountsNotice = nil
-
-        guard let tokenAccount = self.settings.reusableOpenCodeCredential() else {
-            return self.finishOpenCodeAccountAction(.failure("Import your current OpenCode login first."))
-        }
-
-        let trimmedWorkspace = draft.workspaceID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedWorkspace.isEmpty else {
-            return self.finishOpenCodeAccountAction(.failure("Enter an OpenCode workspace ID or workspace URL."))
-        }
-        guard let workspaceID = OpenCodeWorkspaceDiscovery.normalizeWorkspaceID(trimmedWorkspace) else {
-            return self.finishOpenCodeAccountAction(.failure(
-                "Enter a valid OpenCode workspace ID or workspace URL."))
-        }
-
-        if let existing = self.settings.openCodeWorkspaceAccount(
-            tokenAccountID: tokenAccount.id,
-            workspaceID: workspaceID)
-        {
-            _ = self.settings.setActiveOpenCodeWorkspaceAccount(id: existing.id)
-            await self.refreshOpenCodeProvider()
-            return self.finishOpenCodeAccountAction(.noChange(
-                "\(existing.workspaceLabel) is already saved."))
-        }
-
-        let resolvedWorkspaceLabel = draft.workspaceLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let displayLabel = resolvedWorkspaceLabel.isEmpty ? workspaceID : resolvedWorkspaceLabel
-        guard let accountID = self.settings.saveOpenCodeWorkspaceAccount(
-            tokenAccountID: tokenAccount.id,
-            label: displayLabel,
-            workspaceID: workspaceID,
-            workspaceLabel: displayLabel,
-            discoveredOwnerLabel: nil)
-        else {
-            return self.finishOpenCodeAccountAction(.failure(
-                "CodexBar could not save the OpenCode workspace account."))
-        }
-
-        _ = self.settings.setActiveOpenCodeWorkspaceAccount(id: accountID)
-        await self.refreshOpenCodeProvider()
-        return self.finishOpenCodeAccountAction(.success("\(displayLabel) added."))
-    }
-
-    func requestOpenCodeWorkspaceAccountRemoval(_ account: OpenCodeWorkspaceAccount) {
-        self.activeConfirmation = ProviderSettingsConfirmationState(
-            title: "Remove OpenCode account?",
-            message: "Remove \(account.workspaceLabel) from CodexBar?",
-            confirmTitle: "Remove",
-            onConfirm: {
-                self.settings.removeOpenCodeWorkspaceAccount(id: account.id)
-                Task { @MainActor in
-                    await ProviderInteractionContext.$current.withValue(.userInitiated) {
-                        await self.store.refreshProvider(.opencode, allowDisabled: true)
-                    }
-                }
-            })
-    }
-
-    func finishOpenCodeAccountAction(_ result: OpenCodeAccountSaveResult) -> OpenCodeAccountSaveResult {
-        self.openCodeAccountsNotice = result.notice
-        return result
-    }
-
-    func refreshOpenCodeProvider() async {
-        await ProviderInteractionContext.$current.withValue(.userInitiated) {
-            await self.store.refreshProvider(.opencode, allowDisabled: true)
-        }
-    }
-
     func providerErrorDisplay(_ provider: UsageProvider) -> ProviderErrorDisplay? {
         guard let full = self.store.error(for: provider), !full.isEmpty else { return nil }
         let preview = self.store.userFacingError(for: provider) ?? full
@@ -511,15 +356,10 @@ struct ProvidersPane: View {
     func tokenAccountDescriptor(for provider: UsageProvider) -> ProviderSettingsTokenAccountsDescriptor? {
         guard let support = TokenAccountSupportCatalog.support(for: provider) else { return nil }
         let context = self.makeSettingsContext(provider: provider)
-        let subtitle: String = if provider == .codex, let codexSwitchError, !codexSwitchError.isEmpty {
-            "\(support.subtitle)\nAccount switch failed: \(codexSwitchError)"
-        } else {
-            support.subtitle
-        }
         return ProviderSettingsTokenAccountsDescriptor(
             id: "token-accounts-\(provider.rawValue)",
             title: support.title,
-            subtitle: subtitle,
+            subtitle: support.subtitle,
             placeholder: support.placeholder,
             provider: provider,
             isVisible: {
@@ -534,19 +374,7 @@ struct ProvidersPane: View {
                 return data?.clampedActiveIndex() ?? 0
             },
             setActiveIndex: { index in
-                if provider == .codex,
-                   case .codexOAuth = TokenAccountSupportCatalog.support(for: .codex)?.injection
-                {
-                    do {
-                        try CodexAccountSwitcher.switchToAccount(index: index, settings: self.settings)
-                        self.codexSwitchError = nil
-                    } catch {
-                        self.codexSwitchError = error.localizedDescription
-                        return
-                    }
-                } else {
-                    self.settings.setActiveTokenAccountIndex(index, for: provider)
-                }
+                self.settings.setActiveTokenAccountIndex(index, for: provider)
                 Task { @MainActor in
                     await ProviderInteractionContext.$current.withValue(.userInitiated) {
                         await self.store.refreshProvider(provider, allowDisabled: true)
@@ -569,6 +397,13 @@ struct ProvidersPane: View {
                     }
                 }
             },
+            primaryAddActionTitle: provider == .copilot ? "Add Account" : nil,
+            primaryAddAction: provider == .copilot ? {
+                await CopilotLoginFlow.run(settings: self.settings)
+                await ProviderInteractionContext.$current.withValue(.userInitiated) {
+                    await self.store.refreshProvider(provider, allowDisabled: true)
+                }
+            } : nil,
             openConfigFile: {
                 self.settings.openTokenAccountsFile()
             },
@@ -579,10 +414,7 @@ struct ProvidersPane: View {
                         await self.store.refreshProvider(provider, allowDisabled: true)
                     }
                 }
-            },
-            importCurrentToken: provider == .codex
-                ? { Result { try CodexCurrentLoginImporter.readDefault() } }
-                : nil)
+            })
     }
 
     private func makeSettingsContext(provider: UsageProvider) -> ProviderSettingsContext {
@@ -626,7 +458,6 @@ struct ProvidersPane: View {
     }
 
     func menuBarMetricPicker(for provider: UsageProvider) -> ProviderSettingsPickerDescriptor? {
-        if provider == .zai { return nil }
         let options: [ProviderSettingsPickerOption]
         if provider == .openrouter {
             options = [
@@ -635,11 +466,24 @@ struct ProvidersPane: View {
                     id: MenuBarMetricPreference.primary.rawValue,
                     title: "Primary (API key limit)"),
             ]
+        } else if provider == .deepseek {
+            options = [
+                ProviderSettingsPickerOption(id: MenuBarMetricPreference.automatic.rawValue, title: "Automatic"),
+            ]
+        } else if provider == .abacus {
+            let metadata = self.store.metadata(for: provider)
+            options = [
+                ProviderSettingsPickerOption(id: MenuBarMetricPreference.automatic.rawValue, title: "Automatic"),
+                ProviderSettingsPickerOption(
+                    id: MenuBarMetricPreference.primary.rawValue,
+                    title: "Primary (\(metadata.sessionLabel))"),
+            ]
         } else {
             let metadata = self.store.metadata(for: provider)
             let snapshot = self.store.snapshot(for: provider)
             let supportsAverage = self.settings.menuBarMetricSupportsAverage(for: provider)
             let supportsTertiary = self.settings.menuBarMetricSupportsTertiary(for: provider, snapshot: snapshot)
+            let supportsExtraUsage = self.settings.menuBarMetricSupportsExtraUsage(for: provider, snapshot: snapshot)
             var metricOptions: [ProviderSettingsPickerOption] = [
                 ProviderSettingsPickerOption(id: MenuBarMetricPreference.automatic.rawValue, title: "Automatic"),
                 ProviderSettingsPickerOption(
@@ -655,6 +499,11 @@ struct ProvidersPane: View {
                     id: MenuBarMetricPreference.tertiary.rawValue,
                     title: "Tertiary (\(tertiaryTitle))"))
             }
+            if supportsExtraUsage {
+                metricOptions.append(ProviderSettingsPickerOption(
+                    id: MenuBarMetricPreference.extraUsage.rawValue,
+                    title: MenuBarMetricPreference.extraUsage.label))
+            }
             if supportsAverage {
                 metricOptions.append(ProviderSettingsPickerOption(
                     id: MenuBarMetricPreference.average.rawValue,
@@ -665,7 +514,9 @@ struct ProvidersPane: View {
         return ProviderSettingsPickerDescriptor(
             id: "menuBarMetric",
             title: "Menu bar metric",
-            subtitle: "Choose which window drives the menu bar percent.",
+            subtitle: provider == .deepseek
+                ? "Shows the DeepSeek balance in the menu bar."
+                : "Choose which window drives the menu bar percent.",
             binding: Binding(
                 get: {
                     self.settings
@@ -718,12 +569,14 @@ struct ProvidersPane: View {
             tokenError = nil
         }
 
+        // Abacus uses primary for monthly credits (no secondary window)
+        let paceWindow = provider == .abacus ? snapshot?.primary : snapshot?.secondary
         let weeklyPace = if let codexProjection,
                             let weekly = codexProjection.rateWindow(for: .weekly)
         {
             self.store.weeklyPace(provider: provider, window: weekly, now: now)
         } else {
-            snapshot?.secondary.flatMap { window in
+            paceWindow.flatMap { window in
                 self.store.weeklyPace(provider: provider, window: window, now: now)
             }
         }
@@ -746,6 +599,7 @@ struct ProvidersPane: View {
             tokenCostUsageEnabled: self.settings.isCostUsageEffectivelyEnabled(for: provider),
             showOptionalCreditsAndExtraUsage: self.settings.showOptionalCreditsAndExtraUsage,
             hidePersonalInfo: self.settings.hidePersonalInfo,
+            claudePeakHoursEnabled: self.settings.claudePeakHoursEnabled,
             weeklyPace: weeklyPace,
             now: now)
         return UsageMenuCardView.Model.make(input)
@@ -778,6 +632,8 @@ struct ProvidersPane: View {
             case .missingEmail:
                 "Codex login completed, but no account email was available. Try again after confirming "
                     + "the account is fully signed in."
+            case .workspaceSelectionCancelled:
+                "CodexBar found multiple workspaces, but no workspace was selected."
             case let .unsafeManagedHome(path):
                 "CodexBar refused to modify an unexpected managed home path: \(path)"
             }

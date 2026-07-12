@@ -26,6 +26,7 @@ struct ClaudeProviderImplementation: ProviderImplementation {
         _ = settings.claudeOAuthKeychainPromptMode
         _ = settings.claudeOAuthKeychainReadStrategy
         _ = settings.claudeWebExtrasEnabled
+        _ = settings.claudePeakHoursEnabled
     }
 
     @MainActor
@@ -36,7 +37,9 @@ struct ClaudeProviderImplementation: ProviderImplementation {
     @MainActor
     func tokenAccountsVisibility(context: ProviderSettingsContext, support: TokenAccountSupport) -> Bool {
         guard support.requiresManualCookieSource else { return true }
-        if !context.settings.tokenAccounts(for: context.provider).isEmpty { return true }
+        if !context.settings.tokenAccounts(for: context.provider).isEmpty {
+            return true
+        }
         return context.settings.claudeCookieSource == .manual
     }
 
@@ -77,12 +80,27 @@ struct ClaudeProviderImplementation: ProviderImplementation {
                 context.settings.claudeOAuthPromptFreeCredentialsEnabled = enabled
             })
 
+        let peakHoursBinding = Binding(
+            get: { context.settings.claudePeakHoursEnabled },
+            set: { context.settings.claudePeakHoursEnabled = $0 })
+
         return [
             ProviderSettingsToggleDescriptor(
                 id: "claude-oauth-prompt-free-credentials",
-                title: "Avoid Keychain prompts (experimental)",
+                title: "Avoid Keychain prompts",
                 subtitle: subtitle,
                 binding: promptFreeBinding,
+                statusText: nil,
+                actions: [],
+                isVisible: nil,
+                onChange: nil,
+                onAppDidBecomeActive: nil,
+                onAppearWhenEnabled: nil),
+            ProviderSettingsToggleDescriptor(
+                id: "claude-peak-hours",
+                title: "Show peak hours indicator",
+                subtitle: "Show whether Claude is in peak usage hours.",
+                binding: peakHoursBinding,
                 statusText: nil,
                 actions: [],
                 isVisible: nil,
@@ -140,7 +158,7 @@ struct ClaudeProviderImplementation: ProviderImplementation {
             if context.settings.debugDisableKeychainAccess {
                 return "Global Keychain access is disabled in Advanced, so this setting is currently inactive."
             }
-            return "Controls Claude OAuth Keychain prompts when experimental reader mode is off. Choosing " +
+            return "Controls Claude OAuth Keychain prompts when the standard reader is active. Choosing " +
                 "\"Never prompt\" can make OAuth unavailable; use Web/CLI when needed."
         }
 
@@ -194,7 +212,6 @@ struct ClaudeProviderImplementation: ProviderImplementation {
     @MainActor
     func runLoginFlow(context: ProviderLoginContext) async -> Bool {
         await context.controller.runClaudeLoginFlow()
-        return true
     }
 
     @MainActor

@@ -36,47 +36,18 @@ extension SettingsStore {
             ])
     }
 
-    func replaceTokenAccountToken(
+    func addTokenAccount(
         provider: UsageProvider,
-        accountID: UUID,
-        token: String)
+        label: String,
+        token: String,
+        externalIdentifier: String? = nil)
     {
-        guard TokenAccountSupportCatalog.support(for: provider) != nil else { return }
-        guard let data = self.tokenAccountsData(for: provider), !data.accounts.isEmpty else { return }
-
-        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedToken.isEmpty else { return }
-        guard let index = data.accounts.firstIndex(where: { $0.id == accountID }) else { return }
-        guard data.accounts[index].token != trimmedToken else { return }
-
-        var updatedAccounts = data.accounts
-        let existing = updatedAccounts[index]
-        updatedAccounts[index] = ProviderTokenAccount(
-            id: existing.id,
-            label: existing.label,
-            token: trimmedToken,
-            addedAt: existing.addedAt,
-            lastUsed: existing.lastUsed)
-        let updated = ProviderTokenAccountData(
-            version: data.version,
-            accounts: updatedAccounts,
-            activeIndex: data.activeIndex)
-        self.updateProviderConfig(provider: provider) { entry in
-            entry.tokenAccounts = updated
-        }
-        CodexBarLog.logger(LogCategories.tokenAccounts).info(
-            "Token account token replaced",
-            metadata: [
-                "provider": provider.rawValue,
-                "accountID": accountID.uuidString,
-            ])
-    }
-
-    func addTokenAccount(provider: UsageProvider, label: String, token: String) {
         guard TokenAccountSupportCatalog.support(for: provider) != nil else { return }
         let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedToken.isEmpty else { return }
         let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedIdentifier = externalIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalisedIdentifier = (trimmedIdentifier?.isEmpty ?? true) ? nil : trimmedIdentifier
         let existing = self.tokenAccountsData(for: provider)
         let accounts = existing?.accounts ?? []
         let fallbackLabel = trimmedLabel.isEmpty ? "Account \(accounts.count + 1)" : trimmedLabel
@@ -85,13 +56,17 @@ extension SettingsStore {
             label: fallbackLabel,
             token: trimmedToken,
             addedAt: Date().timeIntervalSince1970,
-            lastUsed: nil)
+            lastUsed: nil,
+            externalIdentifier: normalisedIdentifier)
         let updated = ProviderTokenAccountData(
             version: existing?.version ?? 1,
             accounts: accounts + [account],
             activeIndex: accounts.count)
         self.updateProviderConfig(provider: provider) { entry in
             entry.tokenAccounts = updated
+            if provider == .copilot {
+                entry.apiKey = nil
+            }
         }
         self.applyTokenAccountCookieSourceIfNeeded(provider: provider)
         CodexBarLog.logger(LogCategories.tokenAccounts).info(
@@ -102,40 +77,86 @@ extension SettingsStore {
             ])
     }
 
-    @discardableResult
-    func saveOrReuseTokenAccount(
+    func updateTokenAccount(
         provider: UsageProvider,
-        label: String,
-        token: String) -> ProviderTokenAccount?
+        accountID: UUID,
+        label: String? = nil,
+        token: String? = nil,
+        externalIdentifier: String?? = nil)
     {
-        guard TokenAccountSupportCatalog.support(for: provider) != nil else { return nil }
-        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedToken.isEmpty else { return nil }
+        guard let data = self.tokenAccountsData(for: provider), !data.accounts.isEmpty else { return }
+        guard let index = data.accounts.firstIndex(where: { $0.id == accountID }) else { return }
 
-        if let data = self.tokenAccountsData(for: provider),
-           let existingIndex = data.accounts.firstIndex(where: { $0.token == trimmedToken })
-        {
-            self.setActiveTokenAccountIndex(existingIndex, for: provider)
-            return data.accounts[existingIndex]
+        let trimmedLabel = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedToken = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedToken, trimmedToken.isEmpty {
+            return
         }
 
-        self.addTokenAccount(provider: provider, label: label, token: trimmedToken)
-        return self.selectedTokenAccount(for: provider) ?? self.tokenAccounts(for: provider).last
+        let existing = data.accounts[index]
+        let resolvedIdentifier: String?
+        if let externalIdentifier {
+            let trimmed = externalIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+            resolvedIdentifier = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        } else {
+            resolvedIdentifier = existing.externalIdentifier
+        }
+        let updatedAccount = ProviderTokenAccount(
+            id: existing.id,
+            label: (trimmedLabel?.isEmpty == false) ? trimmedLabel! : existing.label,
+            token: trimmedToken ?? existing.token,
+            addedAt: existing.addedAt,
+            lastUsed: existing.lastUsed,
+            externalIdentifier: resolvedIdentifier)
+
+        var accounts = data.accounts
+        accounts[index] = updatedAccount
+        let updated = ProviderTokenAccountData(
+            version: data.version,
+            accounts: accounts,
+            activeIndex: data.clampedActiveIndex())
+        self.updateProviderConfig(provider: provider) { entry in
+            entry.tokenAccounts = updated
+            if provider == .copilot {
+                entry.apiKey = nil
+            }
+        }
+        self.applyTokenAccountCookieSourceIfNeeded(provider: provider)
+        CodexBarLog.logger(LogCategories.tokenAccounts).info(
+            "Token account updated",
+            metadata: [
+                "provider": provider.rawValue,
+                "count": "\(updated.accounts.count)",
+            ])
     }
 
     func removeTokenAccount(provider: UsageProvider, accountID: UUID) {
         guard let data = self.tokenAccountsData(for: provider), !data.accounts.isEmpty else { return }
+        let activeAccountID = data.accounts[data.clampedActiveIndex()].id
+        guard let removedIndex = data.accounts.firstIndex(where: { $0.id == accountID }) else { return }
         let filtered = data.accounts.filter { $0.id != accountID }
         self.updateProviderConfig(provider: provider) { entry in
             if filtered.isEmpty {
                 entry.tokenAccounts = nil
             } else {
-                let clamped = min(max(data.activeIndex, 0), filtered.count - 1)
+                let nextActiveIndex = if activeAccountID != accountID,
+                                         let preservedIndex = filtered.firstIndex(where: { $0.id == activeAccountID })
+                {
+                    preservedIndex
+                } else {
+                    min(removedIndex, filtered.count - 1)
+                }
                 entry.tokenAccounts = ProviderTokenAccountData(
                     version: data.version,
                     accounts: filtered,
-                    activeIndex: clamped)
+                    activeIndex: nextActiveIndex)
             }
+            if provider == .copilot {
+                entry.apiKey = nil
+            }
+        }
+        if provider == .opencode {
+            self.pruneOpenCodeWorkspaces()
         }
         CodexBarLog.logger(LogCategories.tokenAccounts).info(
             "Token account removed",
@@ -143,13 +164,12 @@ extension SettingsStore {
                 "provider": provider.rawValue,
                 "count": "\(filtered.count)",
             ])
-        if provider == .opencode {
-            self.pruneOpenCodeWorkspaceAccountsIfNeeded()
-        }
     }
 
     func ensureTokenAccountsLoaded() {
-        if self.tokenAccountsLoaded { return }
+        if self.tokenAccountsLoaded {
+            return
+        }
         self.tokenAccountsLoaded = true
     }
 

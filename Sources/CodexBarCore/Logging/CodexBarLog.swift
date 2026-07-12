@@ -83,13 +83,17 @@ public enum CodexBarLog {
         let baseFactory: @Sendable (String) -> any LogHandler = { label in
             switch config.destination {
             case .stderr:
-                if config.json { return JSONStderrLogHandler(label: label) }
+                if config.json {
+                    return JSONStderrLogHandler(label: label)
+                }
                 return StreamLogHandler.standardError(label: label)
             case let .oslog(subsystem):
                 #if canImport(os)
                 return OSLogLogHandler(label: label, subsystem: subsystem)
                 #else
-                if config.json { return JSONStderrLogHandler(label: label) }
+                if config.json {
+                    return JSONStderrLogHandler(label: label)
+                }
                 return StreamLogHandler.standardError(label: label)
                 #endif
             }

@@ -76,7 +76,9 @@ struct VertexAIOAuthFetchStrategy: ProviderFetchStrategy {
     }
 
     func shouldFallback(on error: Error, context _: ProviderFetchContext) -> Bool {
-        if error is VertexAIOAuthCredentialsError { return true }
+        if error is VertexAIOAuthCredentialsError {
+            return true
+        }
         if let fetchError = error as? VertexAIFetchError {
             switch fetchError {
             case .unauthorized, .forbidden:

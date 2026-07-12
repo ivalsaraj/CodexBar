@@ -35,7 +35,9 @@ final class InlineIconToggleButton: NSButton {
             self.paddingConstraints.first { $0.firstAttribute == .leading }?.constant = self.contentPadding.left
             self.paddingConstraints.first { $0.firstAttribute == .trailing }?.constant = -self.contentPadding.right
             self.paddingConstraints.first { $0.firstAttribute == .bottom }?.constant = -(self.contentPadding.bottom + 4)
-            if !self.isConfiguring { self.invalidateIntrinsicContentSize() }
+            if !self.isConfiguring {
+                self.invalidateIntrinsicContentSize()
+            }
         }
     }
 
@@ -47,7 +49,9 @@ final class InlineIconToggleButton: NSButton {
             super.attributedTitle = NSAttributedString(string: "")
             super.attributedAlternateTitle = NSAttributedString(string: "")
             self.titleField.stringValue = newValue
-            if !self.isConfiguring { self.invalidateIntrinsicContentSize() }
+            if !self.isConfiguring {
+                self.invalidateIntrinsicContentSize()
+            }
         }
     }
 
@@ -57,7 +61,9 @@ final class InlineIconToggleButton: NSButton {
             super.image = nil
             super.alternateImage = nil
             self.iconView.image = newValue
-            if !self.isConfiguring { self.invalidateIntrinsicContentSize() }
+            if !self.isConfiguring {
+                self.invalidateIntrinsicContentSize()
+            }
         }
     }
 
@@ -164,7 +170,9 @@ final class StackedToggleButton: NSButton {
             self.paddingConstraints.first { $0.firstAttribute == .leading }?.constant = self.contentPadding.left
             self.paddingConstraints.first { $0.firstAttribute == .trailing }?.constant = -self.contentPadding.right
             self.paddingConstraints.first { $0.firstAttribute == .bottom }?.constant = -self.contentPadding.bottom
-            if !self.isConfiguring { self.invalidateIntrinsicContentSize() }
+            if !self.isConfiguring {
+                self.invalidateIntrinsicContentSize()
+            }
         }
     }
 
@@ -176,7 +184,9 @@ final class StackedToggleButton: NSButton {
             super.attributedTitle = NSAttributedString(string: "")
             super.attributedAlternateTitle = NSAttributedString(string: "")
             self.titleField.stringValue = newValue
-            if !self.isConfiguring { self.invalidateIntrinsicContentSize() }
+            if !self.isConfiguring {
+                self.invalidateIntrinsicContentSize()
+            }
         }
     }
 
@@ -186,7 +196,9 @@ final class StackedToggleButton: NSButton {
             super.image = nil
             super.alternateImage = nil
             self.iconView.image = newValue
-            if !self.isConfiguring { self.invalidateIntrinsicContentSize() }
+            if !self.isConfiguring {
+                self.invalidateIntrinsicContentSize()
+            }
         }
     }
 

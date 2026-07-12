@@ -114,13 +114,13 @@ struct UsageStoreCodexAccountScopedRefresher: CodexAccountScopedRefreshing {
     }
 }
 
-struct CodexAccountPromotionResult: Sendable, Equatable {
-    enum Outcome: Sendable, Equatable {
+struct CodexAccountPromotionResult: Equatable {
+    enum Outcome: Equatable {
         case promoted
         case convergedNoOp
     }
 
-    enum DisplacedLiveDisposition: Sendable, Equatable {
+    enum DisplacedLiveDisposition: Equatable {
         case none
         case alreadyManaged(managedAccountID: UUID)
         case imported(managedAccountID: UUID)
@@ -133,7 +133,7 @@ struct CodexAccountPromotionResult: Sendable, Equatable {
     let resultingActiveSource: CodexActiveSource
 }
 
-enum CodexAccountPromotionError: Error, Sendable, Equatable {
+enum CodexAccountPromotionError: Error, Equatable {
     case targetManagedAccountNotFound
     case targetManagedAccountAuthMissing
     case targetManagedAccountAuthUnreadable
@@ -259,7 +259,12 @@ final class CodexAccountPromotionService {
     private func convergedActiveSource(for context: PreparedPromotionContext) -> CodexActiveSource? {
         if let liveAuthIdentity = context.live.authIdentity {
             let targetIdentity = context.target.authIdentity ?? context.target.persistedIdentity
-            guard CodexIdentityMatcher.matches(targetIdentity.identity, liveAuthIdentity.identity) else {
+            guard CodexIdentityMatcher.matches(
+                targetIdentity.identity,
+                lhsEmail: targetIdentity.email,
+                liveAuthIdentity.identity,
+                rhsEmail: liveAuthIdentity.email)
+            else {
                 return nil
             }
 
@@ -280,7 +285,9 @@ final class CodexAccountPromotionService {
 
         guard CodexIdentityMatcher.matches(
             context.snapshot.runtimeIdentity(for: context.target.persisted),
-            context.snapshot.runtimeIdentity(for: liveSystemAccount))
+            lhsEmail: context.snapshot.runtimeEmail(for: context.target.persisted),
+            context.snapshot.runtimeIdentity(for: liveSystemAccount),
+            rhsEmail: liveSystemAccount.email)
         else {
             return nil
         }

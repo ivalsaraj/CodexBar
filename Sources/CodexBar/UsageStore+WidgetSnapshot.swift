@@ -34,41 +34,40 @@ extension UsageStore {
     }
 
     private func makeWidgetEntries(for provider: UsageProvider) -> [WidgetSnapshot.ProviderEntry] {
-        if provider == .opencode {
-            let workspaceAccounts = self.settings.openCodeWorkspaceAccounts
-            guard !workspaceAccounts.isEmpty else {
-                guard let entry = self.makeWidgetEntry(for: provider, snapshot: self.snapshots[provider]) else {
-                    return []
-                }
-                return [entry]
-            }
-
-            let cachedSnapshots = self.tokenAccountSnapshotCache[provider] ?? [:]
-            return workspaceAccounts.compactMap { account in
-                let snapshot = if account.id == self.settings.selectedOpenCodeWorkspaceAccount?.id {
-                    self.snapshots[provider] ?? cachedSnapshots[account.id]
-                } else {
-                    cachedSnapshots[account.id]
-                }
-                return self.makeWidgetEntry(
-                    for: provider,
-                    snapshot: snapshot,
-                    accountID: account.id,
-                    accountLabel: account.workspaceLabel)
-            }
+        guard provider == .opencode else {
+            return self.makeWidgetEntry(for: provider).map { [$0] } ?? []
         }
-
-        guard let entry = self.makeWidgetEntry(for: provider, snapshot: self.snapshots[provider]) else { return [] }
-        return [entry]
+        let accounts = self.settings.opencodeWorkspaceAccounts.accounts
+        guard !accounts.isEmpty else {
+            return self.makeWidgetEntry(for: provider).map { [$0] } ?? []
+        }
+        let activeID = self.settings.activeOpenCodeWorkspaceAccount?.id
+        let orderedAccounts = accounts.sorted { first, second in
+            let firstIsActive = first.id == activeID
+            let secondIsActive = second.id == activeID
+            if firstIsActive != secondIsActive {
+                return firstIsActive
+            }
+            return first.id < second.id
+        }
+        return orderedAccounts.compactMap { account in
+            let snapshot = self.openCodeWorkspaceSnapshots[account.id]
+                ?? UsageSnapshot(primary: nil, secondary: nil, updatedAt: Date())
+            return self.makeWidgetEntry(
+                for: provider,
+                snapshot: snapshot,
+                accountID: account.id,
+                accountLabel: account.ownerLabel.map { "\(account.label) · \($0)" } ?? account.label)
+        }
     }
 
     private func makeWidgetEntry(
         for provider: UsageProvider,
-        snapshot: UsageSnapshot?,
-        accountID: UUID? = nil,
+        snapshot overrideSnapshot: UsageSnapshot? = nil,
+        accountID: String? = nil,
         accountLabel: String? = nil) -> WidgetSnapshot.ProviderEntry?
     {
-        guard let snapshot else { return nil }
+        guard let snapshot = overrideSnapshot ?? self.snapshots[provider] else { return nil }
 
         let tokenSnapshot = self.tokenSnapshots[provider]
         let dailyUsage = tokenSnapshot?.daily.map { entry in
@@ -78,10 +77,37 @@ extension UsageStore {
                 costUSD: entry.costUSD)
         } ?? []
 
-        let tokenUsage = Self.widgetTokenUsageSummary(
-            provider: provider,
-            usageSnapshot: snapshot,
-            tokenSnapshot: tokenSnapshot)
+        let selectedCursorRange = provider == .cursor ? self.settings.cursorUsageRangeKind : nil
+        let cursorSummary = selectedCursorRange.flatMap { range in
+            let summaries = snapshot.cursorRangeSummaries ?? []
+            if let selected = summaries.first(where: { $0.rangeKind == range }) {
+                return selected
+            }
+            guard summaries.count == 1 else { return nil }
+            return summaries.first
+        }
+        let tokenUsage = cursorSummary.map(Self.widgetCursorTokenUsageSummary(from:))
+            ?? Self.widgetTokenUsageSummary(from: tokenSnapshot)
+        let cursorRequestRange = cursorSummary.map {
+            WidgetSnapshot.CursorRequestRange(start: $0.range.start, end: $0.range.end, label: $0.rangeKind.label)
+        }
+        let cursorRequestDetails = cursorSummary.map { summary in
+            summary.recentRequests
+                .sorted { $0.timestamp > $1.timestamp }
+                .prefix(30)
+                .map { request in
+                    let normalized = CursorModelNormalizer.normalize(request.model)
+                    return WidgetSnapshot.CursorRequestDetail(
+                        timestamp: request.timestamp,
+                        model: request.model,
+                        tokens: request.tokens,
+                        requests: request.requests,
+                        requestCost: request.requestCost,
+                        compactModel: UsageFormatter.cursorCompactModelLabel(normalized),
+                        estimateText: UsageFormatter
+                            .cursorEstimateText(CursorRequestCostEstimator.estimate(for: request)))
+                }
+        }
         let usageRows = self.widgetUsageRows(provider: provider, snapshot: snapshot)
 
         let creditsRemaining: Double?
@@ -99,111 +125,27 @@ extension UsageStore {
             codeReviewRemaining = nil
         }
 
-        let cursorRequestDetails = Self.widgetCursorRequestDetails(provider: provider, snapshot: snapshot)
-        let cursorRequestRange = Self.widgetCursorRequestRange(provider: provider, snapshot: snapshot)
-
         return WidgetSnapshot.ProviderEntry(
             provider: provider,
-            accountID: accountID,
-            accountLabel: accountLabel,
             updatedAt: snapshot.updatedAt,
             primary: snapshot.primary,
             secondary: snapshot.secondary,
             tertiary: snapshot.tertiary,
+            accountID: accountID,
+            accountLabel: accountLabel,
             usageRows: usageRows,
             creditsRemaining: creditsRemaining,
             codeReviewRemainingPercent: codeReviewRemaining,
-            providerCost: Self.widgetProviderCostSummary(from: snapshot.providerCost),
             tokenUsage: tokenUsage,
             cursorRequestRange: cursorRequestRange,
             cursorRequestDetails: cursorRequestDetails,
             dailyUsage: dailyUsage)
     }
 
-    private nonisolated static func widgetCursorRequestRange(
-        provider: UsageProvider,
-        snapshot: UsageSnapshot) -> WidgetSnapshot.CursorRequestRange?
-    {
-        guard provider == .cursor,
-              let range = snapshot.cursorRecentRequestRange
-        else {
-            return nil
-        }
-        return WidgetSnapshot.CursorRequestRange(start: range.start, end: range.end)
-    }
-
-    private nonisolated static func widgetCursorRequestDetails(
-        provider: UsageProvider,
-        snapshot: UsageSnapshot) -> [WidgetSnapshot.CursorRequestDetail]?
-    {
-        guard provider == .cursor,
-              let recent = snapshot.cursorRecentRequests,
-              !recent.isEmpty
-        else {
-            return nil
-        }
-
-        return recent
-            .filter { row in
-                let model = row.model.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !model.isEmpty else { return false }
-                // Legacy request-plan rows must survive even with zero tokens, as long as they
-                // represent at least one request. Only drop rows that carry neither tokens nor requests.
-                return row.tokens > 0 || row.requests > 0
-            }
-            .sorted { $0.timestamp > $1.timestamp }
-            .prefix(30)
-            .map { row in
-                let normalized = CursorModelNormalizer.normalize(row.model)
-                let estimate = CursorRequestCostEstimator.estimate(for: row)
-                return WidgetSnapshot.CursorRequestDetail(
-                    timestamp: row.timestamp,
-                    model: row.model,
-                    tokens: row.tokens,
-                    requests: row.requests,
-                    compactModel: UsageFormatter.cursorCompactModelLabel(normalized),
-                    estimateText: UsageFormatter.cursorEstimateText(estimate))
-            }
-    }
-
-    private nonisolated static func widgetProviderCostSummary(
-        from cost: ProviderCostSnapshot?) -> WidgetSnapshot.ProviderCostSummary?
-    {
-        guard let cost, cost.limit > 0 else { return nil }
-        return WidgetSnapshot.ProviderCostSummary(
-            used: cost.used,
-            limit: cost.limit,
-            currencyCode: cost.currencyCode,
-            period: cost.period,
-            resetsAt: cost.resetsAt)
-    }
-
     private nonisolated static func widgetTokenUsageSummary(
-        provider: UsageProvider,
-        usageSnapshot: UsageSnapshot,
-        tokenSnapshot: CostUsageTokenSnapshot?) -> WidgetSnapshot.TokenUsageSummary?
+        from snapshot: CostUsageTokenSnapshot?) -> WidgetSnapshot.TokenUsageSummary?
     {
-        if provider == .cursor,
-           let cursorTokenUsage = usageSnapshot.cursorTokenUsage
-        {
-            let costSummary = usageSnapshot.cursorRecentRequests
-                .flatMap(CursorRequestCostEstimator.summarizedEstimate(for:))
-            let estimatedCycleCost = costSummary?.exactUSD
-                .map { NSDecimalNumber(decimal: $0).doubleValue }
-            let sessionCostText = costSummary?.containsApproximation == true
-                ? UsageFormatter.cursorEstimatedTotalText(costSummary)
-                : nil
-            return WidgetSnapshot.TokenUsageSummary(
-                sessionCostUSD: estimatedCycleCost,
-                sessionCostText: sessionCostText,
-                sessionTokens: cursorTokenUsage.billingCycleTokensUsed,
-                last30DaysCostUSD: nil,
-                last30DaysTokens: nil,
-                sessionLabel: "Cycle",
-                last30DaysLabel: nil)
-        }
-
-        guard let snapshot = tokenSnapshot else { return nil }
+        guard let snapshot else { return nil }
         let fallbackTokens = snapshot.daily.compactMap(\.totalTokens).reduce(0, +)
         let monthTokensValue = snapshot.last30DaysTokens ?? (fallbackTokens > 0 ? fallbackTokens : nil)
         return WidgetSnapshot.TokenUsageSummary(
@@ -211,6 +153,18 @@ extension UsageStore {
             sessionTokens: snapshot.sessionTokens,
             last30DaysCostUSD: snapshot.last30DaysCostUSD,
             last30DaysTokens: monthTokensValue)
+    }
+
+    private nonisolated static func widgetCursorTokenUsageSummary(
+        from summary: CursorRangeUsageSummary) -> WidgetSnapshot.TokenUsageSummary
+    {
+        let exactCost = summary.requestCostSummary?.exactUSD.map { NSDecimalNumber(decimal: $0).doubleValue }
+        return WidgetSnapshot.TokenUsageSummary(
+            sessionCostUSD: exactCost,
+            sessionTokens: summary.tokens,
+            last30DaysCostUSD: exactCost,
+            last30DaysTokens: summary.tokens,
+            sessionCostText: UsageFormatter.cursorEstimatedTotalText(summary.requestCostSummary))
     }
 
     private func widgetUsageRows(
@@ -234,49 +188,20 @@ extension UsageStore {
                 return WidgetSnapshot.WidgetUsageRowSnapshot(
                     id: lane.rawValue,
                     title: title,
-                    percentLeft: window.remainingPercent,
-                    detailText: Self.widgetUsageRowDetail(window: window))
+                    percentLeft: window.remainingPercent)
             }
-        }
-
-        if provider == .zai {
-            let rows: [WidgetSnapshot.WidgetUsageRowSnapshot] = [
-                WidgetSnapshot.WidgetUsageRowSnapshot(
-                    id: "primary",
-                    title: metadata?.sessionLabel ?? "Session",
-                    percentLeft: snapshot.primary?.remainingPercent,
-                    detailText: snapshot.primary.flatMap(Self.widgetUsageRowDetail)),
-                WidgetSnapshot.WidgetUsageRowSnapshot(
-                    id: "secondary",
-                    title: metadata?.weeklyLabel ?? "Weekly",
-                    percentLeft: snapshot.secondary?.remainingPercent,
-                    detailText: snapshot.secondary.flatMap(Self.widgetUsageRowDetail)),
-                WidgetSnapshot.WidgetUsageRowSnapshot(
-                    id: "tertiary",
-                    title: metadata?.opusLabel ?? "MCP",
-                    percentLeft: snapshot.tertiary?.remainingPercent,
-                    detailText: snapshot.tertiary.flatMap(Self.widgetUsageRowDetail)),
-            ]
-            return rows.filter { $0.percentLeft != nil }
         }
 
         let rows: [WidgetSnapshot.WidgetUsageRowSnapshot] = [
             WidgetSnapshot.WidgetUsageRowSnapshot(
                 id: "primary",
                 title: metadata?.sessionLabel ?? "Session",
-                percentLeft: snapshot.primary?.remainingPercent,
-                detailText: snapshot.primary.flatMap(Self.widgetUsageRowDetail)),
+                percentLeft: snapshot.primary?.remainingPercent),
             WidgetSnapshot.WidgetUsageRowSnapshot(
                 id: "secondary",
                 title: metadata?.weeklyLabel ?? "Weekly",
-                percentLeft: snapshot.secondary?.remainingPercent,
-                detailText: snapshot.secondary.flatMap(Self.widgetUsageRowDetail)),
+                percentLeft: snapshot.secondary?.remainingPercent),
         ]
         return rows.filter { $0.percentLeft != nil }
-    }
-
-    private nonisolated static func widgetUsageRowDetail(window: RateWindow) -> String? {
-        let detail = window.resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return detail?.isEmpty == false ? detail : nil
     }
 }

@@ -281,8 +281,12 @@ public enum VertexAIUsageFetcher {
     }
 
     private static func pointValue(from point: MonitoringPoint) -> Double? {
-        if let doubleValue = point.value.doubleValue { return doubleValue }
-        if let int64Value = point.value.int64Value { return Double(int64Value) }
+        if let doubleValue = point.value.doubleValue {
+            return doubleValue
+        }
+        if let int64Value = point.value.int64Value {
+            return Double(int64Value)
+        }
         return nil
     }
 

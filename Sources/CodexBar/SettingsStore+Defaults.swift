@@ -160,6 +160,16 @@ extension SettingsStore {
         }
     }
 
+    var cursorUsageRangeKind: CursorUsageRangeKind {
+        get {
+            CursorUsageRangeKind(rawValue: self.defaultsState.cursorUsageRangeKindRaw ?? "") ?? .billingCycle
+        }
+        set {
+            self.defaultsState.cursorUsageRangeKindRaw = newValue.rawValue
+            self.userDefaults.set(newValue.rawValue, forKey: "cursorUsageRangeKind")
+        }
+    }
+
     var menuBarMetricPreferencesRaw: [String: String] {
         get { self.defaultsState.menuBarMetricPreferencesRaw }
         set {
@@ -192,6 +202,14 @@ extension SettingsStore {
         }
     }
 
+    var confettiOnWeeklyLimitResetsEnabled: Bool {
+        get { self.defaultsState.confettiOnWeeklyLimitResetsEnabled }
+        set {
+            self.defaultsState.confettiOnWeeklyLimitResetsEnabled = newValue
+            self.userDefaults.set(newValue, forKey: "confettiOnWeeklyLimitResetsEnabled")
+        }
+    }
+
     var menuBarShowsHighestUsage: Bool {
         get { self.defaultsState.menuBarShowsHighestUsage }
         set {
@@ -213,8 +231,10 @@ extension SettingsStore {
 
     var claudeOAuthKeychainReadStrategy: ClaudeOAuthKeychainReadStrategy {
         get {
-            let raw = self.defaultsState.claudeOAuthKeychainReadStrategyRaw
-            return ClaudeOAuthKeychainReadStrategy(rawValue: raw ?? "") ?? .securityFramework
+            guard let raw = self.defaultsState.claudeOAuthKeychainReadStrategyRaw else {
+                return .securityCLIExperimental
+            }
+            return ClaudeOAuthKeychainReadStrategy(rawValue: raw) ?? .securityFramework
         }
         set {
             self.defaultsState.claudeOAuthKeychainReadStrategyRaw = newValue.rawValue
@@ -247,6 +267,14 @@ extension SettingsStore {
         }
     }
 
+    var claudePeakHoursEnabled: Bool {
+        get { self.defaultsState.claudePeakHoursEnabled }
+        set {
+            self.defaultsState.claudePeakHoursEnabled = newValue
+            self.userDefaults.set(newValue, forKey: "claudePeakHoursEnabled")
+        }
+    }
+
     var showOptionalCreditsAndExtraUsage: Bool {
         get { self.defaultsState.showOptionalCreditsAndExtraUsage }
         set {
@@ -262,6 +290,28 @@ extension SettingsStore {
             self.userDefaults.set(newValue, forKey: "openAIWebAccessEnabled")
             CodexBarLog.logger(LogCategories.settings).info(
                 "OpenAI web access updated",
+                metadata: ["enabled": newValue ? "1" : "0"])
+        }
+    }
+
+    var openAIWebBatterySaverEnabled: Bool {
+        get { self.defaultsState.openAIWebBatterySaverEnabled }
+        set {
+            self.defaultsState.openAIWebBatterySaverEnabled = newValue
+            self.userDefaults.set(newValue, forKey: "openAIWebBatterySaverEnabled")
+            CodexBarLog.logger(LogCategories.settings).info(
+                "OpenAI web battery saver updated",
+                metadata: ["enabled": newValue ? "1" : "0"])
+        }
+    }
+
+    var providerStorageFootprintsEnabled: Bool {
+        get { self.defaultsState.providerStorageFootprintsEnabled }
+        set {
+            self.defaultsState.providerStorageFootprintsEnabled = newValue
+            self.userDefaults.set(newValue, forKey: "providerStorageFootprintsEnabled")
+            CodexBarLog.logger(LogCategories.settings).info(
+                "Provider storage footprints updated",
                 metadata: ["enabled": newValue ? "1" : "0"])
         }
     }
@@ -489,7 +539,9 @@ extension SettingsStore {
         for provider in providers where !seen.contains(provider) {
             seen.insert(provider)
             normalized.append(provider)
-            if let maxCount, normalized.count >= maxCount { break }
+            if let maxCount, normalized.count >= maxCount {
+                break
+            }
         }
         return normalized
     }

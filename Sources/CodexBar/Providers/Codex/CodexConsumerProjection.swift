@@ -24,6 +24,15 @@ struct CodexUIErrorMapper {
             return "OpenAI web refresh was interrupted. Refresh OpenAI cookies and try again."
         }
 
+        if self.looksOpenAIWebTimeout(lower: lower) {
+            return "OpenAI web refresh timed out. Refresh OpenAI cookies and try again."
+        }
+
+        if self.looksOpenAIWebNetworkError(lower: lower) {
+            return "OpenAI web refresh hit a network error. "
+                + "Check your connection, then refresh OpenAI cookies and try again."
+        }
+
         if self.looksInternalTransport(lower: lower) {
             return "Codex usage is temporarily unavailable. Try refreshing."
         }
@@ -60,6 +69,10 @@ struct CodexUIErrorMapper {
             || lower.contains("codex credits are still loading")
             || lower.contains("codex account changed; importing browser cookies")
             || lower.contains("codex session expired. sign in again.")
+            || lower.contains("openai web refresh timed out. refresh openai cookies and try again.")
+            || lower.contains(
+                "openai web refresh hit a network error. "
+                    + "check your connection, then refresh openai cookies and try again.")
             || lower.contains("codex usage is temporarily unavailable. try refreshing.")
     }
 
@@ -84,38 +97,46 @@ struct CodexUIErrorMapper {
             || lower.contains("get http://")
             || lower.contains("returned invalid data")
     }
+
+    private static func looksOpenAIWebTimeout(lower: String) -> Bool {
+        lower.contains("nsurlerrordomain")
+            && (lower.contains("timed out") || lower.contains("error -1001"))
+    }
+
+    private static func looksOpenAIWebNetworkError(lower: String) -> Bool {
+        lower.contains("nsurlerrordomain")
+    }
 }
 
 struct CodexConsumerProjection {
-    enum Surface: Sendable {
+    enum Surface {
         case liveCard
         case overrideCard
         case widget
         case menuBar
     }
 
-    enum RateLane: String, Sendable {
+    enum RateLane: String {
         case session
         case weekly
     }
 
-    enum SupplementalMetric: String, Sendable {
+    enum SupplementalMetric: String {
         case codeReview
-        case spark
     }
 
-    struct PlanUtilizationLane: Sendable {
+    struct PlanUtilizationLane {
         let role: PlanUtilizationSeriesName
         let window: RateWindow
     }
 
-    enum DashboardVisibility: Sendable {
+    enum DashboardVisibility {
         case hidden
         case displayOnly
         case attached
     }
 
-    struct CreditsProjection: Sendable {
+    struct CreditsProjection {
         let snapshot: CreditsSnapshot?
         let userFacingError: String?
 
@@ -124,7 +145,7 @@ struct CodexConsumerProjection {
         }
     }
 
-    struct UserFacingErrors: Sendable {
+    struct UserFacingErrors {
         let usage: String?
         let credits: String?
         let dashboard: String?
@@ -142,7 +163,7 @@ struct CodexConsumerProjection {
         let now: Date
     }
 
-    enum MenuBarFallback: Sendable {
+    enum MenuBarFallback {
         case none
         case creditsBalance
     }
@@ -161,8 +182,6 @@ struct CodexConsumerProjection {
     private let rateWindowsByLane: [RateLane: RateWindow]
     private let codeReviewRemainingPercent: Double?
     private let codeReviewLimit: RateWindow?
-    private let sparkRemainingPercent: Double?
-    private let sparkLimit: RateWindow?
 
     static func make(surface: Surface, context: Context) -> CodexConsumerProjection {
         let allowsLiveAdjuncts = surface != .overrideCard
@@ -188,21 +207,21 @@ struct CodexConsumerProjection {
             credits: allowsLiveAdjuncts ? CodexUIErrorMapper.userFacingMessage(context.rawCreditsError) : nil,
             dashboard: allowsLiveAdjuncts ? CodexUIErrorMapper.userFacingMessage(context.rawDashboardError) : nil)
 
-        var supplementalMetrics: [SupplementalMetric] = []
-        if surface == .liveCard,
-           dashboardVisibility == .attached,
-           dashboard?.codeReviewRemainingPercent != nil
+        let supplementalMetrics: [SupplementalMetric] = if surface == .liveCard,
+                                                           dashboardVisibility == .attached,
+                                                           dashboard?.codeReviewRemainingPercent != nil
         {
-            supplementalMetrics.append(.codeReview)
-        }
-        if surface == .liveCard, context.snapshot?.codexUsage?.sparkLimit != nil {
-            supplementalMetrics.append(.spark)
+            [.codeReview]
+        } else {
+            []
         }
 
+        let displayableUsageBreakdown = OpenAIDashboardDailyBreakdown.removingSkillUsageServices(
+            from: dashboard?.usageBreakdown ?? [])
         let canShowBuyCredits = surface == .liveCard
         let hasUsageBreakdown = surface == .liveCard
             && dashboardVisibility == .attached
-            && !(dashboard?.usageBreakdown ?? []).isEmpty
+            && !displayableUsageBreakdown.isEmpty
         let hasCreditsHistory = surface == .liveCard
             && dashboardVisibility == .attached
             && !(dashboard?.dailyBreakdown ?? []).isEmpty
@@ -222,9 +241,7 @@ struct CodexConsumerProjection {
             hasCreditsHistory: hasCreditsHistory,
             rateWindowsByLane: rateWindowsByLane,
             codeReviewRemainingPercent: dashboardVisibility == .attached ? dashboard?.codeReviewRemainingPercent : nil,
-            codeReviewLimit: dashboardVisibility == .attached ? dashboard?.codeReviewLimit : nil,
-            sparkRemainingPercent: context.snapshot?.codexUsage?.sparkLimit?.remainingPercent,
-            sparkLimit: context.snapshot?.codexUsage?.sparkLimit)
+            codeReviewLimit: dashboardVisibility == .attached ? dashboard?.codeReviewLimit : nil)
     }
 
     func rateWindow(for lane: RateLane) -> RateWindow? {
@@ -235,8 +252,6 @@ struct CodexConsumerProjection {
         switch metric {
         case .codeReview:
             self.codeReviewRemainingPercent
-        case .spark:
-            self.sparkRemainingPercent
         }
     }
 
@@ -244,8 +259,6 @@ struct CodexConsumerProjection {
         switch metric {
         case .codeReview:
             self.codeReviewLimit
-        case .spark:
-            self.sparkLimit
         }
     }
 

@@ -14,6 +14,7 @@ extension UsageStore {
         _ = self.lastSourceLabels
         _ = self.lastFetchAttempts
         _ = self.accountSnapshots
+        _ = self.openCodeWorkspaceSnapshots
         _ = self.tokenSnapshots
         _ = self.tokenErrors
         _ = self.tokenRefreshInFlight
@@ -22,14 +23,28 @@ extension UsageStore {
         _ = self.openAIDashboard
         _ = self.lastOpenAIDashboardError
         _ = self.openAIDashboardRequiresLogin
-        _ = self.openAIDashboardCookieImportStatus
-        _ = self.openAIDashboardCookieImportDebugLog
         _ = self.versions
         _ = self.isRefreshing
         _ = self.refreshingProviders
         _ = self.pathDebugInfo
         _ = self.statuses
         _ = self.probeLogs
+        _ = self.historicalPaceRevision
+        _ = self.providerStorageFootprints
+        return 0
+    }
+
+    var iconObservationToken: Int {
+        _ = self.snapshots
+        _ = self.errors
+        _ = self.credits
+        _ = self.lastCreditsError
+        _ = self.openAIDashboard
+        _ = self.lastOpenAIDashboardError
+        _ = self.openAIDashboardRequiresLogin
+        _ = self.isRefreshing
+        _ = self.refreshingProviders
+        _ = self.statuses
         _ = self.historicalPaceRevision
         return 0
     }
@@ -53,6 +68,7 @@ extension UsageStore {
             _ = self.settings.debugLoadingPattern
             _ = self.settings.debugKeepCLISessionsAlive
             _ = self.settings.historicalTrackingEnabled
+            _ = self.settings.providerStorageFootprintsEnabled
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -76,7 +92,7 @@ extension UsageStore {
 @MainActor
 @Observable
 final class UsageStore {
-    enum CodexCreditsSource: Sendable {
+    enum CodexCreditsSource {
         case none
         case api
         case dashboardWeb
@@ -111,7 +127,7 @@ final class UsageStore {
     var lastSourceLabels: [UsageProvider: String] = [:]
     var lastFetchAttempts: [UsageProvider: [ProviderFetchAttempt]] = [:]
     var accountSnapshots: [UsageProvider: [TokenAccountUsageSnapshot]] = [:]
-    var tokenAccountSnapshotCache: [UsageProvider: [UUID: UsageSnapshot]] = [:]
+    var openCodeWorkspaceSnapshots: [String: UsageSnapshot] = [:]
     var tokenSnapshots: [UsageProvider: CostUsageTokenSnapshot] = [:]
     var tokenErrors: [UsageProvider: String] = [:]
     var tokenRefreshInFlight: Set<UsageProvider> = []
@@ -130,6 +146,7 @@ final class UsageStore {
     var statuses: [UsageProvider: ProviderStatus] = [:]
     var probeLogs: [UsageProvider: String] = [:]
     var historicalPaceRevision: Int = 0
+    var providerStorageFootprints: [UsageProvider: ProviderStorageFootprint] = [:]
     @ObservationIgnored var lastCreditsSnapshot: CreditsSnapshot?
     @ObservationIgnored var lastCreditsSnapshotAccountKey: String?
     @ObservationIgnored var lastCreditsSource: CodexCreditsSource = .none
@@ -138,6 +155,7 @@ final class UsageStore {
     @ObservationIgnored var lastOpenAIDashboardSnapshot: OpenAIDashboardSnapshot?
     @ObservationIgnored var lastOpenAIDashboardAttachmentAuthorized: Bool = false
     @ObservationIgnored var lastOpenAIDashboardTargetEmail: String?
+    @ObservationIgnored var lastOpenAIDashboardAttemptAt: Date?
     @ObservationIgnored var lastOpenAIDashboardCookieImportAttemptAt: Date?
     @ObservationIgnored var lastOpenAIDashboardCookieImportEmail: String?
     @ObservationIgnored var lastCodexAccountScopedRefreshGuard: CodexAccountScopedRefreshGuard?
@@ -163,10 +181,10 @@ final class UsageStore {
     @ObservationIgnored let codexFetcher: UsageFetcher
     @ObservationIgnored let claudeFetcher: any ClaudeUsageFetching
     @ObservationIgnored private let costUsageFetcher: CostUsageFetcher
-    @ObservationIgnored let utilizationHistoryStore: ProviderUtilizationHistoryStore
     @ObservationIgnored let browserDetection: BrowserDetection
     @ObservationIgnored private let registry: ProviderRegistry
     @ObservationIgnored let settings: SettingsStore
+    @ObservationIgnored let environmentBase: [String: String]
     @ObservationIgnored private let sessionQuotaNotifier: any SessionQuotaNotifying
     @ObservationIgnored private let sessionQuotaLogger = CodexBarLog.logger(LogCategories.sessionQuota)
     @ObservationIgnored let openAIWebLogger = CodexBarLog.logger(LogCategories.openAIWeb)
@@ -177,22 +195,29 @@ final class UsageStore {
     @ObservationIgnored var failureGates: [UsageProvider: ConsecutiveFailureGate] = [:]
     @ObservationIgnored var tokenFailureGates: [UsageProvider: ConsecutiveFailureGate] = [:]
     @ObservationIgnored var providerSpecs: [UsageProvider: ProviderSpec] = [:]
-    @ObservationIgnored var providerRefreshGenerations: [UsageProvider: Int] = [:]
     @ObservationIgnored let providerMetadata: [UsageProvider: ProviderMetadata]
     @ObservationIgnored var providerRuntimes: [UsageProvider: any ProviderRuntime] = [:]
     @ObservationIgnored private var timerTask: Task<Void, Never>?
     @ObservationIgnored private var tokenTimerTask: Task<Void, Never>?
     @ObservationIgnored private var tokenRefreshSequenceTask: Task<Void, Never>?
+    @ObservationIgnored var storageRefreshTask: Task<Void, Never>?
+    @ObservationIgnored var storageRefreshGeneration: UInt64 = 0
+    @ObservationIgnored var storageRefreshInFlightSignature: String?
+    @ObservationIgnored var lastStorageRefreshSignature: String?
+    @ObservationIgnored var lastStorageRefreshAt: Date?
+    @ObservationIgnored var managedCodexAccountsForStorageOverride: [ManagedCodexAccount]?
     @ObservationIgnored private var pathDebugRefreshTask: Task<Void, Never>?
     @ObservationIgnored var codexPlanHistoryBackfillTask: Task<Void, Never>?
     @ObservationIgnored let historicalUsageHistoryStore: HistoricalUsageHistoryStore
     @ObservationIgnored let planUtilizationHistoryStore: PlanUtilizationHistoryStore
     @ObservationIgnored var codexHistoricalDataset: CodexHistoricalDataset?
     @ObservationIgnored var codexHistoricalDatasetAccountKey: String?
+    @ObservationIgnored var lastKnownResetSnapshots: [UsageProvider: UsageSnapshot] = [:]
     @ObservationIgnored var lastKnownSessionRemaining: [UsageProvider: Double] = [:]
     @ObservationIgnored var lastKnownSessionWindowSource: [UsageProvider: SessionQuotaWindowSource] = [:]
     @ObservationIgnored var lastTokenFetchAt: [UsageProvider: Date] = [:]
     @ObservationIgnored var planUtilizationHistory: [UsageProvider: PlanUtilizationHistoryBuckets] = [:]
+    @ObservationIgnored var weeklyLimitResetDetectorStates: [String: WeeklyLimitResetDetectorState] = [:]
     @ObservationIgnored private var hasCompletedInitialRefresh: Bool = false
     @ObservationIgnored private let tokenFetchTTL: TimeInterval = 60 * 60
     @ObservationIgnored private let tokenFetchTimeout: TimeInterval = 10 * 60
@@ -204,21 +229,21 @@ final class UsageStore {
         browserDetection: BrowserDetection,
         claudeFetcher: (any ClaudeUsageFetching)? = nil,
         costUsageFetcher: CostUsageFetcher = CostUsageFetcher(),
-        utilizationHistoryStore: ProviderUtilizationHistoryStore = ProviderUtilizationHistoryStore(),
         settings: SettingsStore,
         registry: ProviderRegistry = .shared,
         historicalUsageHistoryStore: HistoricalUsageHistoryStore = HistoricalUsageHistoryStore(),
         planUtilizationHistoryStore: PlanUtilizationHistoryStore = .defaultAppSupport(),
         sessionQuotaNotifier: any SessionQuotaNotifying = SessionQuotaNotifier(),
-        startupBehavior: StartupBehavior = .automatic)
+        startupBehavior: StartupBehavior = .automatic,
+        environmentBase: [String: String] = ProcessInfo.processInfo.environment)
     {
         self.codexFetcher = fetcher
         self.browserDetection = browserDetection
         self.claudeFetcher = claudeFetcher ?? ClaudeUsageFetcher(browserDetection: browserDetection)
         self.costUsageFetcher = costUsageFetcher
-        self.utilizationHistoryStore = utilizationHistoryStore
         self.settings = settings
         self.registry = registry
+        self.environmentBase = environmentBase
         self.historicalUsageHistoryStore = historicalUsageHistoryStore
         self.planUtilizationHistoryStore = planUtilizationHistoryStore
         self.sessionQuotaNotifier = sessionQuotaNotifier
@@ -238,11 +263,13 @@ final class UsageStore {
             metadata: self.providerMetadata,
             codexFetcher: fetcher,
             claudeFetcher: self.claudeFetcher,
-            browserDetection: browserDetection)
+            browserDetection: browserDetection,
+            environmentBase: environmentBase)
         self.providerRuntimes = Dictionary(uniqueKeysWithValues: ProviderCatalog.all.compactMap { implementation in
             implementation.makeRuntime().map { (implementation.id, $0) }
         })
         self.planUtilizationHistory = planUtilizationHistoryStore.load()
+        self.weeklyLimitResetDetectorStates = Self.loadWeeklyLimitResetDetectorStates(from: settings.userDefaults)
         self.logStartupState()
         self.bindSettings()
         self.pathDebugInfo = PathDebugSnapshot(
@@ -272,9 +299,15 @@ final class UsageStore {
 
     private static func isRunningTestsProcess() -> Bool {
         let environment = ProcessInfo.processInfo.environment
-        if environment["XCTestConfigurationFilePath"] != nil { return true }
-        if environment["XCTestSessionIdentifier"] != nil { return true }
-        if environment["SWIFT_TESTING_ENABLED"] != nil { return true }
+        if environment["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+        if environment["XCTestSessionIdentifier"] != nil {
+            return true
+        }
+        if environment["SWIFT_TESTING_ENABLED"] != nil {
+            return true
+        }
         return CommandLine.arguments.contains { argument in
             argument.contains("xctest") || argument.contains("swift-testing")
         }
@@ -303,14 +336,18 @@ final class UsageStore {
 
     var preferredSnapshot: UsageSnapshot? {
         for provider in self.enabledProviders() {
-            if let snap = self.snapshots[provider] { return snap }
+            if let snap = self.snapshots[provider] {
+                return snap
+            }
         }
         return nil
     }
 
     var iconStyle: IconStyle {
         let enabled = self.enabledProviders()
-        if enabled.count > 1 { return .combined }
+        if enabled.count > 1 {
+            return .combined
+        }
         if let provider = enabled.first {
             return self.style(for: provider)
         }
@@ -335,6 +372,11 @@ final class UsageStore {
         self.settings.enabledProvidersOrdered(metadataByProvider: self.providerMetadata)
     }
 
+    /// Providers that should actually participate in background refresh/status/token work.
+    func enabledProvidersForBackgroundWork() -> [UsageProvider] {
+        self.enabledProviders()
+    }
+
     var statusChecksEnabled: Bool {
         self.settings.statusChecksEnabled
     }
@@ -348,7 +390,10 @@ final class UsageStore {
     }
 
     func snapshot(for provider: UsageProvider) -> UsageSnapshot? {
-        self.snapshots[provider]
+        if provider == .opencode, let active = self.settings.activeOpenCodeWorkspaceAccount {
+            return self.openCodeWorkspaceSnapshots[active.id]
+        }
+        return self.snapshots[provider]
     }
 
     func sourceLabel(for provider: UsageProvider) -> String {
@@ -405,7 +450,7 @@ final class UsageStore {
         // Otherwise providers (notably token-account-backed API providers) can fetch successfully but be
         // hidden from the menu because their credentials are not in ProcessInfo's environment.
         let environment = ProviderRegistry.makeEnvironment(
-            base: ProcessInfo.processInfo.environment,
+            base: self.environmentBase,
             provider: provider,
             settings: self.settings,
             tokenOverride: nil)
@@ -440,6 +485,10 @@ final class UsageStore {
         guard !self.isRefreshing else { return }
         self.prepareRefreshState()
         let refreshPhase: ProviderRefreshPhase = self.hasCompletedInitialRefresh ? .regular : .startup
+        let displayEnabledProviders = self.enabledProvidersForDisplay()
+        let enabledProviderSet = Set(displayEnabledProviders)
+        let refreshProviders = self.enabledProvidersForBackgroundWork()
+        let availableRefreshProviders = Set(self.enabledProviders())
         let refreshStartedAt = Date()
 
         await ProviderRefreshContext.$current.withValue(refreshPhase) {
@@ -449,10 +498,18 @@ final class UsageStore {
                 self.hasCompletedInitialRefresh = true
             }
 
+            self.clearDisabledProviderState(enabledProviders: enabledProviderSet)
+            self.clearUnavailableProviderState(
+                displayEnabledProviders: enabledProviderSet,
+                availableProviders: availableRefreshProviders)
+            self.scheduleStorageFootprintRefresh(for: displayEnabledProviders)
+
             await withTaskGroup(of: Void.self) { group in
-                for provider in UsageProvider.allCases {
+                for provider in refreshProviders {
                     group.addTask { await self.refreshProvider(provider) }
-                    group.addTask { await self.refreshStatus(provider) }
+                    if availableRefreshProviders.contains(provider) {
+                        group.addTask { await self.refreshStatus(provider) }
+                    }
                 }
                 group.addTask { await self.refreshCreditsIfNeeded(minimumSnapshotUpdatedAt: refreshStartedAt) }
             }
@@ -462,12 +519,32 @@ final class UsageStore {
 
             // OpenAI web scrape depends on the current Codex account email (which can change after login/account
             // switch). Run this after Codex usage refresh so we don't accidentally scrape with stale credentials.
-            let codexDashboardGuard = self.currentCodexOpenAIWebRefreshGuard()
-            await self.refreshOpenAIDashboardIfNeeded(
-                force: forceTokenUsage,
-                expectedGuard: codexDashboardGuard)
+            self.syncOpenAIWebState()
+            let refreshPolicy = OpenAIWebRefreshPolicyContext(
+                accessEnabled: self.isEnabled(.codex) &&
+                    self.settings.openAIWebAccessEnabled &&
+                    self.settings.codexCookieSource.isEnabled,
+                batterySaverEnabled: self.settings.openAIWebBatterySaverEnabled,
+                force: forceTokenUsage)
+            let shouldRefreshOpenAIWeb = Self.shouldRunOpenAIWebRefresh(refreshPolicy)
+            self.openAIWebLogger.debug(
+                "OpenAI web refresh gate",
+                metadata: [
+                    "allowed": shouldRefreshOpenAIWeb ? "1" : "0",
+                    "accessEnabled": refreshPolicy.accessEnabled ? "1" : "0",
+                    "batterySaverEnabled": refreshPolicy.batterySaverEnabled ? "1" : "0",
+                    "force": refreshPolicy.force ? "1" : "0",
+                    "interaction": ProviderInteractionContext.current == .userInitiated ? "user" : "background",
+                    "phase": refreshPhase == .startup ? "startup" : "regular",
+                ])
+            if shouldRefreshOpenAIWeb {
+                let codexDashboardGuard = self.currentCodexOpenAIWebRefreshGuard()
+                await self.refreshOpenAIDashboardIfNeeded(
+                    force: forceTokenUsage,
+                    expectedGuard: codexDashboardGuard)
+            }
 
-            if self.openAIDashboardRequiresLogin {
+            if forceTokenUsage, self.openAIDashboardRequiresLogin {
                 await self.refreshProvider(.codex)
                 await self.refreshCreditsIfNeeded(minimumSnapshotUpdatedAt: refreshStartedAt)
             }
@@ -528,6 +605,7 @@ final class UsageStore {
             return
         }
 
+        let providers = self.enabledProvidersForBackgroundWork()
         self.tokenRefreshSequenceTask = Task(priority: .utility) { [weak self] in
             guard let self else { return }
             defer {
@@ -535,8 +613,10 @@ final class UsageStore {
                     self?.tokenRefreshSequenceTask = nil
                 }
             }
-            for provider in UsageProvider.allCases {
-                if Task.isCancelled { break }
+            for provider in providers {
+                if Task.isCancelled {
+                    break
+                }
                 await self.refreshTokenUsage(provider, force: force)
             }
         }
@@ -546,6 +626,7 @@ final class UsageStore {
         self.timerTask?.cancel()
         self.tokenTimerTask?.cancel()
         self.tokenRefreshSequenceTask?.cancel()
+        self.storageRefreshTask?.cancel()
         self.codexPlanHistoryBackfillTask?.cancel()
     }
 
@@ -558,13 +639,18 @@ final class UsageStore {
         provider: UsageProvider,
         snapshot: UsageSnapshot) -> (window: RateWindow, source: SessionQuotaWindowSource)?
     {
-        if let primary = snapshot.primary {
+        if let primary = snapshot.primary, Self.isSessionWindow(primary) {
             return (primary, .primary)
         }
         if provider == .copilot, let secondary = snapshot.secondary {
             return (secondary, .copilotSecondaryFallback)
         }
         return nil
+    }
+
+    private static func isSessionWindow(_ window: RateWindow) -> Bool {
+        guard let minutes = window.windowMinutes else { return true }
+        return minutes <= 6 * 60
     }
 
     func handleSessionQuotaTransition(provider: UsageProvider, snapshot: UsageSnapshot) {
@@ -731,15 +817,20 @@ extension UsageStore {
         let ampCookieHeader = self.settings.ampCookieHeader
         let ollamaCookieSource = self.settings.ollamaCookieSource
         let ollamaCookieHeader = self.settings.ollamaCookieHeader
-        let processEnvironment = ProcessInfo.processInfo.environment
+        let processEnvironment = self.environmentBase
         let openRouterConfigToken = self.settings.providerConfig(for: .openrouter)?.sanitizedAPIKey
-        let openRouterHasConfigToken = !(openRouterConfigToken?.trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty ?? true)
         let openRouterHasEnvToken = OpenRouterSettingsReader.apiToken(environment: processEnvironment) != nil
         let openRouterEnvironment = ProviderConfigEnvironment.applyAPIKeyOverride(
             base: processEnvironment,
             provider: .openrouter,
             config: self.settings.providerConfig(for: .openrouter))
+        let deepSeekHasEnvToken = DeepSeekSettingsReader.apiKey(environment: processEnvironment) != nil
+        let deepSeekHasTokenAccount = self.settings.selectedTokenAccount(for: .deepseek) != nil
+        let deepSeekEnvironment = ProviderRegistry.makeEnvironment(
+            base: processEnvironment,
+            provider: .deepseek,
+            settings: self.settings,
+            tokenOverride: nil)
         let codexFetcher = self.codexFetcher
         let browserDetection = self.browserDetection
         let claudeDebugExecutionContext = self.currentClaudeDebugExecutionContext()
@@ -812,25 +903,25 @@ extension UsageStore {
                         ollamaCookieSource: ollamaCookieSource,
                         ollamaCookieHeader: ollamaCookieHeader)
                 case .openrouter:
-                    let resolution = ProviderTokenResolver.openRouterResolution(environment: openRouterEnvironment)
-                    let hasAny = resolution != nil
-                    let source: String = if resolution == nil {
-                        "none"
-                    } else if openRouterHasConfigToken, openRouterHasEnvToken {
-                        "settings-config (overrides env)"
-                    } else if openRouterHasConfigToken {
-                        "settings-config"
-                    } else {
-                        resolution?.source.rawValue ?? "environment"
-                    }
-                    return "OPENROUTER_API_KEY=\(hasAny ? "present" : "missing") source=\(source)"
+                    return Self.apiKeyDebugLine(
+                        label: "OPENROUTER_API_KEY",
+                        resolution: ProviderTokenResolver.openRouterResolution(environment: openRouterEnvironment),
+                        configToken: openRouterConfigToken,
+                        hasEnvToken: openRouterHasEnvToken)
                 case .warp:
                     let resolution = ProviderTokenResolver.warpResolution()
                     let hasAny = resolution != nil
                     let source = resolution?.source.rawValue ?? "none"
                     return "WARP_API_KEY=\(hasAny ? "present" : "missing") source=\(source)"
+                case .deepseek:
+                    return Self.apiKeyDebugLine(
+                        label: "DEEPSEEK_API_KEY",
+                        resolution: ProviderTokenResolver.deepseekResolution(environment: deepSeekEnvironment),
+                        configToken: nil,
+                        hasEnvToken: deepSeekHasEnvToken,
+                        hasTokenAccount: deepSeekHasTokenAccount)
                 case .gemini, .antigravity, .opencode, .opencodego, .factory, .copilot, .vertexai, .kilo, .kiro, .kimi,
-                     .kimik2, .jetbrains, .perplexity:
+                     .kimik2, .jetbrains, .perplexity, .abacus, .mistral, .codebuff, .windsurf:
                     return unimplementedDebugLogMessages[provider] ?? "Debug log not yet implemented"
                 }
             }
@@ -852,7 +943,7 @@ extension UsageStore {
             let sourceMode = self.sourceMode(for: .claude)
             let snapshot = ProviderRegistry.makeSettingsSnapshot(settings: self.settings, tokenOverride: nil)
             let environment = ProviderRegistry.makeEnvironment(
-                base: ProcessInfo.processInfo.environment,
+                base: self.environmentBase,
                 provider: .claude,
                 settings: self.settings,
                 tokenOverride: nil)
@@ -951,6 +1042,31 @@ extension UsageStore {
         #endif
     }
 
+    private nonisolated static func apiKeyDebugLine(
+        label: String,
+        resolution: ProviderTokenResolution?,
+        configToken: String?,
+        hasEnvToken: Bool,
+        hasTokenAccount: Bool = false) -> String
+    {
+        let hasAny = resolution != nil
+        let hasConfigToken = !(configToken?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        let source: String = if resolution == nil {
+            "none"
+        } else if hasTokenAccount, hasEnvToken {
+            "settings-token-account (overrides env)"
+        } else if hasTokenAccount {
+            "settings-token-account"
+        } else if hasConfigToken, hasEnvToken {
+            "settings-config (overrides env)"
+        } else if hasConfigToken {
+            "settings-config"
+        } else {
+            resolution?.source.rawValue ?? "environment"
+        }
+        return "\(label)=\(hasAny ? "present" : "missing") source=\(source)"
+    }
+
     private static func debugCursorLog(
         browserDetection: BrowserDetection,
         cursorCookieSource: ProviderCookieSource,
@@ -1039,16 +1155,29 @@ extension UsageStore {
         }
     }
 
-    private func runWithTimeout(seconds: Double, operation: @escaping @Sendable () async -> String) async -> String {
-        await withTaskGroup(of: String?.self) { group -> String in
-            group.addTask { await operation() }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                return nil
-            }
-            let result = await group.next()?.flatMap(\.self)
-            group.cancelAll()
-            return result ?? "Probe timed out after \(Int(seconds))s"
+    private func detectVersions() {
+        let implementations = ProviderCatalog.all
+        let browserDetection = self.browserDetection
+        Task { @MainActor [weak self] in
+            let resolved = await Task.detached { () -> [UsageProvider: String] in
+                var resolved: [UsageProvider: String] = [:]
+                await withTaskGroup(of: (UsageProvider, String?).self) { group in
+                    for implementation in implementations {
+                        let context = ProviderVersionContext(
+                            provider: implementation.id,
+                            browserDetection: browserDetection)
+                        group.addTask {
+                            await (implementation.id, implementation.detectVersion(context: context))
+                        }
+                    }
+                    for await (provider, version) in group {
+                        guard let version, !version.isEmpty else { continue }
+                        resolved[provider] = version
+                    }
+                }
+                return resolved
+            }.value
+            self?.versions = resolved
         }
     }
 
@@ -1091,7 +1220,9 @@ extension UsageStore {
                 do {
                     try fm.removeItem(at: cacheDir)
                 } catch let error as NSError {
-                    if error.domain == NSCocoaErrorDomain, error.code == NSFileNoSuchFileError { continue }
+                    if error.domain == NSCocoaErrorDomain, error.code == NSFileNoSuchFileError {
+                        continue
+                    }
                     return error.localizedDescription
                 }
             }
@@ -1197,7 +1328,9 @@ extension UsageStore {
             self.tokenFailureGates[provider]?.recordSuccess()
             self.persistWidgetSnapshot(reason: "token-usage")
         } catch {
-            if error is CancellationError { return }
+            if error is CancellationError {
+                return
+            }
             let duration = Date().timeIntervalSince(startedAt)
             let msg = error.localizedDescription
             let durationText = String(format: "%.2f", duration)

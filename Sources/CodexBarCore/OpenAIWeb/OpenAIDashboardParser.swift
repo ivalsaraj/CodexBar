@@ -68,7 +68,9 @@ public enum OpenAIDashboardParser {
                   match.numberOfRanges >= 2,
                   let r = Range(match.range(at: 1), in: cleaned)
             else { continue }
-            if let val = Double(cleaned[r]) { return min(100, max(0, val)) }
+            if let val = Double(cleaned[r]) {
+                return min(100, max(0, val))
+            }
         }
         return nil
     }
@@ -81,7 +83,9 @@ public enum OpenAIDashboardParser {
             #"credit\s*balance[^0-9]*([0-9][0-9.,]*)"#,
         ]
         for pattern in patterns {
-            if let val = TextParsing.firstNumber(pattern: pattern, text: cleaned) { return val }
+            if let val = TextParsing.firstNumber(pattern: pattern, text: cleaned) {
+                return val
+            }
         }
         return nil
     }
@@ -137,35 +141,6 @@ public enum OpenAIDashboardParser {
         return nil
     }
 
-    public static func parseSubscriptionRenewalDate(
-        bodyText: String,
-        html: String? = nil,
-        now: Date = .init()) -> Date?
-    {
-        if let html,
-           let data = self.clientBootstrapJSONData(fromHTML: html) ?? self.nextDataJSONData(fromHTML: html),
-           let renewal = self.findSubscriptionRenewalDate(in: data, now: now)
-        {
-            return renewal
-        }
-
-        let cleaned = bodyText.replacingOccurrences(of: "\r", with: "\n")
-        let lines = cleaned
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        for index in lines.indices where self.isSubscriptionRenewalLine(lines[index]) {
-            let end = min(lines.count - 1, index + 2)
-            let candidate = lines[index...end].joined(separator: " ")
-            if let date = self.parseResetDate(from: candidate, now: now) {
-                return date
-            }
-        }
-
-        return nil
-    }
-
     public static func parseCreditEvents(rows: [[String]]) -> [CreditEvent] {
         let formatter = self.creditDateFormatter()
 
@@ -182,11 +157,49 @@ public enum OpenAIDashboardParser {
     }
 
     private static func parseCreditsUsed(_ text: String) -> Double {
-        let cleaned = text
-            .replacingOccurrences(of: ",", with: "")
-            .replacingOccurrences(of: "credits", with: "", options: .caseInsensitive)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return Double(cleaned) ?? 0
+        guard let raw = self.firstNumberToken(in: text) else { return 0 }
+        let token = raw
+            .replacingOccurrences(of: "\u{00A0}", with: "")
+            .replacingOccurrences(of: "\u{202F}", with: "")
+            .replacingOccurrences(of: " ", with: "")
+        let hasComma = token.contains(",")
+        let hasDot = token.contains(".")
+        if hasComma, hasDot {
+            return TextParsing.firstNumber(pattern: #"([0-9][0-9.,\s\p{Zs}]*)"#, text: token) ?? 0
+        }
+        if hasComma {
+            if self.usesLocalizedDecimalCommaCreditLabel(text) {
+                return Double(token.replacingOccurrences(of: ",", with: ".")) ?? 0
+            }
+            if token.range(of: #"^\d{1,3}(,\d{3})+$"#, options: .regularExpression) != nil {
+                return Double(token.replacingOccurrences(of: ",", with: "")) ?? 0
+            }
+            return Double(token.replacingOccurrences(of: ",", with: ".")) ?? 0
+        }
+        return Double(token) ?? 0
+    }
+
+    private static func usesLocalizedDecimalCommaCreditLabel(_ text: String) -> Bool {
+        text
+            .lowercased()
+            .contains("crédit")
+    }
+
+    private static func firstNumberToken(in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"([0-9][0-9.,\s\p{Zs}]*)"#,
+            options: [])
+        else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range),
+              match.numberOfRanges >= 2,
+              let tokenRange = Range(match.range(at: 1), in: text)
+        else {
+            return nil
+        }
+        return String(text[tokenRange])
     }
 
     // MARK: - Private
@@ -315,44 +328,64 @@ public enum OpenAIDashboardParser {
         let lower = line.lowercased()
         let isRemaining = lower.contains("remaining") || lower.contains("left")
         let isUsed = lower.contains("used") || lower.contains("spent") || lower.contains("consumed")
-        if isUsed { return (percent, false) }
-        if isRemaining { return (percent, true) }
+        if isUsed {
+            return (percent, false)
+        }
+        if isRemaining {
+            return (percent, true)
+        }
         return (percent, true)
     }
 
     private static func isFiveHourLimitLine(_ line: String) -> Bool {
         let lower = line.lowercased()
-        if lower.contains("5h") { return true }
-        if lower.contains("5-hour") { return true }
-        if lower.contains("5 hour") { return true }
+        if lower.contains("5h") {
+            return true
+        }
+        if lower.range(of: #"\b5\s*h\b"#, options: .regularExpression) != nil {
+            return true
+        }
+        if lower.contains("5-hour") {
+            return true
+        }
+        if lower.contains("5 hour") {
+            return true
+        }
         return false
     }
 
     private static func isWeeklyLimitLine(_ line: String) -> Bool {
         let lower = line.lowercased()
-        if lower.contains("weekly") { return true }
-        if lower.contains("7-day") { return true }
-        if lower.contains("7 day") { return true }
-        if lower.contains("7d") { return true }
+        if lower.contains("weekly") {
+            return true
+        }
+        if lower.contains("7-day") {
+            return true
+        }
+        if lower.contains("7 day") {
+            return true
+        }
+        if lower.contains("7d") {
+            return true
+        }
+        if lower.range(of: #"\b7\s*d\b"#, options: .regularExpression) != nil {
+            return true
+        }
         return false
     }
 
     private static func isCodeReviewLimitLine(_ line: String) -> Bool {
         let lower = line.lowercased()
         guard lower.contains("code review") || lower.contains("core review") else { return false }
-        if lower.contains("github code review") { return false }
+        if lower.contains("github code review") {
+            return false
+        }
         return true
     }
 
     private static func parseResetDate(from line: String, now: Date) -> Date? {
         var raw = line.trimmingCharacters(in: .whitespacesAndNewlines)
         raw = raw.replacingOccurrences(of: #"(?i)^resets?:?\s*"#, with: "", options: .regularExpression)
-        raw = raw.replacingOccurrences(of: #"(?i)^renews?:?\s*"#, with: "", options: .regularExpression)
-        raw = raw.replacingOccurrences(of: #"(?i)^renewal date:?\s*"#, with: "", options: .regularExpression)
-        raw = raw.replacingOccurrences(of: #"(?i)^next billing date:?\s*"#, with: "", options: .regularExpression)
-        raw = raw.replacingOccurrences(of: #"(?i)^billing date:?\s*"#, with: "", options: .regularExpression)
-        raw = raw.replacingOccurrences(of: #"(?i)^current period ends?:?\s*"#, with: "", options: .regularExpression)
-        raw = raw.replacingOccurrences(of: #"(?i)^subscription renews?:?\s*"#, with: "", options: .regularExpression)
         raw = raw.replacingOccurrences(of: " at ", with: " ", options: .caseInsensitive)
         raw = raw.replacingOccurrences(of: " on ", with: " ", options: .caseInsensitive)
         raw = raw.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
@@ -461,91 +494,18 @@ public enum OpenAIDashboardParser {
     private static func nextWeekdayDate(weekday: Int, now: Date, calendar: Calendar) -> Date {
         let currentWeekday = calendar.component(.weekday, from: now)
         var delta = weekday - currentWeekday
-        if delta < 0 { delta += 7 }
+        if delta < 0 {
+            delta += 7
+        }
         guard let next = calendar.date(byAdding: .day, value: delta, to: calendar.startOfDay(for: now)) else {
             return now
         }
         return next
     }
 
-    private static func isSubscriptionRenewalLine(_ line: String) -> Bool {
-        let lower = line.lowercased()
-        if lower.contains("reset") { return false }
-        if lower.contains("renew") { return true }
-        if lower.contains("next billing") { return true }
-        if lower.contains("billing date") { return true }
-        if lower.contains("current period") { return true }
-        return false
-    }
-
     private static func findPlan(in data: Data) -> String? {
         guard let json = try? JSONSerialization.jsonObject(with: data, options: []) else { return nil }
         return self.findPlan(in: json)
-    }
-
-    private static func findSubscriptionRenewalDate(in data: Data, now: Date) -> Date? {
-        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) else { return nil }
-        return self.findSubscriptionRenewalDate(in: json, now: now)
-    }
-
-    private static func findSubscriptionRenewalDate(in json: Any, now: Date) -> Date? {
-        var queue: [(key: String?, value: Any)] = [(nil, json)]
-        var seen = 0
-        while !queue.isEmpty, seen < 6000 {
-            let current = queue.removeFirst()
-            seen += 1
-
-            if let key = current.key,
-               self.isSubscriptionRenewalKey(key),
-               let date = self.dateCandidate(from: current.value, now: now)
-            {
-                return date
-            }
-
-            if let dict = current.value as? [String: Any] {
-                for (key, value) in dict {
-                    queue.append((key, value))
-                }
-            } else if let arr = current.value as? [Any] {
-                queue.append(contentsOf: arr.map { (nil, $0) })
-            }
-        }
-        return nil
-    }
-
-    private static func isSubscriptionRenewalKey(_ key: String) -> Bool {
-        let lower = key.lowercased()
-        if lower.contains("renew") { return true }
-        if lower.contains("nextbilling") || lower.contains("next_billing") { return true }
-        if lower.contains("billingperiodend") || lower.contains("billing_period_end") { return true }
-        if lower.contains("currentperiodend") || lower.contains("current_period_end") { return true }
-        if lower.contains("periodend") || lower.contains("period_end") { return true }
-        return false
-    }
-
-    private static func dateCandidate(from value: Any, now: Date) -> Date? {
-        if let timeInterval = value as? TimeInterval {
-            let seconds = timeInterval > 10_000_000_000 ? timeInterval / 1000 : timeInterval
-            return Date(timeIntervalSince1970: seconds)
-        }
-        if let value = value as? String {
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let numeric = TimeInterval(trimmed) {
-                let seconds = numeric > 10_000_000_000 ? numeric / 1000 : numeric
-                return Date(timeIntervalSince1970: seconds)
-            }
-            let iso = ISO8601DateFormatter()
-            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = iso.date(from: trimmed) {
-                return date
-            }
-            iso.formatOptions = [.withInternetDateTime]
-            if let date = iso.date(from: trimmed) {
-                return date
-            }
-            return self.parseResetDate(from: trimmed, now: now)
-        }
-        return nil
     }
 
     private static func findPlan(in json: Any) -> String? {
@@ -556,7 +516,9 @@ public enum OpenAIDashboardParser {
             seen += 1
             if let dict = cur as? [String: Any] {
                 for (k, v) in dict {
-                    if let plan = self.planCandidate(forKey: k, value: v) { return plan }
+                    if let plan = self.planCandidate(forKey: k, value: v) {
+                        return plan
+                    }
                     queue.append(v)
                 }
             } else if let arr = cur as? [Any] {
@@ -572,9 +534,15 @@ public enum OpenAIDashboardParser {
             return self.normalizePlanValue(str)
         }
         if let dict = value as? [String: Any] {
-            if let name = dict["name"] as? String, let plan = self.normalizePlanValue(name) { return plan }
-            if let display = dict["displayName"] as? String, let plan = self.normalizePlanValue(display) { return plan }
-            if let tier = dict["tier"] as? String, let plan = self.normalizePlanValue(tier) { return plan }
+            if let name = dict["name"] as? String, let plan = self.normalizePlanValue(name) {
+                return plan
+            }
+            if let display = dict["displayName"] as? String, let plan = self.normalizePlanValue(display) {
+                return plan
+            }
+            if let tier = dict["tier"] as? String, let plan = self.normalizePlanValue(tier) {
+                return plan
+            }
         }
         return nil
     }

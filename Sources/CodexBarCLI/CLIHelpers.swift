@@ -17,7 +17,6 @@ extension CodexBarCLI {
         if let rawOverride, let parsed = ProviderSelection(argument: rawOverride) {
             return parsed
         }
-        if enabled.count >= 3 { return .all }
         if enabled.count == 2 {
             let enabledSet = Set(enabled)
             let primary = Set(ProviderDescriptorRegistry.all.filter(\ .metadata.isPrimaryProvider).map(\ .id))
@@ -26,7 +25,12 @@ extension CodexBarCLI {
             }
             return .custom(enabled)
         }
-        if let first = enabled.first { return ProviderSelection(provider: first) }
+        if enabled.count >= 3 {
+            return .custom(enabled)
+        }
+        if let first = enabled.first {
+            return ProviderSelection(provider: first)
+        }
         return .single(.codex)
     }
 
@@ -56,9 +60,13 @@ extension CodexBarCLI {
 
     static func shouldUseColor(noColor: Bool, format: OutputFormat) -> Bool {
         guard format == .text else { return false }
-        if noColor { return false }
+        if noColor {
+            return false
+        }
         let env = ProcessInfo.processInfo.environment
-        if env["TERM"]?.lowercased() == "dumb" { return false }
+        if env["TERM"]?.lowercased() == "dumb" {
+            return false
+        }
         return isatty(STDOUT_FILENO) == 1
     }
 
@@ -360,6 +368,10 @@ extension CodexBarCLI {
 
     static func _costSignatureForTesting() -> CommandSignature {
         CommandSignature.describe(CostOptions())
+    }
+
+    static func _cacheSignatureForTesting() -> CommandSignature {
+        CommandSignature.describe(CacheOptions())
     }
 
     static func _decodeFormatForTesting(from values: ParsedValues) -> OutputFormat {

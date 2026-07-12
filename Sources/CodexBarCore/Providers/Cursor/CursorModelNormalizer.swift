@@ -1,6 +1,5 @@
 import Foundation
 
-/// Origin provider inferred from a raw Cursor model string.
 public enum CursorModelProvider: String, Codable, Equatable, Sendable {
     case anthropic
     case openai
@@ -9,10 +8,6 @@ public enum CursorModelProvider: String, Codable, Equatable, Sendable {
     case unknown
 }
 
-/// A raw Cursor model string parsed into compact display parts plus an optional shared pricing key.
-///
-/// The pricing key is never decided here independently: it is delegated to `CostUsagePricing`
-/// coverage helpers so display normalization cannot drift from actual pricing-catalog coverage.
 public struct CursorNormalizedModel: Equatable, Sendable {
     public let rawName: String
     public let displayName: String
@@ -44,15 +39,9 @@ public struct CursorNormalizedModel: Equatable, Sendable {
     }
 }
 
-/// Tolerant normalizer for Cursor usage-event model strings.
-///
-/// Keeps the raw name intact, produces a compact display label, and exposes a pricing key only when
-/// the shared `CostUsagePricing` catalog actually covers the normalized model. Thinking effort never
-/// changes the pricing key.
 public enum CursorModelNormalizer {
     private static let effortTokens: Set<String> = ["minimal", "low", "medium", "high", "xhigh", "max"]
-    private static let modeTokens: Set<String> = ["thinking"]
-    private static let strippablePrefixes = ["openai/", "anthropic/", "google/", "anthropic."]
+    private static let knownAnthropicFamilies: Set<String> = ["haiku", "sonnet", "opus", "fable"]
 
     public static func normalize(_ raw: String) -> CursorNormalizedModel {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -68,70 +57,123 @@ public enum CursorModelNormalizer {
                 pricingKey: nil)
         }
 
-        var working = trimmed.lowercased()
-        for prefix in self.strippablePrefixes where working.hasPrefix(prefix) {
-            working = String(working.dropFirst(prefix.count))
+        let normalized = self.stripPrefix(from: trimmed.lowercased())
+        let tokens = normalized.split(separator: "-").map(String.init)
+        guard let head = tokens.first else {
+            return CursorNormalizedModel(
+                rawName: raw,
+                displayName: raw,
+                provider: .unknown,
+                family: nil,
+                version: nil,
+                mode: nil,
+                effort: nil,
+                pricingKey: nil)
         }
-        let tokens = working.split(separator: "-").map(String.init)
-        let head = tokens.first ?? ""
 
-        if head == "claude" {
+        switch head {
+        case "claude":
             return self.normalizeAnthropic(rawName: raw, tokens: tokens)
-        }
-        if head.hasPrefix("gpt") || head == "o1" || head == "o3" || head == "o4" {
-            return self.normalizeOpenAI(rawName: raw, candidate: working, tokens: tokens)
-        }
-        if head == "gemini" {
-            return self.normalizeGeneric(rawName: raw, tokens: tokens, provider: .google)
-        }
-        if head == "composer" {
+        case "haiku", "sonnet", "opus", "fable":
+            return self.normalizeAnthropic(rawName: raw, tokens: ["claude"] + tokens)
+        case "composer":
             return self.normalizeComposer(rawName: raw, tokens: tokens)
+        case "gemini":
+            return self.generic(rawName: raw, tokens: tokens, provider: .google)
+        case "cursor", "auto":
+            return self.generic(rawName: raw, tokens: tokens, provider: .cursor)
+        default:
+            if head.hasPrefix("gpt") || head == "o1" || head == "o3" || head == "o4" {
+                return self.normalizeOpenAI(rawName: raw, tokens: tokens)
+            }
+            return self.generic(rawName: raw, tokens: tokens, provider: .unknown)
         }
-        if head == "cursor" || working == "auto" {
-            return self.normalizeGeneric(rawName: raw, tokens: tokens, provider: .cursor)
+    }
+
+    private static func stripPrefix(from raw: String) -> String {
+        ["openai/", "openai:", "anthropic/", "anthropic.", "google/"].reduce(raw) { value, prefix in
+            value.hasPrefix(prefix) ? String(value.dropFirst(prefix.count)) : value
         }
-        return self.normalizeGeneric(rawName: raw, tokens: tokens, provider: .unknown)
+    }
+
+    private static func normalizeOpenAI(rawName: String, tokens: [String]) -> CursorNormalizedModel {
+        let stripped = self.stripEffortSuffix(from: tokens)
+        let pricingTokens = stripped.tokens
+        let display = self.openAIDisplayName(tokens: pricingTokens)
+        let candidate = pricingTokens.joined(separator: "-")
+        return CursorNormalizedModel(
+            rawName: rawName,
+            displayName: display,
+            provider: .openai,
+            family: pricingTokens.first,
+            version: pricingTokens.dropFirst().first,
+            mode: nil,
+            effort: stripped.effort,
+            pricingKey: CostUsagePricing.supportedCodexPricingKey(candidate))
+    }
+
+    private static func stripEffortSuffix(from tokens: [String]) -> (tokens: [String], effort: String?) {
+        var stripped = tokens
+        var effort: String?
+        if stripped.suffix(2) == ["extra", "high"] {
+            stripped.removeLast(2)
+            effort = "extra-high"
+        } else if let suffix = stripped.last, self.effortTokens.contains(suffix) {
+            stripped.removeLast()
+            effort = suffix
+        }
+        return (stripped, effort)
+    }
+
+    private static func openAIDisplayName(tokens: [String]) -> String {
+        guard let first = tokens.first else { return "GPT" }
+        if first.hasPrefix("gpt") {
+            let base = first.replacingOccurrences(of: "gpt", with: "GPT", options: [.anchored])
+            guard tokens.count > 1 else { return base }
+            let suffix = tokens.dropFirst().map(\.capitalized).joined(separator: " ")
+            return "\(base)-\(suffix)"
+        }
+        return tokens.map(\.capitalized).joined(separator: " ")
     }
 
     private static func normalizeAnthropic(rawName: String, tokens: [String]) -> CursorNormalizedModel {
-        var rest = Array(tokens.dropFirst())
-        var mode: String?
-        var effort: String?
-        rest.removeAll { token in
-            if self.modeTokens.contains(token) {
-                mode = token
-                return true
-            }
-            if self.effortTokens.contains(token) {
-                effort = token
-                return true
-            }
-            return false
+        var remainder = Array(tokens.dropFirst())
+        let mode = remainder.contains("thinking") ? "thinking" : nil
+        remainder.removeAll { $0 == "thinking" }
+        let effort = remainder.last.flatMap { self.effortTokens.contains($0) ? $0 : nil }
+        if effort != nil {
+            remainder.removeLast()
         }
 
-        let family = rest.first
-        var versionTokens: [String] = []
-        for token in rest.dropFirst() {
-            guard !token.isEmpty, token.allSatisfy(\.isNumber) else { break }
-            versionTokens.append(token)
+        let family: String?
+        let versionParts: [String]
+        if let first = remainder.first, self.knownAnthropicFamilies.contains(first) {
+            family = first
+            versionParts = remainder.dropFirst().flatMap { $0.split(separator: ".").map(String.init) }
+        } else {
+            versionParts = remainder.flatMap { $0.split(separator: ".").map(String.init) }
+            family = self.inferAnthropicFamily(versionParts: versionParts, effort: effort)
         }
-        let version = versionTokens.isEmpty ? nil : versionTokens.joined(separator: ".")
-
-        let displayName: String = if let family {
-            version.map { "\(family.capitalized) \($0)" } ?? family.capitalized
+        let version = versionParts.isEmpty ? nil : versionParts.joined(separator: ".")
+        let display = if let family {
+            if family == "claude" {
+                version.map { "Claude \($0)" } ?? "Claude"
+            } else {
+                version.map { "\(family.capitalized) \($0)" } ?? family.capitalized
+            }
         } else {
             rawName
         }
-
-        var pricingKey: String?
-        if let family, !versionTokens.isEmpty {
-            let candidate = (["claude", family] + versionTokens).joined(separator: "-")
-            pricingKey = CostUsagePricing.supportedClaudePricingKey(candidate)
+        let pricingKey: String? = if let family, !versionParts.isEmpty {
+            CostUsagePricing.supportedClaudePricingKey(
+                (["claude", family] + versionParts).joined(separator: "-"))
+        } else {
+            nil
         }
 
         return CursorNormalizedModel(
             rawName: rawName,
-            displayName: displayName,
+            displayName: display,
             provider: .anthropic,
             family: family,
             version: version,
@@ -140,60 +182,20 @@ public enum CursorModelNormalizer {
             pricingKey: pricingKey)
     }
 
-    private static func normalizeOpenAI(rawName: String, candidate: String, tokens: [String]) -> CursorNormalizedModel {
-        let head = tokens.first ?? ""
-        let displayName: String
-        if head.hasPrefix("gpt") {
-            var name = "GPT"
-            if tokens.count > 1 {
-                name += "-\(tokens[1])"
-            }
-            let extras = tokens.dropFirst(2).map(\.capitalized)
-            if !extras.isEmpty {
-                name += " " + extras.joined(separator: " ")
-            }
-            displayName = name
-        } else {
-            displayName = tokens.map(\.capitalized).joined(separator: " ")
+    private static func inferAnthropicFamily(versionParts: [String], effort: String?) -> String {
+        if versionParts == ["4", "6"], effort == "max" || effort == "xhigh" {
+            return "opus"
         }
-
-        return CursorNormalizedModel(
-            rawName: rawName,
-            displayName: displayName.isEmpty ? rawName : displayName,
-            provider: .openai,
-            family: tokens.first,
-            version: tokens.count > 1 ? tokens[1] : nil,
-            mode: nil,
-            effort: nil,
-            pricingKey: CostUsagePricing.supportedCodexPricingKey(candidate))
+        return "claude"
     }
 
     private static func normalizeComposer(rawName: String, tokens: [String]) -> CursorNormalizedModel {
-        let versionTokens = tokens.dropFirst().filter { token in
-            token != "fast" && token != "standard"
-        }
-        let version = versionTokens.isEmpty ? nil : versionTokens.joined(separator: ".")
-
-        var mode: String?
-        var pricingKey: String?
-        if version == "2.5" {
-            mode = "fast"
-            pricingKey = "composer-2.5-fast"
-            if tokens.contains("standard") {
-                mode = "standard"
-                pricingKey = "composer-2.5-standard"
-            } else if tokens.contains("fast") {
-                mode = "fast"
-                pricingKey = "composer-2.5-fast"
-            }
-        }
-
-        let displaySuffix = version ?? tokens.dropFirst().joined(separator: ".")
-        let displayName = displaySuffix.isEmpty ? rawName : "Composer \(displaySuffix)"
-
+        let mode = tokens.contains("standard") ? "standard" : "fast"
+        let version = tokens.dropFirst().first { $0 != "fast" && $0 != "standard" }
+        let pricingKey = version == "2.5" ? "composer-2.5-\(mode)" : nil
         return CursorNormalizedModel(
             rawName: rawName,
-            displayName: displayName,
+            displayName: version.map { "Composer \($0)" } ?? rawName,
             provider: .cursor,
             family: "composer",
             version: version,
@@ -202,18 +204,17 @@ public enum CursorModelNormalizer {
             pricingKey: pricingKey)
     }
 
-    private static func normalizeGeneric(
+    private static func generic(
         rawName: String,
         tokens: [String],
         provider: CursorModelProvider) -> CursorNormalizedModel
     {
-        let displayName = tokens.map(\.capitalized).joined(separator: " ")
-        return CursorNormalizedModel(
+        CursorNormalizedModel(
             rawName: rawName,
-            displayName: displayName.isEmpty ? rawName : displayName,
+            displayName: tokens.map(\.capitalized).joined(separator: " "),
             provider: provider,
             family: tokens.first,
-            version: tokens.count > 1 ? tokens[1] : nil,
+            version: tokens.dropFirst().first,
             mode: nil,
             effort: nil,
             pricingKey: nil)

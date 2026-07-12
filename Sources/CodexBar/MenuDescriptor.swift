@@ -57,6 +57,7 @@ struct MenuDescriptor {
         case statusPage
         case addCodexAccount
         case requestCodexSystemPromotion(UUID)
+        case addProviderAccount(UsageProvider)
         case switchAccount(UsageProvider)
         case openTerminal(command: String)
         case loginToProvider(url: String)
@@ -138,7 +139,9 @@ struct MenuDescriptor {
         let meta = store.metadata(for: provider)
         var entries: [Entry] = []
         let headlineText: String = {
-            if let ver = Self.versionNumber(for: provider, store: store) { return "\(meta.displayName) \(ver)" }
+            if let ver = Self.versionNumber(for: provider, store: store) {
+                return "\(meta.displayName) \(ver)"
+            }
             return meta.displayName
         }()
         entries.append(.text(headlineText, .headline))
@@ -146,9 +149,11 @@ struct MenuDescriptor {
         if let snap = store.snapshot(for: provider) {
             let resetStyle = settings.resetTimeDisplayStyle
             if let primary = snap.primary {
-                let primaryWindow = if provider == .warp || provider == .kilo {
-                    // Warp/Kilo primary uses resetDescription for non-reset detail (e.g., "Unlimited", "X/Y credits").
-                    // Avoid rendering it as a "Resets ..." line.
+                let primaryWindow = if provider == .warp || provider == .kilo || provider == .abacus ||
+                    provider == .deepseek
+                {
+                    // Some providers use resetDescription for non-reset detail
+                    // (e.g., "Unlimited", "X/Y credits"). Avoid rendering it as a "Resets ..." line.
                     RateWindow(
                         usedPercent: primary.usedPercent,
                         windowMinutes: primary.windowMinutes,
@@ -163,11 +168,17 @@ struct MenuDescriptor {
                     window: primaryWindow,
                     resetStyle: resetStyle,
                     showUsed: settings.usageBarsShowUsed)
-                if provider == .warp || provider == .kilo,
+                if provider == .warp || provider == .kilo || provider == .abacus || provider == .deepseek,
                    let detail = primary.resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !detail.isEmpty
                 {
                     entries.append(.text(detail, .secondary))
+                }
+                if provider == .abacus,
+                   let pace = store.weeklyPace(provider: provider, window: primary)
+                {
+                    let paceSummary = UsagePaceText.weeklySummary(pace: pace)
+                    entries.append(.text(paceSummary, .secondary))
                 }
             }
             if let weekly = snap.secondary {
@@ -400,6 +411,7 @@ struct MenuDescriptor {
             entries.append(.action("Update ready, restart now?", .installUpdate))
         }
         entries.append(contentsOf: [
+            .action("Refresh", .refresh),
             .action("Settings...", .settings),
             .action("About CodexBar", .about),
             .action("Quit", .quit),
@@ -423,8 +435,12 @@ struct MenuDescriptor {
     }
 
     private static func switchAccountTarget(for provider: UsageProvider?, store: UsageStore) -> MenuAction {
-        if let provider { return .switchAccount(provider) }
-        if let enabled = store.enabledProviders().first { return .switchAccount(enabled) }
+        if let provider {
+            return .switchAccount(provider)
+        }
+        if let enabled = store.enabledProviders().first {
+            return .switchAccount(enabled)
+        }
         return .switchAccount(.codex)
     }
 
@@ -494,7 +510,7 @@ extension MenuDescriptor.MenuAction {
         case .refreshAugmentSession: MenuDescriptor.MenuActionSystemImage.refresh.rawValue
         case .dashboard: MenuDescriptor.MenuActionSystemImage.dashboard.rawValue
         case .statusPage: MenuDescriptor.MenuActionSystemImage.statusPage.rawValue
-        case .addCodexAccount: MenuDescriptor.MenuActionSystemImage.addAccount.rawValue
+        case .addCodexAccount, .addProviderAccount: MenuDescriptor.MenuActionSystemImage.addAccount.rawValue
         case .requestCodexSystemPromotion:
             nil
         case .switchAccount: MenuDescriptor.MenuActionSystemImage.switchAccount.rawValue

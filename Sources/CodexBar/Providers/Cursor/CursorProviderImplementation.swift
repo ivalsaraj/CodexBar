@@ -27,7 +27,9 @@ struct CursorProviderImplementation: ProviderImplementation {
     @MainActor
     func tokenAccountsVisibility(context: ProviderSettingsContext, support: TokenAccountSupport) -> Bool {
         guard support.requiresManualCookieSource else { return true }
-        if !context.settings.tokenAccounts(for: context.provider).isEmpty { return true }
+        if !context.settings.tokenAccounts(for: context.provider).isEmpty {
+            return true
+        }
         return context.settings.cursorCookieSource == .manual
     }
 
@@ -90,9 +92,6 @@ struct CursorProviderImplementation: ProviderImplementation {
 
     @MainActor
     func appendUsageMenuEntries(context: ProviderMenuUsageContext, entries: inout [ProviderMenuEntry]) {
-        if let quota = context.snapshot?.cursorRequests {
-            entries.append(.text(quota.summaryText, .secondary))
-        }
         guard let cost = context.snapshot?.providerCost, cost.currencyCode != "Quota" else { return }
         let used = UsageFormatter.currencyString(cost.used, currencyCode: cost.currencyCode)
         if cost.limit > 0 {

@@ -37,7 +37,12 @@ enum ProviderImplementationRegistry {
         case .synthetic: SyntheticProviderImplementation()
         case .openrouter: OpenRouterProviderImplementation()
         case .warp: WarpProviderImplementation()
+        case .windsurf: WindsurfProviderImplementation()
         case .perplexity: PerplexityProviderImplementation()
+        case .abacus: AbacusProviderImplementation()
+        case .mistral: MistralProviderImplementation()
+        case .deepseek: DeepSeekProviderImplementation()
+        case .codebuff: CodebuffProviderImplementation()
         }
     }
 
@@ -71,7 +76,9 @@ enum ProviderImplementationRegistry {
 
     static func implementation(for id: UsageProvider) -> (any ProviderImplementation)? {
         self.ensureBootstrapped()
-        if let found = self.store.byID[id] { return found }
+        if let found = self.store.byID[id] {
+            return found
+        }
         return self.all.first(where: { $0.id == id })
     }
 }

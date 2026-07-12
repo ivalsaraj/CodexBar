@@ -95,6 +95,8 @@ extension CodexManagedOpenAIWebTests {
         settings._test_managedCodexAccountStoreURL = nil
         settings._test_liveSystemCodexAccount = nil
         settings._test_codexReconciliationEnvironment = nil
+        settings.openAIWebAccessEnabled = true
+        settings.codexCookieSource = .auto
         return settings
     }
 
@@ -157,7 +159,9 @@ actor CoalescingManagedOpenAIDashboardLoader {
     }
 
     func waitUntilStarted(count: Int = 1) async {
-        if self.started >= count { return }
+        if self.started >= count {
+            return
+        }
         await withCheckedContinuation { continuation in
             self.startWaiters.append((count: count, continuation: continuation))
         }

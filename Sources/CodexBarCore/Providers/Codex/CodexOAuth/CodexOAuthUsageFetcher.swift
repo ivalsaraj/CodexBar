@@ -6,13 +6,11 @@ import FoundationNetworking
 public struct CodexUsageResponse: Decodable, Sendable {
     public let planType: PlanType?
     public let rateLimit: RateLimitDetails?
-    public let additionalRateLimits: [AdditionalRateLimit]
     public let credits: CreditDetails?
 
     enum CodingKeys: String, CodingKey {
         case planType = "plan_type"
         case rateLimit = "rate_limit"
-        case additionalRateLimits = "additional_rate_limits"
         case credits
     }
 
@@ -20,8 +18,6 @@ public struct CodexUsageResponse: Decodable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.planType = try? container.decodeIfPresent(PlanType.self, forKey: .planType)
         self.rateLimit = try? container.decodeIfPresent(RateLimitDetails.self, forKey: .rateLimit)
-        self.additionalRateLimits = (try? container.decode([AdditionalRateLimit].self, forKey: .additionalRateLimits))
-            ?? []
         self.credits = try? container.decodeIfPresent(CreditDetails.self, forKey: .credits)
     }
 
@@ -166,33 +162,6 @@ public struct CodexUsageResponse: Decodable, Sendable {
             }
         }
     }
-
-    public struct AdditionalRateLimit: Decodable, Sendable {
-        public let limitName: String?
-        public let meteredFeature: String?
-        public let rateLimit: RateLimitDetails?
-        public let primaryWindow: WindowSnapshot?
-        public let secondaryWindow: WindowSnapshot?
-
-        enum CodingKeys: String, CodingKey {
-            case limitName = "limit_name"
-            case meteredFeature = "metered_feature"
-            case rateLimit = "rate_limit"
-            case primaryWindow = "primary_window"
-            case secondaryWindow = "secondary_window"
-        }
-
-        public init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            self.limitName = try container.decodeIfPresent(String.self, forKey: .limitName)
-            self.meteredFeature = try container.decodeIfPresent(String.self, forKey: .meteredFeature)
-            self.rateLimit = try container.decodeIfPresent(RateLimitDetails.self, forKey: .rateLimit)
-            self.primaryWindow = self.rateLimit?.primaryWindow
-                ?? (try? container.decodeIfPresent(WindowSnapshot.self, forKey: .primaryWindow))
-            self.secondaryWindow = self.rateLimit?.secondaryWindow
-                ?? (try? container.decodeIfPresent(WindowSnapshot.self, forKey: .secondaryWindow))
-        }
-    }
 }
 
 public enum CodexOAuthFetchError: LocalizedError, Sendable {
@@ -291,7 +260,9 @@ public enum CodexOAuthUsageFetcher {
 
     private static func normalizeChatGPTBaseURL(_ value: String) -> String {
         var trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { trimmed = Self.defaultChatGPTBaseURL }
+        if trimmed.isEmpty {
+            trimmed = Self.defaultChatGPTBaseURL
+        }
         while trimmed.hasSuffix("/") {
             trimmed.removeLast()
         }

@@ -199,7 +199,7 @@ enum CLIRenderer {
         now: Date,
         lines: inout [String])
     {
-        if provider == .warp || provider == .kilo {
+        if provider == .warp || provider == .kilo || provider == .mistral || provider == .deepseek {
             if let reset = self.resetLineForDetailBackedWindow(window: window, style: context.resetStyle, now: now) {
                 lines.append(self.subtleLine(reset, useColor: context.useColor))
             }
@@ -300,7 +300,7 @@ enum CLIRenderer {
         useColor: Bool,
         now: Date) -> String?
     {
-        guard provider == .codex || provider == .claude else { return nil }
+        guard provider == .codex || provider == .claude || provider == .opencode else { return nil }
         guard window.remainingPercent > 0 else { return nil }
         guard let pace = UsagePace.weekly(window: window, now: now, defaultWindowMinutes: 10080) else { return nil }
         guard pace.expectedUsedPercent >= Self.paceMinimumExpectedPercent else { return nil }
@@ -329,18 +329,26 @@ enum CLIRenderer {
     }
 
     private static func paceRightLabel(for pace: UsagePace, now: Date) -> String? {
-        if pace.willLastToReset { return "Lasts until reset" }
+        if pace.willLastToReset {
+            return "Lasts until reset"
+        }
         guard let etaSeconds = pace.etaSeconds else { return nil }
         let etaText = Self.paceDurationText(seconds: etaSeconds, now: now)
-        if etaText == "now" { return "Runs out now" }
+        if etaText == "now" {
+            return "Runs out now"
+        }
         return "Runs out in \(etaText)"
     }
 
     private static func paceDurationText(seconds: TimeInterval, now: Date) -> String {
         let date = now.addingTimeInterval(seconds)
         let countdown = UsageFormatter.resetCountdownDescription(from: date, now: now)
-        if countdown == "now" { return "now" }
-        if countdown.hasPrefix("in ") { return String(countdown.dropFirst(3)) }
+        if countdown == "now" {
+            return "now"
+        }
+        if countdown.hasPrefix("in ") {
+            return String(countdown.dropFirst(3))
+        }
         return countdown
     }
 

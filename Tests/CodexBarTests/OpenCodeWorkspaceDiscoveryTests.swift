@@ -1,145 +1,146 @@
 import Foundation
 import Testing
+@testable import CodexBar
 @testable import CodexBarCore
 
 @Suite(.serialized)
 struct OpenCodeWorkspaceDiscoveryTests {
-    private func makeSession() -> URLSession {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [OpenCodeStubURLProtocol.self]
-        return URLSession(configuration: config)
-    }
-
     @Test
-    func `parses workspace metadata from seroval response`() {
-        let text = ";0x00000089;((self.$R=self.$R||{})[\"codexbar\"]=[]," +
-            "($R=>$R[0]=[$R[1]={id:\"wrk_01K6AR1ZET89H8NB691FQ2C2VB\",name:\"Default\"," +
-            "slug:null,owner:{name:\"Team Alpha\"}}," +
-            "$R[2]={id:\"wrk_01K6AR1ZET89H8NB691FQ2C2VC\",name:\"Sandbox\",slug:null,owner:{name:\"Personal\"}}])" +
-            "($R[\"codexbar\"]))"
-
-        let workspaces = OpenCodeWorkspaceDiscovery.parseWorkspaces(text: text)
-
-        #expect(workspaces == [
-            OpenCodeDiscoveredWorkspace(
-                workspaceID: "wrk_01K6AR1ZET89H8NB691FQ2C2VB",
-                workspaceLabel: "Default",
-                ownerLabel: "Team Alpha"),
-            OpenCodeDiscoveredWorkspace(
-                workspaceID: "wrk_01K6AR1ZET89H8NB691FQ2C2VC",
-                workspaceLabel: "Sandbox",
-                ownerLabel: "Personal"),
-        ])
-    }
-
-    @Test
-    func `parses workspace metadata from nested JSON fallback`() throws {
-        let payload: [String: Any] = [
-            "workspaces": [
-                [
-                    "id": "wrk_JSON123",
-                    "name": "JSON Workspace",
-                    "owner": [
-                        "name": "JSON Owner",
-                    ],
-                ],
-            ],
-        ]
-        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-        let text = String(data: data, encoding: .utf8) ?? ""
-
-        let workspaces = OpenCodeWorkspaceDiscovery.parseWorkspaces(text: text)
-
-        #expect(workspaces == [
-            OpenCodeDiscoveredWorkspace(
-                workspaceID: "wrk_JSON123",
-                workspaceLabel: "JSON Workspace",
-                ownerLabel: "JSON Owner"),
-        ])
-    }
-
-    @Test
-    func `normalizes workspace identifiers from raw ids and urls`() {
-        #expect(OpenCodeWorkspaceDiscovery.normalizeWorkspaceID("wrk_RAW123") == "wrk_RAW123")
-        #expect(
-            OpenCodeWorkspaceDiscovery
-                .normalizeWorkspaceID("https://opencode.ai/workspace/wrk_URL123/billing")
-                == "wrk_URL123")
-        #expect(OpenCodeWorkspaceDiscovery.normalizeWorkspaceID("workspace=wrk_QUERY123") == "wrk_QUERY123")
-        #expect(OpenCodeWorkspaceDiscovery.normalizeWorkspaceID("not-a-workspace") == nil)
-    }
-
-    @Test
-    func `discovers workspaces from current session`() async throws {
+    func `discoveries return typed labels and owners through injected session`() async throws {
         defer {
             OpenCodeStubURLProtocol.handler = nil
         }
-
         OpenCodeStubURLProtocol.handler = { request in
-            guard let url = request.url else { throw URLError(.badURL) }
-            let body =
-                ";0x00000089;((self.$R=self.$R||{})[\"codexbar\"]=[]," +
-                "($R=>$R[0]=[$R[1]={id:\"wrk_DISCOVER123\",name:\"Discovered\",slug:null,owner:{name:\"Team One\"}}])" +
-                "($R[\"codexbar\"]))"
-            return Self.makeResponse(url: url, body: body, statusCode: 200, contentType: "text/javascript")
-        }
-
-        let workspaces = try await OpenCodeWorkspaceDiscovery.discoverWorkspaces(
-            cookieHeader: "auth=test",
-            timeout: 2,
-            session: self.makeSession())
-
-        #expect(workspaces == [
-            OpenCodeDiscoveredWorkspace(
-                workspaceID: "wrk_DISCOVER123",
-                workspaceLabel: "Discovered",
-                ownerLabel: "Team One"),
-        ])
-    }
-
-    @Test
-    func `discovery retries post when get payload has no workspaces`() async throws {
-        defer {
-            OpenCodeStubURLProtocol.handler = nil
-        }
-
-        var methods: [String] = []
-        OpenCodeStubURLProtocol.handler = { request in
-            guard let url = request.url else { throw URLError(.badURL) }
-            methods.append(request.httpMethod ?? "GET")
-            let body = if methods.count == 1 {
-                #"{"workspaces":[]}"#
-            } else {
-                #"{"workspaces":[{"id":"wrk_POST123","name":"Post Fallback","owner":{"name":"Recovered"}}]}"#
+            let body = """
+            {
+              "data": [
+                {"id": "wrk_ALPHA", "name": "Alpha Workspace", "owner": {"name": "Alice"}},
+                {"id": "wrk_BETA", "label": "Beta Workspace", "owner": {"email": "bob@example.test"}}
+              ]
             }
-            return Self.makeResponse(url: url, body: body, statusCode: 200, contentType: "application/json")
+            """
+            return try Self.makeResponse(url: #require(request.url), body: body, statusCode: 200)
         }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OpenCodeStubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
 
-        let workspaces = try await OpenCodeWorkspaceDiscovery.discoverWorkspaces(
+        let workspaces = try await OpenCodeWorkspaceDiscovery.discover(
             cookieHeader: "auth=test",
             timeout: 2,
-            session: self.makeSession())
+            session: session)
 
-        #expect(methods == ["GET", "POST"])
-        #expect(workspaces == [
-            OpenCodeDiscoveredWorkspace(
-                workspaceID: "wrk_POST123",
-                workspaceLabel: "Post Fallback",
-                ownerLabel: "Recovered"),
-        ])
+        #expect(workspaces.map(\.workspaceID) == ["wrk_ALPHA", "wrk_BETA"])
+        #expect(workspaces.map(\.label) == ["Alpha Workspace", "Beta Workspace"])
+        #expect(workspaces.map(\.ownerLabel) == ["Alice", "bob@example.test"])
+    }
+
+    @Test
+    func `discovery result exposes missing credentials and failures`() async {
+        defer { OpenCodeStubURLProtocol.handler = nil }
+        OpenCodeStubURLProtocol.handler = { request in
+            try Self.makeResponse(url: #require(request.url), body: "{}", statusCode: 500)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OpenCodeStubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+
+        let missing = await OpenCodeWorkspaceDiscovery.resolve(
+            cookieHeader: nil,
+            timeout: 2,
+            session: session)
+        #expect(missing == .missingReusableCredential)
+
+        let failure = await OpenCodeWorkspaceDiscovery.resolve(
+            cookieHeader: "auth=test",
+            timeout: 2,
+            session: session)
+        guard case .discoveryFailed = failure else {
+            Issue.record("Expected a discovery failure result")
+            return
+        }
+    }
+
+    @Test
+    @MainActor
+    func `failed import does not persist first time credential`() async throws {
+        defer { OpenCodeStubURLProtocol.handler = nil }
+        OpenCodeStubURLProtocol.handler = { request in
+            try Self.makeResponse(url: #require(request.url), body: "{}", statusCode: 500)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OpenCodeStubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let suite = "OpenCodeWorkspaceDiscoveryTests-import-no-persist"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        let settings = SettingsStore(
+            userDefaults: defaults,
+            configStore: testConfigStore(suiteName: suite),
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore(),
+            tokenAccountStore: InMemoryTokenAccountStore())
+        settings.opencodeCookieSource = .manual
+        settings.opencodeCookieHeader = "auth=import"
+
+        let results = try await settings.importOpenCodeWorkspaceAccounts(
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            timeout: 2,
+            session: session)
+
+        #expect(results.count == 1)
+        guard case let .discoveryFailed(message) = results[0] else {
+            Issue.record("Expected a typed discovery failure result")
+            return
+        }
+        #expect(message.contains("HTTP 500"))
+        #expect(settings.tokenAccounts(for: .opencode).isEmpty)
+        #expect(settings.opencodeWorkspaceAccounts.accounts.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func `import maps discovery failure to typed mutation result`() async throws {
+        defer { OpenCodeStubURLProtocol.handler = nil }
+        OpenCodeStubURLProtocol.handler = { request in
+            try Self.makeResponse(url: #require(request.url), body: "{}", statusCode: 500)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OpenCodeStubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let suite = "OpenCodeWorkspaceDiscoveryTests-import-failure"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        let settings = SettingsStore(
+            userDefaults: defaults,
+            configStore: testConfigStore(suiteName: suite),
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore(),
+            tokenAccountStore: InMemoryTokenAccountStore())
+        settings.addTokenAccount(provider: .opencode, label: "Shared", token: "auth=shared")
+
+        let results = try await settings.importOpenCodeWorkspaceAccounts(
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            timeout: 2,
+            session: session)
+
+        #expect(results.count == 1)
+        guard case .discoveryFailed = results[0] else {
+            Issue.record("Expected a typed discovery failure result")
+            return
+        }
     }
 
     private static func makeResponse(
         url: URL,
         body: String,
-        statusCode: Int,
-        contentType: String) -> (HTTPURLResponse, Data)
+        statusCode: Int) -> (HTTPURLResponse, Data)
     {
         let response = HTTPURLResponse(
             url: url,
             statusCode: statusCode,
             httpVersion: "HTTP/1.1",
-            headerFields: ["Content-Type": contentType])!
+            headerFields: ["Content-Type": "application/json"])!
         return (response, Data(body.utf8))
     }
 }

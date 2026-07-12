@@ -21,7 +21,8 @@ public enum CodexProviderDescriptor {
                 defaultEnabled: true,
                 isPrimaryProvider: true,
                 usesAccountFallback: true,
-                browserCookieOrder: ProviderBrowserCookieDefaults.defaultImportOrder,
+                browserCookieOrder: ProviderBrowserCookieDefaults.codexCookieImportOrder
+                    ?? ProviderBrowserCookieDefaults.defaultImportOrder,
                 dashboardURL: "https://chatgpt.com/codex/settings/usage",
                 statusPageURL: "https://status.openai.com/"),
             branding: ProviderBranding(
@@ -112,11 +113,9 @@ struct CodexCLIUsageStrategy: ProviderFetchStrategy {
     }
 
     func fetch(_ context: ProviderFetchContext) async throws -> ProviderFetchResult {
-        let keepAlive = context.settings?.debugKeepCLISessionsAlive ?? false
-        let usage = try await context.fetcher.loadLatestUsage(keepCLISessionsAlive: keepAlive)
-        let credits = await context.includeCredits
-            ? (try? context.fetcher.loadLatestCredits(keepCLISessionsAlive: keepAlive))
-            : nil
+        let snapshot = try await context.fetcher.loadLatestCLIAccountSnapshot()
+        guard let usage = snapshot.usage else { throw UsageError.noRateLimitsFound }
+        let credits = context.includeCredits ? snapshot.credits : nil
         return self.makeResult(
             usage: usage,
             credits: credits,

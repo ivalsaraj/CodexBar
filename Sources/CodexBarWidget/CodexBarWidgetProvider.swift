@@ -78,7 +78,12 @@ enum ProviderChoice: String, AppEnum {
         case .synthetic: return nil // Synthetic not yet supported in widgets
         case .openrouter: return nil // OpenRouter not yet supported in widgets
         case .warp: return nil // Warp not yet supported in widgets
+        case .windsurf: return nil // Windsurf not yet supported in widgets
         case .perplexity: return nil // Perplexity not yet supported in widgets
+        case .abacus: return nil // Abacus AI not yet supported in widgets
+        case .mistral: return nil // Mistral not yet supported in widgets
+        case .deepseek: return nil // DeepSeek not yet supported in widgets
+        case .codebuff: return nil // Codebuff not yet supported in widgets
         }
     }
 }
@@ -101,7 +106,7 @@ struct ProviderSelectionIntent: AppIntent, WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Provider"
     static let description = IntentDescription("Select the provider to display in the widget.")
 
-    @Parameter(title: "Provider")
+    @Parameter(title: "Provider", default: .codex)
     var provider: ProviderChoice
 
     init() {
@@ -133,18 +138,33 @@ struct SwitchWidgetOpenCodeWorkspaceIntent: AppIntent {
     static let title: LocalizedStringResource = "Switch OpenCode Workspace"
     static let description = IntentDescription("Switch the OpenCode workspace shown in the widget.")
 
-    @Parameter(title: "Workspace Account ID")
+    @Parameter(title: "Workspace")
     var accountID: String
 
     init() {}
 
-    init(accountID: UUID) {
-        self.accountID = accountID.uuidString
+    init(accountID: String) {
+        self.accountID = accountID
+    }
+
+    static func validatedAccountID(_ accountID: String, snapshot: WidgetSnapshot) -> String? {
+        guard OpenCodeWorkspaceAccount.isCanonicalID(accountID),
+              snapshot.entries.contains(where: {
+                  $0.provider == .opencode && $0.accountID == accountID
+              })
+        else {
+            return nil
+        }
+        return accountID
     }
 
     func perform() async throws -> some IntentResult {
-        WidgetSelectionStore.saveSelectedProvider(.opencode)
-        WidgetSelectionStore.saveSelectedAccountID(UUID(uuidString: self.accountID), for: .opencode)
+        guard let snapshot = WidgetSnapshotStore.load(),
+              let accountID = Self.validatedAccountID(self.accountID, snapshot: snapshot)
+        else {
+            return .result()
+        }
+        WidgetSelectionStore.saveSelectedOpenCodeWorkspaceAccountID(accountID)
         WidgetCenter.shared.reloadAllTimelines()
         return .result()
     }
@@ -154,10 +174,10 @@ struct CompactMetricSelectionIntent: AppIntent, WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Provider + Metric"
     static let description = IntentDescription("Select the provider and metric to display.")
 
-    @Parameter(title: "Provider")
+    @Parameter(title: "Provider", default: .codex)
     var provider: ProviderChoice
 
-    @Parameter(title: "Metric")
+    @Parameter(title: "Metric", default: .credits)
     var metric: CompactMetric
 
     init() {
@@ -169,24 +189,59 @@ struct CompactMetricSelectionIntent: AppIntent, WidgetConfigurationIntent {
 struct CodexBarWidgetEntry: TimelineEntry {
     let date: Date
     let provider: UsageProvider
-    let accountID: UUID?
+    let accountID: String?
     let snapshot: WidgetSnapshot
+
+    init(date: Date, provider: UsageProvider, accountID: String? = nil, snapshot: WidgetSnapshot) {
+        self.date = date
+        self.provider = provider
+        self.accountID = accountID
+        self.snapshot = snapshot
+    }
 }
 
 struct CodexBarCompactEntry: TimelineEntry {
     let date: Date
     let provider: UsageProvider
-    let accountID: UUID?
+    let accountID: String?
     let metric: CompactMetric
     let snapshot: WidgetSnapshot
+
+    init(
+        date: Date,
+        provider: UsageProvider,
+        accountID: String? = nil,
+        metric: CompactMetric,
+        snapshot: WidgetSnapshot)
+    {
+        self.date = date
+        self.provider = provider
+        self.accountID = accountID
+        self.metric = metric
+        self.snapshot = snapshot
+    }
 }
 
 struct CodexBarSwitcherEntry: TimelineEntry {
     let date: Date
     let provider: UsageProvider
-    let accountID: UUID?
+    let accountID: String?
     let availableProviders: [UsageProvider]
     let snapshot: WidgetSnapshot
+
+    init(
+        date: Date,
+        provider: UsageProvider,
+        accountID: String? = nil,
+        availableProviders: [UsageProvider],
+        snapshot: WidgetSnapshot)
+    {
+        self.date = date
+        self.provider = provider
+        self.accountID = accountID
+        self.availableProviders = availableProviders
+        self.snapshot = snapshot
+    }
 }
 
 struct CodexBarTimelineProvider: AppIntentTimelineProvider {
@@ -194,7 +249,6 @@ struct CodexBarTimelineProvider: AppIntentTimelineProvider {
         CodexBarWidgetEntry(
             date: Date(),
             provider: .codex,
-            accountID: nil,
             snapshot: WidgetPreviewData.snapshot())
     }
 
@@ -204,7 +258,9 @@ struct CodexBarTimelineProvider: AppIntentTimelineProvider {
         return CodexBarWidgetEntry(
             date: Date(),
             provider: provider,
-            accountID: Self.selectedAccountID(for: provider, snapshot: snapshot),
+            accountID: CodexBarSwitcherTimelineProvider.selectedOpenCodeWorkspaceAccountID(
+                provider: provider,
+                snapshot: snapshot),
             snapshot: snapshot)
     }
 
@@ -213,26 +269,16 @@ struct CodexBarTimelineProvider: AppIntentTimelineProvider {
         in context: Context) async -> Timeline<CodexBarWidgetEntry>
     {
         let provider = configuration.provider.provider
-        let snapshot = WidgetSnapshotStore.load() ?? WidgetPreviewData.snapshot()
+        let snapshot = WidgetSnapshotStore.load() ?? WidgetPreviewData.emptySnapshot()
         let entry = CodexBarWidgetEntry(
             date: Date(),
             provider: provider,
-            accountID: Self.selectedAccountID(for: provider, snapshot: snapshot),
+            accountID: CodexBarSwitcherTimelineProvider.selectedOpenCodeWorkspaceAccountID(
+                provider: provider,
+                snapshot: snapshot),
             snapshot: snapshot)
         let refresh = Date().addingTimeInterval(30 * 60)
         return Timeline(entries: [entry], policy: .after(refresh))
-    }
-
-    private static func selectedAccountID(for provider: UsageProvider, snapshot: WidgetSnapshot) -> UUID? {
-        guard provider == .opencode else { return nil }
-        let availableAccounts = snapshot.entries(for: .opencode).compactMap(\.accountID)
-        guard !availableAccounts.isEmpty else { return nil }
-        let stored = WidgetSelectionStore.loadSelectedAccountID(for: .opencode)
-        let selected = availableAccounts.first(where: { $0 == stored }) ?? availableAccounts.first
-        if selected != stored {
-            WidgetSelectionStore.saveSelectedAccountID(selected, for: .opencode)
-        }
-        return selected
     }
 }
 
@@ -259,18 +305,17 @@ struct CodexBarSwitcherTimelineProvider: TimelineProvider {
     }
 
     private func makeEntry() -> CodexBarSwitcherEntry {
-        let snapshot = WidgetSnapshotStore.load() ?? WidgetPreviewData.snapshot()
+        let snapshot = WidgetSnapshotStore.load() ?? WidgetPreviewData.emptySnapshot()
         let providers = self.availableProviders(from: snapshot)
         let stored = WidgetSelectionStore.loadSelectedProvider()
         let selected = providers.first { $0 == stored } ?? providers.first ?? .codex
         if selected != stored {
             WidgetSelectionStore.saveSelectedProvider(selected)
         }
-        let accountID = Self.selectedAccountID(for: selected, snapshot: snapshot)
         return CodexBarSwitcherEntry(
             date: Date(),
             provider: selected,
-            accountID: accountID,
+            accountID: Self.selectedOpenCodeWorkspaceAccountID(provider: selected, snapshot: snapshot),
             availableProviders: providers,
             snapshot: snapshot)
     }
@@ -286,16 +331,15 @@ struct CodexBarSwitcherTimelineProvider: TimelineProvider {
         return supported.isEmpty ? [.codex] : supported
     }
 
-    private static func selectedAccountID(for provider: UsageProvider, snapshot: WidgetSnapshot) -> UUID? {
+    static func selectedOpenCodeWorkspaceAccountID(
+        provider: UsageProvider,
+        snapshot: WidgetSnapshot) -> String?
+    {
         guard provider == .opencode else { return nil }
-        let availableAccounts = snapshot.entries(for: .opencode).compactMap(\.accountID)
-        guard !availableAccounts.isEmpty else { return nil }
-        let stored = WidgetSelectionStore.loadSelectedAccountID(for: .opencode)
-        let selected = availableAccounts.first(where: { $0 == stored }) ?? availableAccounts.first
-        if selected != stored {
-            WidgetSelectionStore.saveSelectedAccountID(selected, for: .opencode)
-        }
-        return selected
+        let entries = snapshot.entries.filter { $0.provider == .opencode && $0.accountID != nil }
+        let stored = WidgetSelectionStore.loadSelectedOpenCodeWorkspaceAccountID()
+        return entries.first(where: { $0.accountID == stored })?.accountID
+            ?? entries.first?.accountID
     }
 }
 
@@ -304,19 +348,21 @@ struct CodexBarCompactTimelineProvider: AppIntentTimelineProvider {
         CodexBarCompactEntry(
             date: Date(),
             provider: .codex,
-            accountID: nil,
             metric: .credits,
             snapshot: WidgetPreviewData.snapshot())
     }
 
     func snapshot(for configuration: CompactMetricSelectionIntent, in context: Context) async -> CodexBarCompactEntry {
         let provider = configuration.provider.provider
+        let metric = configuration.metric
         let snapshot = WidgetSnapshotStore.load() ?? WidgetPreviewData.snapshot()
         return CodexBarCompactEntry(
             date: Date(),
             provider: provider,
-            accountID: Self.selectedAccountID(for: provider, snapshot: snapshot),
-            metric: configuration.metric,
+            accountID: CodexBarSwitcherTimelineProvider.selectedOpenCodeWorkspaceAccountID(
+                provider: provider,
+                snapshot: snapshot),
+            metric: metric,
             snapshot: snapshot)
     }
 
@@ -325,31 +371,26 @@ struct CodexBarCompactTimelineProvider: AppIntentTimelineProvider {
         in context: Context) async -> Timeline<CodexBarCompactEntry>
     {
         let provider = configuration.provider.provider
-        let snapshot = WidgetSnapshotStore.load() ?? WidgetPreviewData.snapshot()
+        let metric = configuration.metric
+        let snapshot = WidgetSnapshotStore.load() ?? WidgetPreviewData.emptySnapshot()
         let entry = CodexBarCompactEntry(
             date: Date(),
             provider: provider,
-            accountID: Self.selectedAccountID(for: provider, snapshot: snapshot),
-            metric: configuration.metric,
+            accountID: CodexBarSwitcherTimelineProvider.selectedOpenCodeWorkspaceAccountID(
+                provider: provider,
+                snapshot: snapshot),
+            metric: metric,
             snapshot: snapshot)
         let refresh = Date().addingTimeInterval(30 * 60)
         return Timeline(entries: [entry], policy: .after(refresh))
     }
-
-    private static func selectedAccountID(for provider: UsageProvider, snapshot: WidgetSnapshot) -> UUID? {
-        guard provider == .opencode else { return nil }
-        let availableAccounts = snapshot.entries(for: .opencode).compactMap(\.accountID)
-        guard !availableAccounts.isEmpty else { return nil }
-        let stored = WidgetSelectionStore.loadSelectedAccountID(for: .opencode)
-        let selected = availableAccounts.first(where: { $0 == stored }) ?? availableAccounts.first
-        if selected != stored {
-            WidgetSelectionStore.saveSelectedAccountID(selected, for: .opencode)
-        }
-        return selected
-    }
 }
 
 enum WidgetPreviewData {
+    static func emptySnapshot() -> WidgetSnapshot {
+        WidgetSnapshot(entries: [], enabledProviders: [], generatedAt: Date())
+    }
+
     static func snapshot() -> WidgetSnapshot {
         let primary = RateWindow(usedPercent: 35, windowMinutes: nil, resetsAt: nil, resetDescription: "Resets in 4h")
         let secondary = RateWindow(usedPercent: 60, windowMinutes: nil, resetsAt: nil, resetDescription: "Resets in 3d")

@@ -43,6 +43,34 @@ struct CLISnapshotTests {
     }
 
     @Test
+    func `renders Codex prolite plan with spaced display name`() {
+        let identity = ProviderIdentitySnapshot(
+            providerID: .codex,
+            accountEmail: "user@example.com",
+            accountOrganization: nil,
+            loginMethod: "prolite")
+        let snap = UsageSnapshot(
+            primary: .init(usedPercent: 12, windowMinutes: 300, resetsAt: nil, resetDescription: "today at 3:00 PM"),
+            secondary: nil,
+            tertiary: nil,
+            updatedAt: Date(timeIntervalSince1970: 0),
+            identity: identity)
+
+        let output = CLIRenderer.renderText(
+            provider: .codex,
+            snapshot: snap,
+            credits: nil,
+            context: RenderContext(
+                header: "Codex 1.2.3 (codex-cli)",
+                status: nil,
+                useColor: false,
+                resetStyle: .absolute))
+
+        #expect(output.contains("Plan: Pro Lite"))
+        #expect(!output.contains("Plan: Prolite"))
+    }
+
+    @Test
     func `renders text snapshot for claude without weekly`() {
         let snap = UsageSnapshot(
             primary: .init(usedPercent: 2, windowMinutes: nil, resetsAt: nil, resetDescription: "3pm (Europe/Vienna)"),
@@ -245,42 +273,6 @@ struct CLISnapshotTests {
     }
 
     @Test
-    func `does not render pace line for opencode`() {
-        let now = Date()
-        let snap = UsageSnapshot(
-            primary: .init(
-                usedPercent: 54,
-                windowMinutes: 300,
-                resetsAt: now.addingTimeInterval(90 * 60),
-                resetDescription: nil),
-            secondary: .init(
-                usedPercent: 69,
-                windowMinutes: 10080,
-                resetsAt: now.addingTimeInterval(2 * 24 * 60 * 60 + 11 * 60 * 60),
-                resetDescription: nil),
-            tertiary: .init(
-                usedPercent: 34,
-                windowMinutes: 30 * 24 * 60,
-                resetsAt: now.addingTimeInterval(29 * 24 * 60 * 60),
-                resetDescription: nil),
-            updatedAt: now)
-
-        let output = CLIRenderer.renderText(
-            provider: .opencode,
-            snapshot: snap,
-            credits: nil,
-            context: RenderContext(
-                header: "CodexBar 0.0.0",
-                status: nil,
-                useColor: false,
-                resetStyle: .countdown))
-
-        #expect(!output.contains("Pace:"))
-        #expect(!output.contains("reserve"))
-        #expect(!output.contains("deficit"))
-    }
-
-    @Test
     func `renders JSON payload`() throws {
         let snap = UsageSnapshot(
             primary: .init(usedPercent: 50, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
@@ -460,5 +452,28 @@ struct CLISnapshotTests {
 
         #expect(!output.contains("\u{001B}["))
         #expect(output.contains("Status: Operational – Operational"))
+    }
+
+    @Test
+    func `renders 5-hour tertiary row for zai`() {
+        let snap = UsageSnapshot(
+            primary: .init(usedPercent: 9, windowMinutes: 10080, resetsAt: nil, resetDescription: nil),
+            secondary: .init(usedPercent: 50, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            tertiary: .init(usedPercent: 25, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+            updatedAt: Date(timeIntervalSince1970: 0))
+
+        let output = CLIRenderer.renderText(
+            provider: .zai,
+            snapshot: snap,
+            credits: nil,
+            context: RenderContext(
+                header: "z.ai 0.0.0 (zai)",
+                status: nil,
+                useColor: false,
+                resetStyle: .absolute))
+
+        #expect(output.contains("5-hour:"))
+        #expect(output.contains("Tokens:"))
+        #expect(output.contains("MCP:"))
     }
 }

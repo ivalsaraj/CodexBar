@@ -167,8 +167,8 @@ struct ProviderDetailView<SupplementaryContent: View>: View {
         if let providerCost = self.model.providerCost {
             metricLabels.append(providerCost.title)
         }
-        if let tokenUsage = self.model.tokenUsage {
-            metricLabels.append(tokenUsage.title)
+        if self.model.tokenUsage != nil {
+            metricLabels.append("Cost")
         }
 
         let infoWidth = ProviderSettingsMetrics.labelWidth(
@@ -237,7 +237,9 @@ private struct ProviderDetailHeaderView: View {
         let first = lines[0]
         let rest = lines.dropFirst().joined(separator: "\n")
         let tail = rest.trimmingCharacters(in: .whitespacesAndNewlines)
-        if tail.isEmpty { return String(first) }
+        if tail.isEmpty {
+            return String(first)
+        }
         return "\(first) • \(tail)"
     }
 }
@@ -314,6 +316,9 @@ private struct ProviderDetailInfoGrid: View {
         if self.store.refreshingProviders.contains(self.provider) {
             return "Refreshing"
         }
+        if self.store.unavailableMessage(for: self.provider) != nil {
+            return "Unavailable"
+        }
         return "Not fetched yet"
     }
 }
@@ -388,15 +393,13 @@ struct ProviderMetricsInlineView: View {
 
                 if let tokenUsage = self.model.tokenUsage {
                     ProviderMetricInlineTextRow(
-                        title: tokenUsage.title,
+                        title: "Cost",
                         value: tokenUsage.sessionLine,
                         labelWidth: self.labelWidth)
-                    if let monthLine = tokenUsage.monthLine {
-                        ProviderMetricInlineTextRow(
-                            title: "",
-                            value: monthLine,
-                            labelWidth: self.labelWidth)
-                    }
+                    ProviderMetricInlineTextRow(
+                        title: "",
+                        value: tokenUsage.monthLine,
+                        labelWidth: self.labelWidth)
                 }
             }
         }

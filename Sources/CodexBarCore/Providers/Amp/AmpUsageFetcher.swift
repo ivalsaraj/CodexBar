@@ -65,7 +65,7 @@ public enum AmpCookieImporter {
         for browserSource in installed {
             do {
                 let query = BrowserCookieQuery(domains: self.cookieDomains)
-                let sources = try Self.cookieClient.records(
+                let sources = try Self.cookieClient.codexBarRecords(
                     matching: query,
                     in: browserSource,
                     logger: log)
@@ -272,7 +272,9 @@ public struct AmpUsageFetcher: Sendable {
     }
 
     @MainActor private static func recordDump(_ text: String) {
-        if self.recentDumps.count >= 5 { self.recentDumps.removeFirst() }
+        if self.recentDumps.count >= 5 {
+            self.recentDumps.removeFirst()
+        }
         self.recentDumps.append(text)
     }
 
@@ -375,7 +377,9 @@ public struct AmpUsageFetcher: Sendable {
 
     static func shouldAttachCookie(to url: URL?) -> Bool {
         guard let host = url?.host?.lowercased() else { return false }
-        if host == "ampcode.com" || host == "www.ampcode.com" { return true }
+        if host == "ampcode.com" || host == "www.ampcode.com" {
+            return true
+        }
         return host.hasSuffix(".ampcode.com")
     }
 
@@ -384,17 +388,29 @@ public struct AmpUsageFetcher: Sendable {
 
         let path = url.path.lowercased()
         let components = path.split(separator: "/").map(String.init)
-        if components.contains("login") { return true }
-        if components.contains("signin") { return true }
-        if components.contains("sign-in") { return true }
+        if components.contains("login") {
+            return true
+        }
+        if components.contains("signin") {
+            return true
+        }
+        if components.contains("sign-in") {
+            return true
+        }
 
         // Amp currently redirects to /auth/sign-in?returnTo=... when session is invalid. Keep this slightly broader
         // than one exact path so we keep working if Amp changes auth routes.
         if components.contains("auth") {
             let query = url.query?.lowercased() ?? ""
-            if query.contains("returnto=") { return true }
-            if query.contains("redirect=") { return true }
-            if query.contains("redirectto=") { return true }
+            if query.contains("returnto=") {
+                return true
+            }
+            if query.contains("redirect=") {
+                return true
+            }
+            if query.contains("redirectto=") {
+                return true
+            }
         }
 
         return false

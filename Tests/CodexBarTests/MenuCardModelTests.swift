@@ -4,7 +4,7 @@ import SwiftUI
 import Testing
 @testable import CodexBar
 
-@Suite
+// swiftlint:disable:next type_body_length
 struct MenuCardModelTests {
     @Test
     func `builds metrics using remaining percent`() throws {
@@ -126,6 +126,74 @@ struct MenuCardModelTests {
     }
 
     @Test
+    func `claude model includes design and routines bars when present`() throws {
+        let now = Date()
+        let identity = ProviderIdentitySnapshot(
+            providerID: .claude,
+            accountEmail: nil,
+            accountOrganization: nil,
+            loginMethod: "Max")
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(
+                usedPercent: 2,
+                windowMinutes: nil,
+                resetsAt: now.addingTimeInterval(3600),
+                resetDescription: nil),
+            secondary: RateWindow(
+                usedPercent: 8,
+                windowMinutes: 10080,
+                resetsAt: now.addingTimeInterval(7200),
+                resetDescription: nil),
+            tertiary: RateWindow(
+                usedPercent: 16,
+                windowMinutes: 10080,
+                resetsAt: now.addingTimeInterval(7800),
+                resetDescription: nil),
+            extraRateWindows: [
+                NamedRateWindow(
+                    id: "claude-design",
+                    title: "Designs",
+                    window: RateWindow(
+                        usedPercent: 31,
+                        windowMinutes: 10080,
+                        resetsAt: now.addingTimeInterval(8200),
+                        resetDescription: nil)),
+                NamedRateWindow(
+                    id: "claude-routines",
+                    title: "Daily Routines",
+                    window: RateWindow(
+                        usedPercent: 7,
+                        windowMinutes: 10080,
+                        resetsAt: now.addingTimeInterval(9200),
+                        resetDescription: nil)),
+            ],
+            updatedAt: now,
+            identity: identity)
+        let metadata = try #require(ProviderDefaults.metadata[.claude])
+        let model = UsageMenuCardView.Model.make(.init(
+            provider: .claude,
+            metadata: metadata,
+            snapshot: snapshot,
+            credits: nil,
+            creditsError: nil,
+            dashboard: nil,
+            dashboardError: nil,
+            tokenSnapshot: nil,
+            tokenError: nil,
+            account: AccountInfo(email: "codex@example.com", plan: "plus"),
+            isRefreshing: false,
+            lastError: nil,
+            usageBarsShowUsed: false,
+            resetTimeDisplayStyle: .countdown,
+            tokenCostUsageEnabled: false,
+            showOptionalCreditsAndExtraUsage: true,
+            hidePersonalInfo: false,
+            now: now))
+
+        #expect(model.metrics.map(\.title) == ["Session", "Weekly", "Sonnet", "Designs", "Daily Routines"])
+    }
+
+    @Test
     func `shows error subtitle when present`() throws {
         let metadata = try #require(ProviderDefaults.metadata[.codex])
         let model = UsageMenuCardView.Model.make(.init(
@@ -189,22 +257,145 @@ struct MenuCardModelTests {
             hidePersonalInfo: false,
             now: now))
 
-        #expect(model.tokenUsage?.monthLine?.contains("456") == true)
-        #expect(model.tokenUsage?.monthLine?.contains("tokens") == true)
+        #expect(model.tokenUsage?.monthLine.contains("456") == true)
+        #expect(model.tokenUsage?.monthLine.contains("tokens") == true)
     }
 
     @Test
-    func `cursor model includes billing cycle token usage`() throws {
+    func `cursor menu model uses the selected range and preserves its selection callback`() throws {
         let now = Date()
-        let metadata = try #require(ProviderDefaults.metadata[.cursor])
+        let request = CursorRecentRequest(
+            timestamp: now.addingTimeInterval(-60),
+            model: "gpt-5.5-extra-high",
+            tokens: 1000,
+            requests: 1,
+            requestCost: 2)
+        let cycle = CursorRangeUsageSummary(
+            rangeKind: .billingCycle,
+            range: CursorRecentRequestRange(start: now.addingTimeInterval(-3600), end: now),
+            tokens: 1000,
+            requests: 1,
+            weightedRequestCost: 2,
+            requestCostSummary: nil,
+            recentRequests: [request])
+        let last30Days = CursorRangeUsageSummary(
+            rangeKind: .last30Days,
+            range: CursorRecentRequestRange(start: now.addingTimeInterval(-2_592_000), end: now),
+            tokens: 2000,
+            requests: 1,
+            weightedRequestCost: 2,
+            requestCostSummary: nil,
+            recentRequests: [request])
         let snapshot = UsageSnapshot(
-            primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            primary: nil,
             secondary: nil,
-            tertiary: nil,
-            cursorRequests: CursorRequestUsage(used: 70, limit: 500),
-            cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 86_684_822),
+            cursorRangeSummaries: [cycle, last30Days],
             updatedAt: now)
+        let metadata = try #require(ProviderDefaults.metadata[.cursor])
+        var selectedRange: CursorUsageRangeKind?
+        let model = UsageMenuCardView.Model.make(.init(
+            provider: .cursor,
+            metadata: metadata,
+            snapshot: snapshot,
+            credits: nil,
+            creditsError: nil,
+            dashboard: nil,
+            dashboardError: nil,
+            tokenSnapshot: nil,
+            tokenError: nil,
+            account: AccountInfo(email: nil, plan: nil),
+            isRefreshing: false,
+            lastError: nil,
+            usageBarsShowUsed: false,
+            resetTimeDisplayStyle: .countdown,
+            tokenCostUsageEnabled: false,
+            showOptionalCreditsAndExtraUsage: true,
+            hidePersonalInfo: false,
+            cursorUsageRangeKind: .last30Days,
+            selectCursorUsageRange: { selectedRange = $0 },
+            now: now))
+        let tokenUsage = try #require(model.tokenUsage)
 
+        #expect(tokenUsage.title == "Cursor usage")
+        #expect(tokenUsage.sessionLine == "30d: 2K tokens")
+        #expect(tokenUsage.selectedCursorRangeKind == .last30Days)
+        #expect(tokenUsage.cursorRequestDetails.first?.requestCost == 2)
+        tokenUsage.selectCursorRange?(.billingCycle)
+        #expect(selectedRange == .billingCycle)
+    }
+
+    @Test
+    func `cursor menu model falls back to the available 30 day range`() throws {
+        let now = Date()
+        let request = CursorRecentRequest(
+            timestamp: now.addingTimeInterval(-60),
+            model: "gpt-5.5",
+            tokens: 1000,
+            requests: 1)
+        let last30Days = CursorRangeUsageSummary(
+            rangeKind: .last30Days,
+            range: CursorRecentRequestRange(start: now.addingTimeInterval(-2_592_000), end: now),
+            tokens: 1000,
+            requests: 1,
+            requestCostSummary: nil,
+            recentRequests: [request])
+        let snapshot = UsageSnapshot(
+            primary: nil,
+            secondary: nil,
+            cursorRangeSummaries: [last30Days],
+            updatedAt: now)
+        let metadata = try #require(ProviderDefaults.metadata[.cursor])
+        let model = UsageMenuCardView.Model.make(.init(
+            provider: .cursor,
+            metadata: metadata,
+            snapshot: snapshot,
+            credits: nil,
+            creditsError: nil,
+            dashboard: nil,
+            dashboardError: nil,
+            tokenSnapshot: nil,
+            tokenError: nil,
+            account: AccountInfo(email: nil, plan: nil),
+            isRefreshing: false,
+            lastError: nil,
+            usageBarsShowUsed: false,
+            resetTimeDisplayStyle: .countdown,
+            tokenCostUsageEnabled: false,
+            showOptionalCreditsAndExtraUsage: true,
+            hidePersonalInfo: false,
+            cursorUsageRangeKind: .billingCycle,
+            now: now))
+        let tokenUsage = try #require(model.tokenUsage)
+
+        #expect(tokenUsage.sessionLine == "30d: 1K tokens")
+        #expect(tokenUsage.selectedCursorRangeKind == .last30Days)
+        #expect(tokenUsage.cursorRangeKinds == [.last30Days])
+    }
+
+    @Test
+    @MainActor
+    func `cursor menu policy forwards scrolling for long request details`() throws {
+        let now = Date()
+        let requests = (0..<8).map { index in
+            CursorRecentRequest(
+                timestamp: now.addingTimeInterval(Double(-index)),
+                model: "gpt-5.5",
+                tokens: 1000,
+                requests: 1)
+        }
+        let summary = CursorRangeUsageSummary(
+            rangeKind: .billingCycle,
+            range: CursorRecentRequestRange(start: now.addingTimeInterval(-3600), end: now),
+            tokens: 8000,
+            requests: 8,
+            requestCostSummary: nil,
+            recentRequests: requests)
+        let snapshot = UsageSnapshot(
+            primary: nil,
+            secondary: nil,
+            cursorRangeSummaries: [summary],
+            updatedAt: now)
+        let metadata = try #require(ProviderDefaults.metadata[.cursor])
         let model = UsageMenuCardView.Model.make(.init(
             provider: .cursor,
             metadata: metadata,
@@ -225,10 +416,7 @@ struct MenuCardModelTests {
             hidePersonalInfo: false,
             now: now))
 
-        #expect(model.tokenUsage?.title == "Tokens")
-        // Legacy request-backed plans keep request quota primary; cycle tokens move secondary.
-        #expect(model.tokenUsage?.sessionLine == "Requests: 70 / 500")
-        #expect(model.tokenUsage?.monthLine == "Cycle: 87M tokens")
+        #expect(StatusItemController.menuCardInteractionPolicy(for: model) == .scrollableContent)
     }
 
     @Test
@@ -256,89 +444,6 @@ struct MenuCardModelTests {
 
         #expect(model.planText == nil)
         #expect(model.email.isEmpty)
-    }
-
-    @Test
-    func showsLoadingSubtitleWhileSwitchingAccountsEvenWhenSnapshotExists() throws {
-        let now = Date()
-        let metadata = try #require(ProviderDefaults.metadata[.codex])
-        let identity = ProviderIdentitySnapshot(
-            providerID: .codex,
-            accountEmail: "first@example.com",
-            accountOrganization: nil,
-            loginMethod: nil)
-        let snapshot = UsageSnapshot(
-            primary: RateWindow(
-                usedPercent: 35,
-                windowMinutes: 300,
-                resetsAt: now.addingTimeInterval(600),
-                resetDescription: nil),
-            secondary: nil,
-            tertiary: nil,
-            updatedAt: now,
-            identity: identity)
-        let model = UsageMenuCardView.Model.make(.init(
-            provider: .codex,
-            metadata: metadata,
-            snapshot: snapshot,
-            credits: nil,
-            creditsError: nil,
-            dashboard: nil,
-            dashboardError: nil,
-            tokenSnapshot: nil,
-            tokenError: nil,
-            account: AccountInfo(email: nil, plan: nil),
-            isRefreshing: false,
-            lastError: nil,
-            usageBarsShowUsed: false,
-            resetTimeDisplayStyle: .countdown,
-            tokenCostUsageEnabled: false,
-            showOptionalCreditsAndExtraUsage: true,
-            hidePersonalInfo: false,
-            forceLoadingSubtitle: true,
-            now: now))
-
-        #expect(model.subtitleStyle == .loading)
-        #expect(model.subtitleText == "Loading account...")
-    }
-
-    @Test
-    func hidesCodexCreditsWhenDisabled() throws {
-        let now = Date()
-        let identity = ProviderIdentitySnapshot(
-            providerID: .codex,
-            accountEmail: "codex@example.com",
-            accountOrganization: nil,
-            loginMethod: nil)
-        let snapshot = UsageSnapshot(
-            primary: RateWindow(usedPercent: 0, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
-            secondary: nil,
-            tertiary: nil,
-            updatedAt: now,
-            identity: identity)
-        let metadata = try #require(ProviderDefaults.metadata[.codex])
-
-        let model = UsageMenuCardView.Model.make(.init(
-            provider: .codex,
-            metadata: metadata,
-            snapshot: snapshot,
-            credits: CreditsSnapshot(remaining: 12, events: [], updatedAt: now),
-            creditsError: nil,
-            dashboard: nil,
-            dashboardError: nil,
-            tokenSnapshot: nil,
-            tokenError: nil,
-            account: AccountInfo(email: "codex@example.com", plan: nil),
-            isRefreshing: false,
-            lastError: nil,
-            usageBarsShowUsed: false,
-            resetTimeDisplayStyle: .countdown,
-            tokenCostUsageEnabled: false,
-            showOptionalCreditsAndExtraUsage: false,
-            hidePersonalInfo: false,
-            now: now))
-
-        #expect(model.creditsText == nil)
     }
 
     @Test
@@ -828,5 +933,51 @@ struct MenuCardModelTests {
         let primary = try #require(model.metrics.first)
         #expect(primary.resetText == nil)
         #expect(primary.detailText == "10/100 credits")
+    }
+
+    @Test
+    func `mistral model surfaces monthly cost as primary detail text`() throws {
+        let now = Date()
+        let resetsAt = now.addingTimeInterval(3 * 24 * 60 * 60)
+        let identity = ProviderIdentitySnapshot(
+            providerID: .mistral,
+            accountEmail: nil,
+            accountOrganization: nil,
+            loginMethod: nil)
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(
+                usedPercent: 0,
+                windowMinutes: nil,
+                resetsAt: resetsAt,
+                resetDescription: "€1.2345 this month"),
+            secondary: nil,
+            tertiary: nil,
+            updatedAt: now,
+            identity: identity)
+        let metadata = try #require(ProviderDefaults.metadata[.mistral])
+
+        let model = UsageMenuCardView.Model.make(.init(
+            provider: .mistral,
+            metadata: metadata,
+            snapshot: snapshot,
+            credits: nil,
+            creditsError: nil,
+            dashboard: nil,
+            dashboardError: nil,
+            tokenSnapshot: nil,
+            tokenError: nil,
+            account: AccountInfo(email: nil, plan: nil),
+            isRefreshing: false,
+            lastError: nil,
+            usageBarsShowUsed: true,
+            resetTimeDisplayStyle: .countdown,
+            tokenCostUsageEnabled: false,
+            showOptionalCreditsAndExtraUsage: true,
+            hidePersonalInfo: false,
+            now: now))
+
+        let primary = try #require(model.metrics.first)
+        #expect(primary.detailText == "€1.2345 this month")
+        #expect(primary.resetText?.hasPrefix("Resets") == true)
     }
 }

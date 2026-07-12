@@ -101,15 +101,16 @@ extension UsageStore {
         if let override = self._test_codexCreditsLoaderOverride {
             return try await override()
         }
-        return try await self.codexCreditsFetcher().loadLatestCredits(
-            keepCLISessionsAlive: self.settings.debugKeepCLISessionsAlive)
+        return try await self.codexCreditsFetcher().loadLatestCredits()
     }
 
     func waitForCodexSnapshot(minimumUpdatedAt: Date) async -> UsageSnapshot? {
         let deadline = Date().addingTimeInterval(Self.codexSnapshotWaitTimeoutSeconds)
 
         while Date() < deadline {
-            if Task.isCancelled { return nil }
+            if Task.isCancelled {
+                return nil
+            }
             if let snapshot = await MainActor.run(body: { self.snapshots[.codex] }),
                snapshot.updatedAt >= minimumUpdatedAt
             {
@@ -126,7 +127,9 @@ extension UsageStore {
         let refreshStartDeadline = Date().addingTimeInterval(Self.codexRefreshStartGraceSeconds)
 
         while Date() < deadline {
-            if Task.isCancelled { return nil }
+            if Task.isCancelled {
+                return nil
+            }
             let state = await MainActor.run {
                 (
                     snapshot: self.snapshots[.codex],

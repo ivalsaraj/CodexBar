@@ -226,6 +226,55 @@ struct CodexManagedOpenAIWebTests {
     }
 
     @Test
+    func `successful dashboard apply preserves cached open A I web view for same account`() async {
+        let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-preserve-cache-on-success")
+        let managedAccount = ManagedCodexAccount(
+            id: UUID(),
+            email: "managed@example.com",
+            managedHomePath: "/tmp/managed-codex-home",
+            createdAt: 1,
+            updatedAt: 1,
+            lastAuthenticatedAt: 1)
+        settings._test_activeManagedCodexAccount = managedAccount
+        settings.codexActiveSource = .managedAccount(id: managedAccount.id)
+        defer { settings._test_activeManagedCodexAccount = nil }
+
+        OpenAIDashboardWebsiteDataStore.clearCacheForTesting()
+        let cache = OpenAIDashboardWebViewCache.shared
+        cache.clearAllForTesting()
+        defer {
+            cache.clearAllForTesting()
+            OpenAIDashboardWebsiteDataStore.clearCacheForTesting()
+        }
+
+        let store = UsageStore(
+            fetcher: UsageFetcher(environment: [:]),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings,
+            startupBehavior: .testing)
+        let websiteDataStore = OpenAIDashboardWebsiteDataStore.store(forAccountEmail: managedAccount.email)
+        cache.cacheEntryForTesting(websiteDataStore: websiteDataStore)
+
+        #expect(cache.hasCachedEntry(for: websiteDataStore))
+
+        await store.applyOpenAIDashboard(
+            OpenAIDashboardSnapshot(
+                signedInEmail: managedAccount.email,
+                codeReviewRemainingPercent: 90,
+                creditEvents: [],
+                dailyBreakdown: [],
+                usageBreakdown: [],
+                creditsPurchaseURL: nil,
+                creditsRemaining: 10,
+                accountPlan: "Pro",
+                updatedAt: Date()),
+            targetEmail: managedAccount.email)
+
+        #expect(cache.hasCachedEntry(for: websiteDataStore))
+        #expect(cache.entryCount == 1)
+    }
+
+    @Test
     func `dashboard refresh does not target stale last known live email`() async {
         let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-live-system-refresh-strict-target")
         let isolatedHome = FileManager.default.temporaryDirectory
@@ -788,6 +837,45 @@ struct CodexManagedOpenAIWebTests {
             store.lastOpenAIDashboardError ==
                 "OpenAI cookies are for rdsarna@gmail.com, not ratulsarna@gmail.com. " +
                 "Switch chatgpt.com account, then refresh OpenAI cookies.")
+        #expect(store.openAIDashboard == nil)
+    }
+
+    @Test
+    func `managed codex refresh reports no matching web session without fake account`() async {
+        let settings = self.makeSettingsStore(suite: "CodexManagedOpenAIWebTests-no-matching-web-session")
+        let managedAccount = ManagedCodexAccount(
+            id: UUID(),
+            email: "ratulsarna@gmail.com",
+            managedHomePath: "/tmp/managed-codex-home",
+            createdAt: 1,
+            updatedAt: 1,
+            lastAuthenticatedAt: 1)
+        settings._test_activeManagedCodexAccount = managedAccount
+        settings.codexActiveSource = .managedAccount(id: managedAccount.id)
+        defer { settings._test_activeManagedCodexAccount = nil }
+
+        let store = UsageStore(
+            fetcher: UsageFetcher(environment: [:]),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings,
+            startupBehavior: .testing)
+
+        store._test_openAIDashboardLoaderOverride = { _, _, _ in
+            throw OpenAIDashboardFetcher.FetchError.loginRequired
+        }
+        defer { store._test_openAIDashboardLoaderOverride = nil }
+        store._test_openAIDashboardCookieImportOverride = { _, _, _, _, _ in
+            throw OpenAIDashboardBrowserCookieImporter.ImportError.noMatchingAccount(found: [])
+        }
+        defer { store._test_openAIDashboardCookieImportOverride = nil }
+
+        let expectedGuard = store.currentCodexOpenAIWebRefreshGuard()
+        await store.refreshOpenAIDashboardIfNeeded(force: true, expectedGuard: expectedGuard)
+
+        #expect(
+            store.lastOpenAIDashboardError ==
+                "No matching OpenAI web session found for ratulsarna@gmail.com. " +
+                "Sign in to chatgpt.com as ratulsarna@gmail.com, then refresh OpenAI cookies.")
         #expect(store.openAIDashboard == nil)
     }
 }

@@ -23,7 +23,9 @@ enum TestProcessCleanup {
         let deadline = Date().addingTimeInterval(0.6)
         while Date() < deadline {
             let stillRunning = pids.contains(where: { kill($0, 0) == 0 })
-            if !stillRunning { return }
+            if !stillRunning {
+                return
+            }
             usleep(50000)
         }
 
@@ -50,7 +52,9 @@ enum TestProcessCleanup {
         proc.waitUntilExit()
 
         // Exit code 1 = "no processes matched".
-        if proc.terminationStatus != 0 { return [] }
+        if proc.terminationStatus != 0 {
+            return []
+        }
 
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
         guard let text = String(data: data, encoding: .utf8) else { return [] }

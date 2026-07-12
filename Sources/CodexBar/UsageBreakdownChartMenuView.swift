@@ -146,7 +146,7 @@ struct UsageBreakdownChartMenuView: View {
     private static let selectionBandColor = Color(nsColor: .labelColor).opacity(0.1)
 
     private static func makeModel(from breakdown: [OpenAIDashboardDailyBreakdown]) -> Model {
-        let sorted = breakdown
+        let sorted = OpenAIDashboardDailyBreakdown.removingSkillUsageServices(from: breakdown)
             .sorted { lhs, rhs in lhs.day < rhs.day }
 
         var points: [Point] = []
@@ -170,7 +170,9 @@ struct UsageBreakdownChartMenuView: View {
             dayDates.append((dayKey: day.day, date: date))
             if day.totalCreditsUsed > 0 {
                 if let cur = peak {
-                    if day.totalCreditsUsed > cur.creditsUsed { peak = (date, day.totalCreditsUsed) }
+                    if day.totalCreditsUsed > cur.creditsUsed {
+                        peak = (date, day.totalCreditsUsed)
+                    }
                 } else {
                     peak = (date, day.totalCreditsUsed)
                 }
@@ -216,7 +218,9 @@ struct UsageBreakdownChartMenuView: View {
 
         return totals
             .sorted { lhs, rhs in
-                if lhs.value == rhs.value { return lhs.key < rhs.key }
+                if lhs.value == rhs.value {
+                    return lhs.key < rhs.key
+                }
                 return lhs.value > rhs.value
             }
             .map(\.key)
@@ -326,7 +330,9 @@ struct UsageBreakdownChartMenuView: View {
         geo: GeometryProxy)
     {
         guard let location else {
-            if self.selectedDayKey != nil { self.selectedDayKey = nil }
+            if self.selectedDayKey != nil {
+                self.selectedDayKey = nil
+            }
             return
         }
 
@@ -349,7 +355,9 @@ struct UsageBreakdownChartMenuView: View {
         for entry in model.selectableDayDates {
             let dist = abs(entry.date.timeIntervalSince(date))
             if let cur = best {
-                if dist < cur.distance { best = (entry.dayKey, dist) }
+                if dist < cur.distance {
+                    best = (entry.dayKey, dist)
+                }
             } else {
                 best = (entry.dayKey, dist)
             }
@@ -377,7 +385,9 @@ struct UsageBreakdownChartMenuView: View {
 
         let services = day.services
             .sorted { lhs, rhs in
-                if lhs.creditsUsed == rhs.creditsUsed { return lhs.service < rhs.service }
+                if lhs.creditsUsed == rhs.creditsUsed {
+                    return lhs.service < rhs.service
+                }
                 return lhs.creditsUsed > rhs.creditsUsed
             }
             .prefix(3)

@@ -18,105 +18,56 @@ struct TokenAccountUsageSnapshot: Identifiable {
 }
 
 extension UsageStore {
-    private struct TokenAccountFetchOutcome {
-        let outcome: ProviderFetchOutcome
-        let env: [String: String]
-    }
-
-    func cachedTokenAccountSnapshot(for provider: UsageProvider, accountID: UUID) -> UsageSnapshot? {
-        self.tokenAccountSnapshotCache[provider]?[accountID]
-    }
-
-    func fetchTokenAccountPreviewSnapshot(
-        provider: UsageProvider,
-        account: ProviderTokenAccount) async -> TokenAccountUsageSnapshot
-    {
-        let override = TokenAccountOverride(provider: provider, account: account)
-        let fetched = await self.fetchOutcome(provider: provider, override: override)
-        let outcome = fetched.outcome
-        if self.shouldSyncCodexOverrideToken(provider: provider, outcome: outcome) {
-            await self.syncCodexAccountTokenFromDiskIfNeeded(accountID: account.id, env: fetched.env)
-        }
-        let resolved = self.resolveAccountOutcome(outcome, provider: provider, account: account)
-        if let usage = resolved.usage {
-            self.cacheTokenAccountSnapshot(usage, for: provider, accountID: account.id)
-        }
-        return resolved.snapshot
-    }
+    static let tokenAccountMenuSnapshotLimit = 6
 
     func tokenAccounts(for provider: UsageProvider) -> [ProviderTokenAccount] {
         guard TokenAccountSupportCatalog.support(for: provider) != nil else { return [] }
-        if provider == .opencode {
-            return self.settings.openCodeMenuTokenAccounts
-        }
         return self.settings.tokenAccounts(for: provider)
-    }
-
-    func selectedTokenAccount(for provider: UsageProvider) -> ProviderTokenAccount? {
-        if provider == .opencode {
-            return self.settings.selectedOpenCodeMenuTokenAccount ?? self.settings.selectedTokenAccount(for: provider)
-        }
-        return self.settings.selectedTokenAccount(for: provider)
     }
 
     func shouldFetchAllTokenAccounts(provider: UsageProvider, accounts: [ProviderTokenAccount]) -> Bool {
         guard TokenAccountSupportCatalog.support(for: provider) != nil else { return false }
-        if provider == .opencode {
+        guard provider != .opencode else { return false }
+        if provider == .copilot {
             return accounts.count > 1
         }
         return self.settings.showAllTokenAccountsInMenu && accounts.count > 1
     }
 
-    func syncActiveCodexAccountTokenFromDiskIfNeeded(env: [String: String]? = nil) async {
-        guard let active = self.settings.selectedTokenAccount(for: .codex) else { return }
-        await self.syncCodexAccountTokenFromDiskIfNeeded(accountID: active.id, env: env)
-    }
-
-    func syncCodexAccountTokenFromDiskIfNeeded(accountID: UUID, env: [String: String]? = nil) async {
-        guard let account = self.settings.tokenAccounts(for: .codex).first(where: { $0.id == accountID })
-        else { return }
-        let processEnv = env ?? ProcessInfo.processInfo.environment
-        let codexHome = Self.resolveCodexHomeDirectory(env: processEnv)
-        let diskToken = await Task.detached(priority: .utility) {
-            try? CodexCurrentLoginImporter.read(fromCodexHome: codexHome)
-        }.value
-        guard let diskToken else {
-            return
-        }
-
-        if Self.authPayloadsAreEquivalent(account.token, diskToken) { return }
-        self.settings.replaceTokenAccountToken(
-            provider: .codex,
-            accountID: account.id,
-            token: diskToken)
-    }
-
-    func refreshTokenAccounts(
-        provider: UsageProvider,
-        accounts: [ProviderTokenAccount],
-        refreshGeneration: Int? = nil) async
-    {
-        let selectedAccount = self.selectedTokenAccount(for: provider)
+    func refreshTokenAccounts(provider: UsageProvider, accounts: [ProviderTokenAccount]) async {
+        let selectedAccount = self.settings.selectedTokenAccount(for: provider)
         let limitedAccounts = self.limitedTokenAccounts(accounts, selected: selectedAccount)
         let effectiveSelected = selectedAccount ?? limitedAccounts.first
+
+        // Capture the prior per-account snapshot state so we can preserve last-good
+        // data when an in-flight refresh is cancelled (e.g. menu tab switches). Without
+        // this, cancellation produces empty/error snapshots and the menu briefly shows
+        // misleading cards for accounts that previously had valid data.
+        let priorSnapshots = await MainActor.run { self.accountSnapshots[provider] ?? [] }
+        let priorByAccountID = Dictionary(uniqueKeysWithValues: priorSnapshots.map { ($0.account.id, $0) })
+
         var snapshots: [TokenAccountUsageSnapshot] = []
         var historySamples: [(account: ProviderTokenAccount, snapshot: UsageSnapshot)] = []
         var selectedOutcome: ProviderFetchOutcome?
         var selectedSnapshot: UsageSnapshot?
+        var sawAnyNonCancellationOutcome = false
 
         for account in limitedAccounts {
-            guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
             let override = TokenAccountOverride(provider: provider, account: account)
-            let fetched = await self.fetchOutcome(provider: provider, override: override)
-            let outcome = fetched.outcome
-            if self.shouldSyncCodexOverrideToken(provider: provider, outcome: outcome) {
-                await self.syncCodexAccountTokenFromDiskIfNeeded(accountID: account.id, env: fetched.env)
+            let outcome = await self.fetchOutcome(provider: provider, override: override)
+            let isCancellation = Self.outcomeIsCancellation(outcome)
+            if !isCancellation {
+                sawAnyNonCancellationOutcome = true
             }
-            guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
-            let resolved = self.resolveAccountOutcome(outcome, provider: provider, account: account)
-            snapshots.append(resolved.snapshot)
+            let resolved = self.resolveAccountOutcome(
+                outcome,
+                provider: provider,
+                account: account,
+                priorSnapshot: priorByAccountID[account.id])
+            if let snapshot = resolved.snapshot {
+                snapshots.append(snapshot)
+            }
             if let usage = resolved.usage {
-                self.cacheTokenAccountSnapshot(usage, for: provider, accountID: account.id)
                 historySamples.append((account: account, snapshot: usage))
             }
             if account.id == effectiveSelected?.id {
@@ -125,13 +76,15 @@ extension UsageStore {
             }
         }
 
-        guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
-        await MainActor.run {
-            self.accountSnapshots[provider] = snapshots
-        }
-
-        await MainActor.run {
-            CodexAccountEnvironment.flushTempHomes()
+        // If every fetch was cancelled (e.g. the user closed/reopened the menu mid-flight)
+        // and we have no usable snapshots, leave the prior per-account state alone.
+        // Wiping it would produce a menu of useless "cancelled" placeholders.
+        let shouldPreservePriorState = !sawAnyNonCancellationOutcome &&
+            snapshots.allSatisfy { $0.snapshot == nil }
+        if !shouldPreservePriorState {
+            await MainActor.run {
+                self.accountSnapshots[provider] = snapshots
+            }
         }
 
         if let selectedOutcome {
@@ -139,8 +92,7 @@ extension UsageStore {
                 selectedOutcome,
                 provider: provider,
                 account: effectiveSelected,
-                fallbackSnapshot: selectedSnapshot,
-                refreshGeneration: refreshGeneration)
+                fallbackSnapshot: selectedSnapshot)
         }
 
         await self.recordFetchedTokenAccountPlanUtilizationHistory(
@@ -149,12 +101,21 @@ extension UsageStore {
             selectedAccount: effectiveSelected)
     }
 
+    private static func outcomeIsCancellation(_ outcome: ProviderFetchOutcome) -> Bool {
+        if case let .failure(error) = outcome.result, error is CancellationError {
+            return true
+        }
+        return false
+    }
+
     func limitedTokenAccounts(
         _ accounts: [ProviderTokenAccount],
         selected: ProviderTokenAccount?) -> [ProviderTokenAccount]
     {
-        let limit = 6
-        if accounts.count <= limit { return accounts }
+        let limit = Self.tokenAccountMenuSnapshotLimit
+        if accounts.count <= limit {
+            return accounts
+        }
         var limited = Array(accounts.prefix(limit))
         if let selected, !limited.contains(where: { $0.id == selected.id }) {
             limited.removeLast()
@@ -163,14 +124,13 @@ extension UsageStore {
         return limited
     }
 
-    private func fetchOutcome(
+    func fetchOutcome(
         provider: UsageProvider,
-        override: TokenAccountOverride?) async -> TokenAccountFetchOutcome
+        override: TokenAccountOverride?) async -> ProviderFetchOutcome
     {
         let descriptor = ProviderDescriptorRegistry.descriptor(for: provider)
         let context = self.makeFetchContext(provider: provider, override: override)
-        let outcome = await descriptor.fetchOutcome(context: context)
-        return TokenAccountFetchOutcome(outcome: outcome, env: context.env)
+        return await descriptor.fetchOutcome(context: context)
     }
 
     func makeFetchContext(
@@ -180,7 +140,7 @@ extension UsageStore {
         let sourceMode = self.sourceMode(for: provider)
         let snapshot = ProviderRegistry.makeSettingsSnapshot(settings: self.settings, tokenOverride: override)
         let env = ProviderRegistry.makeEnvironment(
-            base: ProcessInfo.processInfo.environment,
+            base: self.environmentBase,
             provider: provider,
             settings: self.settings,
             tokenOverride: override)
@@ -206,23 +166,27 @@ extension UsageStore {
             ?? .auto
     }
 
-    func sourceMode(for provider: UsageProvider, override: TokenAccountOverride?) -> ProviderSourceMode {
-        if override != nil, provider == .codex {
-            // Account previews must stay account-scoped. Falling back to CLI in auto mode can show active-account data.
-            return .oauth
-        }
-        return self.sourceMode(for: provider)
-    }
-
-    private func shouldSyncCodexOverrideToken(provider: UsageProvider, outcome: ProviderFetchOutcome) -> Bool {
-        guard provider == .codex else { return false }
-        guard case let .success(result) = outcome.result else { return false }
-        return result.sourceLabel == "oauth"
-    }
-
     private struct ResolvedAccountOutcome {
-        let snapshot: TokenAccountUsageSnapshot
+        let snapshot: TokenAccountUsageSnapshot?
         let usage: UsageSnapshot?
+    }
+
+    func tokenAccountErrorMessage(_ error: any Error) -> String? {
+        guard !(error is CancellationError) else { return nil }
+        let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        return message.isEmpty ? nil : message
+    }
+
+    /// Per-account snapshot error text. Unlike ``tokenAccountErrorMessage``,
+    /// cancellations are preserved as a non-empty marker so the menu does not
+    /// silently fall back to the live (selected-account) snapshot when an
+    /// individual account refresh is cancelled.
+    func tokenAccountSnapshotErrorMessage(_ error: any Error) -> String {
+        if error is CancellationError {
+            return "Refresh cancelled"
+        }
+        let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        return message.isEmpty ? "Refresh failed" : message
     }
 
     func recordFetchedTokenAccountPlanUtilizationHistory(
@@ -243,7 +207,8 @@ extension UsageStore {
     private func resolveAccountOutcome(
         _ outcome: ProviderFetchOutcome,
         provider: UsageProvider,
-        account: ProviderTokenAccount) -> ResolvedAccountOutcome
+        account: ProviderTokenAccount,
+        priorSnapshot: TokenAccountUsageSnapshot? = nil) -> ResolvedAccountOutcome
     {
         switch outcome.result {
         case let .success(result):
@@ -256,10 +221,23 @@ extension UsageStore {
                 sourceLabel: result.sourceLabel)
             return ResolvedAccountOutcome(snapshot: snapshot, usage: labeled)
         case let .failure(error):
+            // Preserve the last-good snapshot when the refresh was cancelled (e.g. the
+            // user switched menu tabs mid-flight). Without this the per-account list
+            // would briefly render error chips for accounts that already had data.
+            if error is CancellationError {
+                if let priorSnapshot, priorSnapshot.snapshot != nil {
+                    return ResolvedAccountOutcome(snapshot: priorSnapshot, usage: priorSnapshot.snapshot)
+                }
+                // No usable prior data: skip this row entirely. The caller will
+                // either preserve the existing per-account state or fall back to
+                // the single live card. Rendering a "cancelled" placeholder here
+                // produces visually duplicate cards with no useful data.
+                return ResolvedAccountOutcome(snapshot: nil, usage: nil)
+            }
             let snapshot = TokenAccountUsageSnapshot(
                 account: account,
                 snapshot: nil,
-                error: error.localizedDescription,
+                error: self.tokenAccountSnapshotErrorMessage(error),
                 sourceLabel: nil)
             return ResolvedAccountOutcome(snapshot: snapshot, usage: nil)
         }
@@ -269,10 +247,8 @@ extension UsageStore {
         _ outcome: ProviderFetchOutcome,
         provider: UsageProvider,
         account: ProviderTokenAccount?,
-        fallbackSnapshot: UsageSnapshot?,
-        refreshGeneration: Int? = nil) async
+        fallbackSnapshot: UsageSnapshot?) async
     {
-        guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
         await MainActor.run {
             self.lastFetchAttempts[provider] = outcome.attempts
         }
@@ -284,49 +260,37 @@ extension UsageStore {
             } else {
                 scoped
             }
-            guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
-            await MainActor.run {
-                self.handleSessionQuotaTransition(provider: provider, snapshot: labeled)
-                self.snapshots[provider] = labeled
+            let backfilled = await MainActor.run {
+                let backfilled = labeled.backfillingResetTimes(from: self.lastKnownResetSnapshots[provider])
+                self.handleSessionQuotaTransition(provider: provider, snapshot: backfilled)
+                self.lastKnownResetSnapshots[provider] = backfilled
+                self.snapshots[provider] = backfilled
                 self.lastSourceLabels[provider] = result.sourceLabel
                 self.errors[provider] = nil
                 self.failureGates[provider]?.recordSuccess()
-                if let account {
-                    self.cacheTokenAccountSnapshot(
-                        labeled,
-                        for: provider,
-                        accountID: account.id)
-                }
+                return backfilled
             }
             await self.recordPlanUtilizationHistorySample(
                 provider: provider,
-                snapshot: labeled,
+                snapshot: backfilled,
                 account: account)
         case let .failure(error):
-            guard self.shouldApplyRefreshGeneration(refreshGeneration, for: provider) else { return }
             await MainActor.run {
+                guard let message = self.tokenAccountErrorMessage(error) else {
+                    self.errors[provider] = nil
+                    return
+                }
                 let hadPriorData = self.snapshots[provider] != nil || fallbackSnapshot != nil
                 let shouldSurface = self.failureGates[provider]?
                     .shouldSurfaceError(onFailureWithPriorData: hadPriorData) ?? true
                 if shouldSurface {
-                    self.errors[provider] = error.localizedDescription
+                    self.errors[provider] = message
                     self.snapshots.removeValue(forKey: provider)
                 } else {
                     self.errors[provider] = nil
                 }
             }
         }
-    }
-
-    func shouldApplyRefreshGeneration(_ generation: Int?, for provider: UsageProvider) -> Bool {
-        guard let generation else { return true }
-        return self.isLatestProviderRefreshGeneration(generation, for: provider)
-    }
-
-    func cacheTokenAccountSnapshot(_ snapshot: UsageSnapshot, for provider: UsageProvider, accountID: UUID) {
-        var providerCache = self.tokenAccountSnapshotCache[provider] ?? [:]
-        providerCache[accountID] = snapshot
-        self.tokenAccountSnapshotCache[provider] = providerCache
     }
 
     func applyAccountLabel(
@@ -345,35 +309,5 @@ extension UsageStore {
             accountOrganization: existing?.accountOrganization,
             loginMethod: existing?.loginMethod)
         return snapshot.withIdentity(identity)
-    }
-
-    private static func resolveCodexHomeDirectory(env: [String: String]) -> URL {
-        if let raw = env["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !raw.isEmpty
-        {
-            return URL(fileURLWithPath: raw)
-        }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
-    }
-
-    private static func authPayloadsAreEquivalent(_ lhs: String, _ rhs: String) -> Bool {
-        if lhs == rhs { return true }
-        guard let leftCanonical = self.canonicalAuthPayload(lhs),
-              let rightCanonical = self.canonicalAuthPayload(rhs)
-        else {
-            return false
-        }
-        return leftCanonical == rightCanonical
-    }
-
-    private static func canonicalAuthPayload(_ raw: String) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let data = Data(trimmed.utf8)
-        guard let object = try? JSONSerialization.jsonObject(with: data) else { return nil }
-        guard let canonicalData = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
-            return nil
-        }
-        return String(data: canonicalData, encoding: .utf8)
     }
 }

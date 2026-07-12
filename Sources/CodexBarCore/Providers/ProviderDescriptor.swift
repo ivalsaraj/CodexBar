@@ -77,7 +77,12 @@ public enum ProviderDescriptorRegistry {
         .synthetic: SyntheticProviderDescriptor.descriptor,
         .openrouter: OpenRouterProviderDescriptor.descriptor,
         .warp: WarpProviderDescriptor.descriptor,
+        .windsurf: WindsurfProviderDescriptor.descriptor,
         .perplexity: PerplexityProviderDescriptor.descriptor,
+        .abacus: AbacusProviderDescriptor.descriptor,
+        .mistral: MistralProviderDescriptor.descriptor,
+        .deepseek: DeepSeekProviderDescriptor.descriptor,
+        .codebuff: CodebuffProviderDescriptor.descriptor,
     ]
     private static let bootstrap: Void = {
         for provider in UsageProvider.allCases {
@@ -116,8 +121,12 @@ public enum ProviderDescriptorRegistry {
 
     public static func descriptor(for id: UsageProvider) -> ProviderDescriptor {
         self.ensureBootstrapped()
-        if let found = self.store.byID[id] { return found }
-        if let found = self.all.first(where: { $0.id == id }) { return found }
+        if let found = self.store.byID[id] {
+            return found
+        }
+        if let found = self.all.first(where: { $0.id == id }) {
+            return found
+        }
         fatalError("Missing ProviderDescriptor for \(id.rawValue)")
     }
 

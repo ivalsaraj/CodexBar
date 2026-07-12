@@ -4,7 +4,7 @@ enum CostUsageCacheIO {
     private static func artifactVersion(for provider: UsageProvider) -> Int {
         switch provider {
         case .codex:
-            2
+            4
         case .claude, .vertexai:
             2
         default:
@@ -27,7 +27,9 @@ enum CostUsageCacheIO {
 
     static func load(provider: UsageProvider, cacheRoot: URL? = nil) -> CostUsageCache {
         let url = self.cacheFileURL(provider: provider, cacheRoot: cacheRoot)
-        if let decoded = self.loadCache(at: url) { return decoded }
+        if let decoded = self.loadCache(at: url) {
+            return decoded
+        }
         return CostUsageCache()
     }
 
@@ -77,6 +79,7 @@ struct CostUsageFileUsage: Codable {
     var lastModel: String?
     var lastTotals: CostUsageCodexTotals?
     var sessionId: String?
+    var forkedFromId: String?
     var claudeRows: [CostUsageScanner.ClaudeUsageRow]?
 }
 

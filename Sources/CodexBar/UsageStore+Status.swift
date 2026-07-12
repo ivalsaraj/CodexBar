@@ -32,9 +32,13 @@ extension UsageStore {
             let raw = try container.decode(String.self)
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = formatter.date(from: raw) { return date }
+            if let date = formatter.date(from: raw) {
+                return date
+            }
             formatter.formatOptions = [.withInternetDateTime]
-            if let date = formatter.date(from: raw) { return date }
+            if let date = formatter.date(from: raw) {
+                return date
+            }
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 date")
         }
 
@@ -64,9 +68,13 @@ extension UsageStore {
             let raw = try container.decode(String.self)
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = formatter.date(from: raw) { return date }
+            if let date = formatter.date(from: raw) {
+                return date
+            }
             formatter.formatOptions = [.withInternetDateTime]
-            if let date = formatter.date(from: raw) { return date }
+            if let date = formatter.date(from: raw) {
+                return date
+            }
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 date")
         }
 
@@ -87,7 +95,9 @@ extension UsageStore {
             let indicator = Self.workspaceIndicator(
                 status: update?.status ?? incident.statusImpact,
                 severity: incident.severity)
-            if Self.indicatorRank(indicator) <= Self.indicatorRank(best.indicator) { continue }
+            if Self.indicatorRank(indicator) <= Self.indicatorRank(best.indicator) {
+                continue
+            }
             best = (indicator: indicator, incident: incident, update: update)
         }
 
@@ -133,7 +143,9 @@ extension UsageStore {
         let lines = normalized.split(separator: "\n", omittingEmptySubsequences: true)
         for rawLine in lines {
             let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty { continue }
+            if trimmed.isEmpty {
+                continue
+            }
             let lower = trimmed.lowercased()
             if lower.hasPrefix("**summary") || lower.hasPrefix("**description") || lower == "summary" {
                 continue
@@ -147,7 +159,9 @@ extension UsageStore {
                 cleaned.removeFirst(2)
             }
             cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleaned.isEmpty { return cleaned }
+            if !cleaned.isEmpty {
+                return cleaned
+            }
         }
         return nil
     }

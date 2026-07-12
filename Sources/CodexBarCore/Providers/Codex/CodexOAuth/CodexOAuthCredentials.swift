@@ -55,9 +55,8 @@ public enum CodexOAuthCredentialsStore {
             .appendingPathComponent("auth.json")
     }
 
-    public static func load(
-        env: [String: String] = ProcessInfo.processInfo.environment)
-        throws -> CodexOAuthCredentials
+    public static func load(env: [String: String] = ProcessInfo.processInfo
+        .environment) throws -> CodexOAuthCredentials
     {
         let url = self.authFilePath(env: env)
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -146,7 +145,9 @@ public enum CodexOAuthCredentialsStore {
         guard let value = raw as? String, !value.isEmpty else { return nil }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: value) { return date }
+        if let date = formatter.date(from: value) {
+            return date
+        }
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)
     }

@@ -1,129 +1,75 @@
 import CodexBarCore
-import Foundation
 import SwiftUI
-
-struct OpenCodeAccountsSectionState {
-    let accounts: [OpenCodeWorkspaceAccount]
-    let activeAccountID: UUID?
-    let hasReusableCredential: Bool
-    let notice: String?
-
-    var activeAccount: OpenCodeWorkspaceAccount? {
-        if let activeAccountID,
-           let account = self.accounts.first(where: { $0.id == activeAccountID })
-        {
-            return account
-        }
-        return self.accounts.first
-    }
-
-    var showsActivePicker: Bool {
-        self.accounts.count > 1
-    }
-}
-
-enum OpenCodeAccountSaveResult: Equatable {
-    case success(String)
-    case noChange(String)
-    case failure(String)
-
-    var notice: String {
-        switch self {
-        case let .success(message), let .noChange(message), let .failure(message):
-            message
-        }
-    }
-
-    var shouldResetForm: Bool {
-        if case .success = self {
-            return true
-        }
-        return false
-    }
-}
-
-struct OpenCodeAccountDraft: Sendable {
-    let workspaceID: String
-    let workspaceLabel: String
-}
 
 @MainActor
 struct OpenCodeAccountsSectionView: View {
-    let state: OpenCodeAccountsSectionState
-    let setActiveAccount: (UUID) -> Void
-    let importCurrentLogin: @MainActor @Sendable () async -> OpenCodeAccountSaveResult
-    let refreshAccounts: @MainActor @Sendable () async -> OpenCodeAccountSaveResult
-    let saveAccount: @MainActor @Sendable (OpenCodeAccountDraft) async -> OpenCodeAccountSaveResult
-    let removeAccount: (OpenCodeWorkspaceAccount) -> Void
-
+    @Bindable var settings: SettingsStore
+    let store: UsageStore
     @State private var workspaceID = ""
     @State private var workspaceLabel = ""
-    @State private var activeOperation: Operation?
-
-    private enum Operation {
-        case importing
-        case refreshing
-        case saving
-    }
+    @State private var statusText: String?
 
     var body: some View {
-        ProviderSettingsSection(title: "Accounts") {
-            if let selection = self.activeSelectionBinding {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("Active")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: ProviderSettingsMetrics.pickerLabelWidth, alignment: .leading)
+        ProviderSettingsSection(title: "OpenCode workspaces") {
+            Text("Reuse one OpenCode login across saved workspaces.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-                    Picker("", selection: selection) {
-                        ForEach(self.state.accounts, id: \.id) { account in
-                            Text(self.accountDisplayName(account)).tag(account.id)
-                        }
+            HStack(spacing: 8) {
+                Button("Import current login") {
+                    Task { @MainActor in
+                        await self.importCurrentLogin()
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-
-                    Spacer(minLength: 0)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
 
-                Text("Choose which OpenCode workspace CodexBar should follow.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else if let account = self.state.activeAccount {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("Active")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: ProviderSettingsMetrics.pickerLabelWidth, alignment: .leading)
-
-                    Text(self.accountDisplayName(account))
-                        .font(.subheadline)
-
-                    Spacer(minLength: 0)
+                Button("Refresh workspaces") {
+                    Task { @MainActor in
+                        await self.importCurrentLogin()
+                    }
                 }
-            } else {
-                Text("No OpenCode workspace accounts saved yet.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
-            if !self.state.accounts.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(self.state.accounts, id: \.id) { account in
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(self.accountDisplayName(account))
-                                    .font(.subheadline.weight(.semibold))
-                                Text(self.accountDetail(account))
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
+            if self.settings.opencodeWorkspaceAccounts.accounts.isEmpty {
+                Text("No saved workspaces yet.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(self.settings.opencodeWorkspaceAccounts.accounts) { account in
+                        HStack(spacing: 8) {
+                            Button {
+                                self.select(accountID: account.id)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: self.settings.activeOpenCodeWorkspaceAccount?.id == account.id ?
+                                        "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(
+                                            self.settings.activeOpenCodeWorkspaceAccount?.id == account.id ?
+                                                Color.accentColor : Color.secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(account.label)
+                                            .font(.footnote.weight(.semibold))
+                                        if let ownerLabel = account.ownerLabel {
+                                            Text(ownerLabel)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
                             }
-
-                            Spacer(minLength: 0)
+                            .buttonStyle(.plain)
 
                             Button("Remove") {
-                                self.removeAccount(account)
+                                self.settings.removeOpenCodeWorkspace(id: account.id)
                             }
-                            .buttonStyle(.link)
+                            .buttonStyle(.bordered)
                             .controlSize(.small)
                         }
                     }
@@ -131,69 +77,21 @@ struct OpenCodeAccountsSectionView: View {
             }
 
             HStack(spacing: 8) {
-                Button("Import current login") {
-                    self.runOperation(.importing, shouldResetOnSuccess: false) {
-                        await self.importCurrentLogin()
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(self.activeOperation != nil)
-
-                Button("Refresh workspaces") {
-                    self.runOperation(.refreshing, shouldResetOnSuccess: false) {
-                        await self.refreshAccounts()
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(self.activeOperation != nil || !self.state.hasReusableCredential)
-            }
-
-            Text(self.state.hasReusableCredential
-                ? "CodexBar reuses your saved OpenCode login and keeps workspaces in sync."
-                : "Import your current OpenCode login first to add workspaces without pasting cookies.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .center, spacing: 10) {
-                    Text("Workspace")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: ProviderSettingsMetrics.pickerLabelWidth, alignment: .leading)
-
-                    TextField("wrk_… or https://opencode.ai/workspace/…", text: self.$workspaceID)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                HStack(alignment: .center, spacing: 10) {
-                    Text("Name")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: ProviderSettingsMetrics.pickerLabelWidth, alignment: .leading)
-
-                    TextField("Optional workspace name", text: self.$workspaceLabel)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                Text("Paste a `wrk_…` ID or an OpenCode workspace URL. CodexBar reuses your current OpenCode login.")
+                TextField("Workspace ID or URL", text: self.$workspaceID)
+                    .textFieldStyle(.roundedBorder)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                Button("Add workspace") {
-                    let draft = OpenCodeAccountDraft(
-                        workspaceID: self.workspaceID,
-                        workspaceLabel: self.workspaceLabel)
-                    self.runOperation(.saving, shouldResetOnSuccess: true) {
-                        await self.saveAccount(draft)
-                    }
+                TextField("Label", text: self.$workspaceLabel)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.footnote)
+                Button("Add") {
+                    self.addWorkspace()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(self.activeOperation != nil)
             }
 
-            if let notice = self.state.notice, !notice.isEmpty {
-                Text(notice)
+            if let statusText = self.statusText, !statusText.isEmpty {
+                Text(statusText)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -201,46 +99,57 @@ struct OpenCodeAccountsSectionView: View {
         }
     }
 
-    private var activeSelectionBinding: Binding<UUID>? {
-        guard self.state.showsActivePicker else { return nil }
-        guard let fallbackID = self.state.activeAccount?.id else { return nil }
-        return Binding(
-            get: { self.state.activeAccountID ?? fallbackID },
-            set: { self.setActiveAccount($0) })
-    }
-
-    private func accountDisplayName(_ account: OpenCodeWorkspaceAccount) -> String {
-        let base = account.workspaceLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-        return base.isEmpty ? account.label : base
-    }
-
-    private func accountDetail(_ account: OpenCodeWorkspaceAccount) -> String {
-        var pieces = [account.label, account.workspaceID]
-        if let owner = account.discoveredOwnerLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !owner.isEmpty {
-            pieces.append(owner)
+    private func select(accountID: String) {
+        guard self.settings.setActiveOpenCodeWorkspace(id: accountID) else { return }
+        Task { @MainActor in
+            await self.store.refreshProvider(.opencode, allowDisabled: true)
         }
-        return pieces.joined(separator: " • ")
     }
 
-    private func resetForm() {
-        self.workspaceID = ""
-        self.workspaceLabel = ""
-    }
-
-    private func runOperation(
-        _ operation: Operation,
-        shouldResetOnSuccess: Bool,
-        action: @escaping @Sendable () async -> OpenCodeAccountSaveResult)
-    {
-        self.activeOperation = operation
-        Task {
-            let result = await action()
-            await MainActor.run {
-                if shouldResetOnSuccess, result.shouldResetForm {
-                    self.resetForm()
-                }
-                self.activeOperation = nil
+    private func addWorkspace() {
+        let id = self.workspaceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = self.workspaceLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokenAccountID = self.settings.selectedTokenAccount(for: .opencode)?.id
+        let result = self.settings.addOpenCodeWorkspace(
+            tokenAccountID: tokenAccountID,
+            workspaceID: id,
+            label: label.isEmpty ? id : label)
+        switch result {
+        case .saved:
+            self.workspaceID = ""
+            self.workspaceLabel = ""
+            self.statusText = nil
+            Task { @MainActor in
+                await self.store.refreshProvider(.opencode, allowDisabled: true)
             }
+        case .duplicate:
+            self.statusText = "That workspace is already saved."
+        case .missingReusableCredential:
+            self.statusText = "Import or add an OpenCode login before adding a workspace."
+        case .invalidWorkspaceID:
+            self.statusText = "Enter a valid OpenCode workspace ID or URL."
+        case let .discoveryFailed(message):
+            self.statusText = message
+        }
+    }
+
+    private func importCurrentLogin() async {
+        self.statusText = "Importing OpenCode workspaces…"
+        do {
+            let results = try await self.settings.importOpenCodeWorkspaceAccounts(
+                browserDetection: self.store.browserDetection,
+                timeout: 60)
+            if case .discoveryFailed = results.first {
+                self.statusText = "Could not refresh OpenCode workspaces. Check your OpenCode login and try again."
+                return
+            }
+            let savedCount = results.count(where: { $0 == .saved })
+            self.statusText = savedCount == 0
+                ? "OpenCode workspaces are up to date."
+                : "Saved \(savedCount) OpenCode workspace\(savedCount == 1 ? "" : "s")."
+            await self.store.refreshProvider(.opencode, allowDisabled: true)
+        } catch {
+            self.statusText = error.localizedDescription
         }
     }
 }

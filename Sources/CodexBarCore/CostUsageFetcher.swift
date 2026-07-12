@@ -26,6 +26,22 @@ public struct CostUsageFetcher: Sendable {
         forceRefresh: Bool = false,
         allowVertexClaudeFallback: Bool = false) async throws -> CostUsageTokenSnapshot
     {
+        try await Self.loadTokenSnapshot(
+            provider: provider,
+            now: now,
+            forceRefresh: forceRefresh,
+            allowVertexClaudeFallback: allowVertexClaudeFallback)
+    }
+
+    static func loadTokenSnapshot(
+        provider: UsageProvider,
+        now: Date = Date(),
+        forceRefresh: Bool = false,
+        allowVertexClaudeFallback: Bool = false,
+        scannerOptions overrideScannerOptions: CostUsageScanner.Options? = nil,
+        piScannerOptions overridePiScannerOptions: PiSessionCostScanner
+            .Options? = nil) async throws -> CostUsageTokenSnapshot
+    {
         guard provider == .codex || provider == .claude || provider == .vertexai else {
             throw CostUsageError.unsupportedProvider(provider)
         }
@@ -34,7 +50,7 @@ public struct CostUsageFetcher: Sendable {
         // Rolling window: last 30 days (inclusive). Use -29 for inclusive boundaries.
         let since = Calendar.current.date(byAdding: .day, value: -29, to: now) ?? now
 
-        var options = CostUsageScanner.Options()
+        var options = overrideScannerOptions ?? CostUsageScanner.Options()
         if provider == .vertexai {
             options.claudeLogProviderFilter = allowVertexClaudeFallback ? .all : .vertexAIOnly
         } else if provider == .claude {
@@ -66,6 +82,24 @@ public struct CostUsageFetcher: Sendable {
                 options: fallback)
         }
 
+        if provider == .codex || provider == .claude {
+            var piOptions = overridePiScannerOptions ?? PiSessionCostScanner.Options()
+            if piOptions.cacheRoot == nil {
+                piOptions.cacheRoot = options.cacheRoot
+            }
+            if forceRefresh {
+                piOptions.refreshMinIntervalSeconds = 0
+                piOptions.forceRescan = true
+            }
+            let piReport = PiSessionCostScanner.loadDailyReport(
+                provider: provider,
+                since: since,
+                until: until,
+                now: now,
+                options: piOptions)
+            daily = CostUsageDailyReport.merged([daily, piReport])
+        }
+
         return Self.tokenSnapshot(from: daily, now: now)
     }
 
@@ -74,13 +108,19 @@ public struct CostUsageFetcher: Sendable {
         let currentDay = daily.data.max { lhs, rhs in
             let lDate = CostUsageDateParser.parse(lhs.date) ?? .distantPast
             let rDate = CostUsageDateParser.parse(rhs.date) ?? .distantPast
-            if lDate != rDate { return lDate < rDate }
+            if lDate != rDate {
+                return lDate < rDate
+            }
             let lCost = lhs.costUSD ?? -1
             let rCost = rhs.costUSD ?? -1
-            if lCost != rCost { return lCost < rCost }
+            if lCost != rCost {
+                return lCost < rCost
+            }
             let lTokens = lhs.totalTokens ?? -1
             let rTokens = rhs.totalTokens ?? -1
-            if lTokens != rTokens { return lTokens < rTokens }
+            if lTokens != rTokens {
+                return lTokens < rTokens
+            }
             return lhs.date < rhs.date
         }
         // Prefer summary totals when present; fall back to summing daily entries.
@@ -103,17 +143,25 @@ public struct CostUsageFetcher: Sendable {
     static func selectCurrentSession(from sessions: [CostUsageSessionReport.Entry])
         -> CostUsageSessionReport.Entry?
     {
-        if sessions.isEmpty { return nil }
+        if sessions.isEmpty {
+            return nil
+        }
         return sessions.max { lhs, rhs in
             let lDate = CostUsageDateParser.parse(lhs.lastActivity) ?? .distantPast
             let rDate = CostUsageDateParser.parse(rhs.lastActivity) ?? .distantPast
-            if lDate != rDate { return lDate < rDate }
+            if lDate != rDate {
+                return lDate < rDate
+            }
             let lCost = lhs.costUSD ?? -1
             let rCost = rhs.costUSD ?? -1
-            if lCost != rCost { return lCost < rCost }
+            if lCost != rCost {
+                return lCost < rCost
+            }
             let lTokens = lhs.totalTokens ?? -1
             let rTokens = rhs.totalTokens ?? -1
-            if lTokens != rTokens { return lTokens < rTokens }
+            if lTokens != rTokens {
+                return lTokens < rTokens
+            }
             return lhs.session < rhs.session
         }
     }
@@ -121,17 +169,25 @@ public struct CostUsageFetcher: Sendable {
     static func selectMostRecentMonth(from months: [CostUsageMonthlyReport.Entry])
         -> CostUsageMonthlyReport.Entry?
     {
-        if months.isEmpty { return nil }
+        if months.isEmpty {
+            return nil
+        }
         return months.max { lhs, rhs in
             let lDate = CostUsageDateParser.parseMonth(lhs.month) ?? .distantPast
             let rDate = CostUsageDateParser.parseMonth(rhs.month) ?? .distantPast
-            if lDate != rDate { return lDate < rDate }
+            if lDate != rDate {
+                return lDate < rDate
+            }
             let lCost = lhs.costUSD ?? -1
             let rCost = rhs.costUSD ?? -1
-            if lCost != rCost { return lCost < rCost }
+            if lCost != rCost {
+                return lCost < rCost
+            }
             let lTokens = lhs.totalTokens ?? -1
             let rTokens = rhs.totalTokens ?? -1
-            if lTokens != rTokens { return lTokens < rTokens }
+            if lTokens != rTokens {
+                return lTokens < rTokens
+            }
             return lhs.month < rhs.month
         }
     }

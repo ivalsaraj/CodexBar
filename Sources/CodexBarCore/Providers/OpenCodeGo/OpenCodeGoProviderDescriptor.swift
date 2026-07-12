@@ -50,8 +50,8 @@ struct OpenCodeGoUsageFetchStrategy: ProviderFetchStrategy {
     }
 
     func fetch(_ context: ProviderFetchContext) async throws -> ProviderFetchResult {
-        let workspaceOverride = context.env["CODEXBAR_OPENCODEGO_WORKSPACE_ID"]
-            ?? context.settings?.opencodego?.workspaceID
+        let workspaceOverride = context.settings?.opencodego?.workspaceID
+            ?? context.env["CODEXBAR_OPENCODEGO_WORKSPACE_ID"]
         let cookieSource = context.settings?.opencodego?.cookieSource ?? .auto
         do {
             let cookieHeader = try Self.resolveCookieHeader(context: context, allowCached: true)
