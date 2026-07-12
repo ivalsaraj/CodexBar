@@ -46,6 +46,8 @@ struct OpenCodeWidgetSnapshotTests {
         #expect(entries.count == 2)
         #expect(entries.map(\.accountLabel) == ["Alpha · Alice", "Beta · Bob"])
         #expect(entries.map(\.accountID) == accounts.map(\.id))
+        #expect(entries[0].primary == nil)
+        #expect(entries[1].primary?.usedPercent == 30)
         let encoded = try JSONEncoder().encode(captured)
         let encodedText = String(data: encoded, encoding: .utf8) ?? ""
         #expect(!encodedText.contains("auth=shared"))

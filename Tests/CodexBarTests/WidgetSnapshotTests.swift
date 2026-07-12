@@ -32,6 +32,39 @@ struct WidgetSnapshotTests {
     }
 
     @Test
+    func `widget snapshot decodes legacy Cursor range without label`() throws {
+        let json = #"""
+        {
+          "entries": [{
+            "provider": "cursor",
+            "updatedAt": "2026-07-01T00:00:00Z",
+            "primary": null,
+            "secondary": null,
+            "tertiary": null,
+            "creditsRemaining": null,
+            "codeReviewRemainingPercent": null,
+            "tokenUsage": null,
+            "cursorRequestRange": {
+              "start": "2026-06-01T00:00:00Z",
+              "end": "2026-07-01T00:00:00Z"
+            },
+            "dailyUsage": []
+          }],
+          "enabledProviders": ["cursor"],
+          "generatedAt": "2026-07-01T00:00:00Z"
+        }
+        """#
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let snapshot = try decoder.decode(WidgetSnapshot.self, from: Data(json.utf8))
+
+        #expect(snapshot.entries.first?.cursorRequestRange?.label == "Usage")
+        #expect(snapshot.entries.first?.cursorRequestRange?.start != nil)
+        #expect(snapshot.entries.first?.cursorRequestRange?.end != nil)
+    }
+
+    @Test
     func `widget snapshot preserves selected Cursor range and request detail shape`() throws {
         let timestamp = Date(timeIntervalSince1970: 1_772_000_000)
         let entry = WidgetSnapshot.ProviderEntry(

@@ -16,20 +16,37 @@ public struct OpenCodeWorkspaceAccount: Codable, Identifiable, Sendable, Equatab
         ownerLabel: String? = nil,
         now: Date = Date())
     {
+        self.init(
+            tokenAccountID: tokenAccountID,
+            workspaceID: workspaceID,
+            label: label,
+            ownerLabel: ownerLabel,
+            createdAt: now.timeIntervalSince1970,
+            updatedAt: now.timeIntervalSince1970)
+    }
+
+    init?(
+        tokenAccountID: UUID,
+        workspaceID: String,
+        label: String,
+        ownerLabel: String?,
+        createdAt: TimeInterval,
+        updatedAt: TimeInterval)
+    {
         guard let normalizedWorkspaceID = Self.normalizeWorkspaceID(workspaceID) else { return nil }
         self.id = Self.canonicalID(tokenAccountID: tokenAccountID, workspaceID: normalizedWorkspaceID)
         self.tokenAccountID = tokenAccountID
         self.workspaceID = normalizedWorkspaceID
         self.label = Self.cleanLabel(label, fallback: normalizedWorkspaceID)
         self.ownerLabel = Self.cleanOptionalLabel(ownerLabel)
-        self.createdAt = now.timeIntervalSince1970
-        self.updatedAt = now.timeIntervalSince1970
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 
     public static func normalizeWorkspaceID(_ raw: String?) -> String? {
         guard let raw else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("wrk_"), trimmed.count > 4 {
+        if Self.isValidWorkspaceID(trimmed) {
             return trimmed
         }
         if let url = URL(string: trimmed) {
@@ -38,15 +55,16 @@ public struct OpenCodeWorkspaceAccount: Codable, Identifiable, Sendable, Equatab
                parts.count > index + 1
             {
                 let candidate = parts[index + 1]
-                if candidate.hasPrefix("wrk_"), candidate.count > 4 {
+                if Self.isValidWorkspaceID(candidate) {
                     return candidate
                 }
             }
         }
-        if let match = trimmed.range(of: #"wrk_[A-Za-z0-9]+"#, options: .regularExpression) {
-            return String(trimmed[match])
-        }
         return nil
+    }
+
+    private static func isValidWorkspaceID(_ value: String) -> Bool {
+        value.range(of: #"^wrk_[A-Za-z0-9]+$"#, options: .regularExpression) != nil
     }
 
     public static func canonicalID(tokenAccountID: UUID, workspaceID: String) -> String {

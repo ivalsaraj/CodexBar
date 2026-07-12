@@ -414,6 +414,7 @@ private struct SwitcherMediumUsageView: View {
             }
             if self.entry.provider == .cursor {
                 CursorWidgetRangeSummaryView(entry: self.entry)
+                CursorWidgetRequestDetailsView(entry: self.entry)
             } else if let token = entry.tokenUsage {
                 ValueLine(
                     title: "Today",
@@ -445,6 +446,7 @@ private struct SwitcherLargeUsageView: View {
             }
             if self.entry.provider == .cursor {
                 CursorWidgetRangeSummaryView(entry: self.entry)
+                CursorWidgetRequestDetailsView(entry: self.entry)
             } else if let token = entry.tokenUsage {
                 VStack(alignment: .leading, spacing: 4) {
                     ValueLine(
@@ -459,30 +461,7 @@ private struct SwitcherLargeUsageView: View {
                     }
                 }
             }
-            if let requests = entry.cursorRequestDetails {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(requests.prefix(3).enumerated()), id: \.offset) { _, request in
-                        VStack(alignment: .leading, spacing: 1) {
-                            ValueLine(
-                                title: request.compactModel ?? request.model,
-                                value: "\(WidgetFormat.tokenCount(request.tokens)) · "
-                                    + UsageFormatter.cursorRequestCountLabel(requests: request.requests))
-                            if let estimateText = request.estimateText {
-                                Text(estimateText)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let requestCostDetail = UsageFormatter.cursorRequestCostDetail(
-                                requestCost: request.requestCost)
-                            {
-                                Text(requestCostDetail)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
+            CursorWidgetRequestDetailsView(entry: self.entry)
             UsageHistoryChart(points: self.entry.dailyUsage, color: WidgetColors.color(for: self.entry.provider))
                 .frame(height: 50)
         }
@@ -530,6 +509,7 @@ private struct MediumUsageView: View {
             }
             if self.entry.provider == .cursor {
                 CursorWidgetRangeSummaryView(entry: self.entry)
+                CursorWidgetRequestDetailsView(entry: self.entry)
             } else if let token = entry.tokenUsage {
                 ValueLine(
                     title: "Today",
@@ -563,6 +543,7 @@ private struct LargeUsageView: View {
             }
             if self.entry.provider == .cursor {
                 CursorWidgetRangeSummaryView(entry: self.entry)
+                CursorWidgetRequestDetailsView(entry: self.entry)
             } else if let token = entry.tokenUsage {
                 VStack(alignment: .leading, spacing: 4) {
                     ValueLine(
@@ -619,6 +600,7 @@ private struct HistoryView: View {
                 .frame(height: self.isLarge ? 90 : 60)
             if self.entry.provider == .cursor {
                 CursorWidgetRangeSummaryView(entry: self.entry)
+                CursorWidgetRequestDetailsView(entry: self.entry)
             } else if let token = entry.tokenUsage {
                 ValueLine(
                     title: "Today",
@@ -705,6 +687,37 @@ private struct CursorWidgetRangeSummaryView: View {
                 ValueLine(
                     title: self.entry.cursorRequestRange?.label ?? "Usage",
                     value: WidgetFormat.cursorCostAndTokens(token))
+            }
+        }
+    }
+}
+
+private struct CursorWidgetRequestDetailsView: View {
+    let entry: WidgetSnapshot.ProviderEntry
+
+    var body: some View {
+        if self.entry.provider == .cursor, let requests = self.entry.cursorRequestDetails {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(requests.prefix(3).enumerated()), id: \.offset) { _, request in
+                    VStack(alignment: .leading, spacing: 1) {
+                        ValueLine(
+                            title: request.compactModel ?? request.model,
+                            value: "\(WidgetFormat.tokenCount(request.tokens)) · "
+                                + UsageFormatter.cursorRequestCountLabel(requests: request.requests))
+                        if let estimateText = request.estimateText {
+                            Text(estimateText)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let requestCostDetail = UsageFormatter.cursorRequestCostDetail(
+                            requestCost: request.requestCost)
+                        {
+                            Text(requestCostDetail)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
         }
     }

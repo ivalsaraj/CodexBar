@@ -120,6 +120,117 @@ public struct ProviderConfig: Codable, Sendable, Identifiable {
         self.codexActiveSource = codexActiveSource
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case enabled
+        case source
+        case extrasEnabled
+        case apiKey
+        case cookieHeader
+        case cookieSource
+        case region
+        case workspaceID
+        case opencodeWorkspaceAccounts
+        case openCodeWorkspaceAccounts
+        case opencodeActiveWorkspaceAccountID
+        case enterpriseHost
+        case tokenAccounts
+        case codexActiveSource
+    }
+
+    private struct LegacyOpenCodeWorkspaceAccountData: Decodable {
+        let activeAccountID: UUID?
+        let accounts: [LegacyOpenCodeWorkspaceAccount]
+    }
+
+    private struct LegacyOpenCodeWorkspaceAccount: Decodable {
+        let id: UUID
+        let tokenAccountID: UUID
+        let label: String?
+        let workspaceID: String
+        let workspaceLabel: String?
+        let discoveredOwnerLabel: String?
+        let addedAt: TimeInterval?
+        let lastValidatedAt: TimeInterval?
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let currentAccounts = try container.decodeIfPresent(
+            OpenCodeWorkspaceAccounts.self,
+            forKey: .opencodeWorkspaceAccounts)
+        let accounts = try currentAccounts ?? Self.migrateLegacyOpenCodeWorkspaceAccounts(
+            container.decodeIfPresent(
+                LegacyOpenCodeWorkspaceAccountData.self,
+                forKey: .openCodeWorkspaceAccounts))
+
+        try self.init(
+            id: container.decode(UsageProvider.self, forKey: .id),
+            enabled: container.decodeIfPresent(Bool.self, forKey: .enabled),
+            source: container.decodeIfPresent(ProviderSourceMode.self, forKey: .source),
+            extrasEnabled: container.decodeIfPresent(Bool.self, forKey: .extrasEnabled),
+            apiKey: container.decodeIfPresent(String.self, forKey: .apiKey),
+            cookieHeader: container.decodeIfPresent(String.self, forKey: .cookieHeader),
+            cookieSource: container.decodeIfPresent(ProviderCookieSource.self, forKey: .cookieSource),
+            region: container.decodeIfPresent(String.self, forKey: .region),
+            workspaceID: container.decodeIfPresent(String.self, forKey: .workspaceID),
+            opencodeWorkspaceAccounts: accounts,
+            opencodeActiveWorkspaceAccountID: container.decodeIfPresent(
+                String.self,
+                forKey: .opencodeActiveWorkspaceAccountID),
+            enterpriseHost: container.decodeIfPresent(String.self, forKey: .enterpriseHost),
+            tokenAccounts: container.decodeIfPresent(ProviderTokenAccountData.self, forKey: .tokenAccounts),
+            codexActiveSource: container.decodeIfPresent(CodexActiveSource.self, forKey: .codexActiveSource))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(self.id, forKey: .id)
+        try container.encodeIfPresent(self.enabled, forKey: .enabled)
+        try container.encodeIfPresent(self.source, forKey: .source)
+        try container.encodeIfPresent(self.extrasEnabled, forKey: .extrasEnabled)
+        try container.encodeIfPresent(self.apiKey, forKey: .apiKey)
+        try container.encodeIfPresent(self.cookieHeader, forKey: .cookieHeader)
+        try container.encodeIfPresent(self.cookieSource, forKey: .cookieSource)
+        try container.encodeIfPresent(self.region, forKey: .region)
+        try container.encodeIfPresent(self.workspaceID, forKey: .workspaceID)
+        try container.encodeIfPresent(self.opencodeWorkspaceAccounts, forKey: .opencodeWorkspaceAccounts)
+        try container.encodeIfPresent(
+            self.opencodeActiveWorkspaceAccountID,
+            forKey: .opencodeActiveWorkspaceAccountID)
+        try container.encodeIfPresent(self.enterpriseHost, forKey: .enterpriseHost)
+        try container.encodeIfPresent(self.tokenAccounts, forKey: .tokenAccounts)
+        try container.encodeIfPresent(self.codexActiveSource, forKey: .codexActiveSource)
+    }
+
+    private static func migrateLegacyOpenCodeWorkspaceAccounts(
+        _ data: LegacyOpenCodeWorkspaceAccountData?) -> OpenCodeWorkspaceAccounts?
+    {
+        guard let data else { return nil }
+        var accounts: [OpenCodeWorkspaceAccount] = []
+        var activeID: String?
+        for legacy in data.accounts {
+            let label = legacy.workspaceLabel ?? legacy.label ?? legacy.workspaceID
+            let createdAt = legacy.addedAt ?? 0
+            let updatedAt = max(createdAt, legacy.lastValidatedAt ?? createdAt)
+            guard let account = OpenCodeWorkspaceAccount(
+                tokenAccountID: legacy.tokenAccountID,
+                workspaceID: legacy.workspaceID,
+                label: label,
+                ownerLabel: legacy.discoveredOwnerLabel,
+                createdAt: createdAt,
+                updatedAt: updatedAt)
+            else {
+                continue
+            }
+            accounts.append(account)
+            if legacy.id == data.activeAccountID {
+                activeID = account.id
+            }
+        }
+        return OpenCodeWorkspaceAccounts(accounts: accounts, activeID: activeID)
+    }
+
     public var sanitizedAPIKey: String? {
         Self.clean(self.apiKey)
     }

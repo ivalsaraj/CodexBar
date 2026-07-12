@@ -122,6 +122,19 @@ public struct WidgetSnapshot: Codable, Sendable {
             self.end = end
             self.label = label
         }
+
+        private enum CodingKeys: String, CodingKey {
+            case start
+            case end
+            case label
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.start = try container.decode(Date.self, forKey: .start)
+            self.end = try container.decode(Date.self, forKey: .end)
+            self.label = try container.decodeIfPresent(String.self, forKey: .label) ?? "Usage"
+        }
     }
 
     public struct DailyUsagePoint: Codable, Sendable {

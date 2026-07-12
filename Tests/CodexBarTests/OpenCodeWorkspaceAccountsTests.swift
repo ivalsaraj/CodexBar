@@ -83,6 +83,14 @@ struct OpenCodeWorkspaceAccountsTests {
             tokenAccountID: UUID(),
             workspaceID: "not-a-workspace",
             label: "Invalid") == .invalidWorkspaceID)
+        #expect(accounts.add(
+            tokenAccountID: UUID(),
+            workspaceID: "wrk_ALPHA?query=unexpected",
+            label: "Invalid") == .invalidWorkspaceID)
+        #expect(accounts.add(
+            tokenAccountID: UUID(),
+            workspaceID: "wrk_ALPHA/extra",
+            label: "Invalid") == .invalidWorkspaceID)
     }
 
     @Test
@@ -104,5 +112,62 @@ struct OpenCodeWorkspaceAccountsTests {
         #expect(account.id == OpenCodeWorkspaceAccount.canonicalID(
             tokenAccountID: tokenAccountID,
             workspaceID: "wrk_ALPHA"))
+    }
+
+    @Test
+    func `config store migrates legacy OpenCode workspace accounts`() throws {
+        let firstID = try #require(UUID(uuidString: "11111111-1111-1111-1111-111111111111"))
+        let secondID = try #require(UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
+        let tokenID = try #require(UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"))
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codexbar-legacy-opencode-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let json = """
+        {
+          "version": 1,
+          "providers": [{
+            "id": "opencode",
+            "openCodeWorkspaceAccounts": {
+              "version": 1,
+              "activeAccountID": "\(secondID.uuidString)",
+              "accounts": [
+                {
+                  "id": "\(firstID.uuidString)",
+                  "tokenAccountID": "\(tokenID.uuidString)",
+                  "label": "Shared",
+                  "workspaceID": "wrk_ALPHA",
+                  "workspaceLabel": "Alpha",
+                  "discoveredOwnerLabel": "Alice",
+                  "addedAt": 100,
+                  "lastValidatedAt": 200
+                },
+                {
+                  "id": "\(secondID.uuidString)",
+                  "tokenAccountID": "\(tokenID.uuidString)",
+                  "label": "Shared",
+                  "workspaceID": "wrk_BETA",
+                  "workspaceLabel": "Beta",
+                  "discoveredOwnerLabel": "Bob",
+                  "addedAt": 300,
+                  "lastValidatedAt": 400
+                }
+              ]
+            }
+          }]
+        }
+        """
+        try json.write(to: url, atomically: true, encoding: .utf8)
+
+        let config = try #require(try CodexBarConfigStore(fileURL: url).load())
+        let accounts = try #require(config.providerConfig(for: .opencode)?.opencodeWorkspaceAccounts)
+
+        #expect(accounts.accounts.map(\.workspaceID) == ["wrk_ALPHA", "wrk_BETA"])
+        #expect(accounts.active?.workspaceID == "wrk_BETA")
+        #expect(accounts.active?.ownerLabel == "Bob")
+        #expect(accounts.accounts.first?.createdAt == 100)
+        let migrated = try String(contentsOf: url)
+        #expect(migrated.contains("opencodeWorkspaceAccounts"))
+        #expect(!migrated.contains("openCodeWorkspaceAccounts"))
     }
 }

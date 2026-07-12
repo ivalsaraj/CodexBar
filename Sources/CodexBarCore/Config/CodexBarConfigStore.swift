@@ -32,6 +32,9 @@ public struct CodexBarConfigStore: @unchecked Sendable {
         let decoder = JSONDecoder()
         do {
             let decoded = try decoder.decode(CodexBarConfig.self, from: data)
+            if data.range(of: Data("\"openCodeWorkspaceAccounts\"".utf8)) != nil {
+                try? self.save(decoded)
+            }
             return decoded.normalized()
         } catch {
             throw CodexBarConfigStoreError.decodeFailed(error.localizedDescription)

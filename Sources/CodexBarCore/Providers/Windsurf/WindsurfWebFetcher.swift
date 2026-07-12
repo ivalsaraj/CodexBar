@@ -131,7 +131,8 @@ public enum WindsurfWebFetcherError: LocalizedError, Sendable {
 public enum WindsurfWebFetcher {
     private static let windsurfOrigin = "https://windsurf.com"
     private static let windsurfProfileReferer = "https://windsurf.com/profile"
-    private static let getPlanStatusURL = "https://windsurf.com/_backend/exa.seat_management_pb.SeatManagementService/GetPlanStatus"
+    private static let getPlanStatusURL =
+        "https://windsurf.com/_backend/exa.seat_management_pb.SeatManagementService/GetPlanStatus"
 
     public static func fetchUsage(
         browserDetection: BrowserDetection,

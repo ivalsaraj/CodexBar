@@ -390,7 +390,10 @@ final class UsageStore {
     }
 
     func snapshot(for provider: UsageProvider) -> UsageSnapshot? {
-        self.snapshots[provider]
+        if provider == .opencode, let active = self.settings.activeOpenCodeWorkspaceAccount {
+            return self.openCodeWorkspaceSnapshots[active.id]
+        }
+        return self.snapshots[provider]
     }
 
     func sourceLabel(for provider: UsageProvider) -> String {

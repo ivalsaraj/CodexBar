@@ -10,7 +10,7 @@ extension SettingsStore {
         set {
             self.updateProviderConfig(provider: .opencode) { entry in
                 entry.opencodeWorkspaceAccounts = newValue
-                entry.opencodeActiveWorkspaceAccountID = newValue.activeID
+                entry.opencodeActiveWorkspaceAccountID = nil
             }
         }
     }

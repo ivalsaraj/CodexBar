@@ -52,7 +52,6 @@ extension UsageStore {
         }
         return orderedAccounts.compactMap { account in
             let snapshot = self.openCodeWorkspaceSnapshots[account.id]
-                ?? (account.id == activeID ? self.snapshots[provider] : nil)
                 ?? UsageSnapshot(primary: nil, secondary: nil, updatedAt: Date())
             return self.makeWidgetEntry(
                 for: provider,
