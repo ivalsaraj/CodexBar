@@ -461,7 +461,6 @@ private struct SwitcherLargeUsageView: View {
                     }
                 }
             }
-            CursorWidgetRequestDetailsView(entry: self.entry)
             UsageHistoryChart(points: self.entry.dailyUsage, color: WidgetColors.color(for: self.entry.provider))
                 .frame(height: 50)
         }
