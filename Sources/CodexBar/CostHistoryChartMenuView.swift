@@ -2,6 +2,26 @@ import Charts
 import CodexBarCore
 import SwiftUI
 
+enum CostHistoryChartEntryPolicy {
+    static func shouldInclude(_ entry: CostUsageDailyReport.Entry) -> Bool {
+        if self.knownCostUSD(entry) != nil {
+            return true
+        }
+        return [
+            entry.totalTokens,
+            entry.inputTokens,
+            entry.outputTokens,
+            entry.cacheReadTokens,
+            entry.cacheCreationTokens,
+        ].contains { ($0 ?? 0) > 0 }
+    }
+
+    static func knownCostUSD(_ entry: CostUsageDailyReport.Entry) -> Double? {
+        guard let costUSD = entry.costUSD, costUSD >= 0 else { return nil }
+        return costUSD
+    }
+}
+
 @MainActor
 struct CostHistoryChartMenuView: View {
     typealias DailyEntry = CostUsageDailyReport.Entry
@@ -9,14 +29,15 @@ struct CostHistoryChartMenuView: View {
     private struct Point: Identifiable {
         let id: String
         let date: Date
-        let costUSD: Double
+        let costUSD: Double?
         let totalTokens: Int?
 
-        init(date: Date, costUSD: Double, totalTokens: Int?) {
+        init(date: Date, costUSD: Double?, totalTokens: Int?) {
             self.date = date
             self.costUSD = costUSD
             self.totalTokens = totalTokens
-            self.id = "\(Int(date.timeIntervalSince1970))-\(costUSD)"
+            let costID = costUSD.map { String($0) } ?? "unknown"
+            self.id = "\(Int(date.timeIntervalSince1970))-\(costID)"
         }
     }
 
@@ -45,15 +66,15 @@ struct CostHistoryChartMenuView: View {
                     ForEach(model.points) { point in
                         BarMark(
                             x: .value("Day", point.date, unit: .day),
-                            y: .value("Cost", point.costUSD))
+                            y: .value("Cost", point.costUSD ?? 0))
                             .foregroundStyle(model.barColor)
                     }
-                    if let peak = Self.peakPoint(model: model) {
-                        let capStart = max(peak.costUSD - Self.capHeight(maxValue: model.maxCostUSD), 0)
+                    if let peak = Self.peakPoint(model: model), let peakCostUSD = peak.costUSD {
+                        let capStart = max(peakCostUSD - Self.capHeight(maxValue: model.maxCostUSD), 0)
                         BarMark(
                             x: .value("Day", peak.date, unit: .day),
                             yStart: .value("Cap start", capStart),
-                            yEnd: .value("Cap end", peak.costUSD))
+                            yEnd: .value("Cap end", peakCostUSD))
                             .foregroundStyle(Color(nsColor: .systemYellow))
                     }
                 }
@@ -151,24 +172,31 @@ struct CostHistoryChartMenuView: View {
         var peak: (key: String, costUSD: Double)?
         var maxCostUSD: Double = 0
         for entry in sorted {
-            guard let costUSD = entry.costUSD, costUSD >= 0 else { continue }
+            guard CostHistoryChartEntryPolicy.shouldInclude(entry) else { continue }
             guard let date = self.dateFromDayKey(entry.date) else { continue }
+            let costUSD = CostHistoryChartEntryPolicy.knownCostUSD(entry)
             let point = Point(date: date, costUSD: costUSD, totalTokens: entry.totalTokens)
             points.append(point)
             pointsByKey[entry.date] = point
             entriesByKey[entry.date] = entry
             dateKeys.append((entry.date, date))
-            if let cur = peak {
-                if costUSD > cur.costUSD { peak = (entry.date, costUSD) }
-            } else {
-                peak = (entry.date, costUSD)
+            if let costUSD {
+                if let cur = peak {
+                    if costUSD > cur.costUSD {
+                        peak = (entry.date, costUSD)
+                    }
+                } else {
+                    peak = (entry.date, costUSD)
+                }
+                maxCostUSD = max(maxCostUSD, costUSD)
             }
-            maxCostUSD = max(maxCostUSD, costUSD)
         }
 
         let axisDates: [Date] = {
             guard let first = dateKeys.first?.date, let last = dateKeys.last?.date else { return [] }
-            if Calendar.current.isDate(first, inSameDayAs: last) { return [first] }
+            if Calendar.current.isDate(first, inSameDayAs: last) {
+                return [first]
+            }
             return [first, last]
         }()
 
@@ -255,7 +283,9 @@ struct CostHistoryChartMenuView: View {
         geo: GeometryProxy)
     {
         guard let location else {
-            if self.selectedDateKey != nil { self.selectedDateKey = nil }
+            if self.selectedDateKey != nil {
+                self.selectedDateKey = nil
+            }
             return
         }
 
@@ -278,7 +308,9 @@ struct CostHistoryChartMenuView: View {
         for entry in model.dateKeys {
             let dist = abs(entry.date.timeIntervalSince(date))
             if let cur = best {
-                if dist < cur.distance { best = (entry.key, dist) }
+                if dist < cur.distance {
+                    best = (entry.key, dist)
+                }
             } else {
                 best = (entry.key, dist)
             }
@@ -295,7 +327,7 @@ struct CostHistoryChartMenuView: View {
         }
 
         let dayLabel = date.formatted(.dateTime.month(.abbreviated).day())
-        let cost = UsageFormatter.usdString(point.costUSD)
+        let cost = point.costUSD.map(UsageFormatter.usdString) ?? "—"
         if let tokens = point.totalTokens {
             let primary = "\(dayLabel): \(cost) · \(UsageFormatter.tokenCountString(tokens)) tokens"
             let secondary = self.topModelsText(key: key, model: model)
