@@ -102,6 +102,12 @@ Usage source picker:
 - CLI RPC: `account/rateLimits/read` → credits balance.
 - CLI PTY diagnostics can still parse `Credits:` from saved/manual `/status` output.
 
+## Subscription utilization history
+
+- Records successful Codex rate-limit samples by their observation time.
+- Reset timestamps group samples into their session or weekly utilization periods, but are not displayed as
+  chart dates; a reset can be in the future while the observed usage is current.
+
 ## Cost usage (local log scan)
 - Source files:
   - Native Codex logs:

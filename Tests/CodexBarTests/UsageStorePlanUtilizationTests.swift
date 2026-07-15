@@ -174,7 +174,7 @@ struct UsageStorePlanUtilizationTests {
 
     @MainActor
     @Test
-    func `session chart uses native reset boundaries and fills missing windows`() throws {
+    func `session chart groups reset boundaries and labels observed windows`() throws {
         let calendar = Calendar(identifier: .gregorian)
         let firstBoundary = try #require(calendar.date(from: DateComponents(
             timeZone: TimeZone.current,
@@ -202,11 +202,12 @@ struct UsageStorePlanUtilizationTests {
             referenceDate: thirdBoundary)
 
         #expect(model.pointCount == 3)
+        #expect(model.xDomain == -0.5...2.5)
         #expect(model.usedPercents == [62, 0, 20])
         #expect(model.pointDates == [
-            formattedBoundary(firstBoundary),
+            formattedBoundary(firstBoundary.addingTimeInterval(-30 * 60)),
             formattedBoundary(firstBoundary.addingTimeInterval(5 * 60 * 60)),
-            formattedBoundary(thirdBoundary),
+            formattedBoundary(thirdBoundary.addingTimeInterval(-30 * 60)),
         ])
     }
 
