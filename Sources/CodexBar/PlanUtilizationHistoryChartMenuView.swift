@@ -377,7 +377,8 @@ struct PlanUtilizationHistoryChartMenuView: View {
             resetBoundaryLattice: resetBoundaryLattice)
         return EntryPointAccumulator(
             effectiveBoundaryDate: effectiveBoundaryDate,
-            displayBoundaryDate: rawResetBoundaryDate ?? effectiveBoundaryDate,
+            // Reset boundaries group samples; the chart must show when the usage was observed.
+            displayBoundaryDate: entry.capturedAt,
             observedAt: entry.capturedAt,
             usedPercent: max(0, min(100, entry.usedPercent)),
             hasObservedResetBoundary: rawResetBoundaryDate != nil)

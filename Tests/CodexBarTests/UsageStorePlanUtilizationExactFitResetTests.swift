@@ -6,7 +6,7 @@ import Testing
 struct UsageStorePlanUtilizationExactFitResetTests {
     @MainActor
     @Test
-    func `weekly chart uses reset date as bar date`() {
+    func `weekly chart uses observation date as bar date`() {
         let firstBoundary = Date(timeIntervalSince1970: 1_710_000_000)
         let secondBoundary = firstBoundary.addingTimeInterval(7 * 24 * 60 * 60)
         let thirdBoundary = secondBoundary.addingTimeInterval(7 * 24 * 60 * 60)
@@ -26,10 +26,31 @@ struct UsageStorePlanUtilizationExactFitResetTests {
 
         #expect(model.usedPercents == [62, 48, 20])
         #expect(model.pointDates == [
-            formattedBoundary(firstBoundary),
-            formattedBoundary(secondBoundary),
-            formattedBoundary(thirdBoundary),
+            formattedBoundary(firstBoundary.addingTimeInterval(-30 * 60)),
+            formattedBoundary(secondBoundary.addingTimeInterval(-30 * 60)),
+            formattedBoundary(thirdBoundary.addingTimeInterval(-30 * 60)),
         ])
+    }
+
+    @MainActor
+    @Test
+    func `weekly chart does not display a future reset date`() {
+        let capturedAt = Date(timeIntervalSince1970: 1_784_080_800) // 2026-07-15T07:20:00Z
+        let resetAt = capturedAt.addingTimeInterval(5 * 24 * 60 * 60)
+        let histories = [
+            planSeries(name: .weekly, windowMinutes: 10080, entries: [
+                planEntry(at: capturedAt, usedPercent: 47, resetsAt: resetAt),
+            ]),
+        ]
+
+        let model = PlanUtilizationHistoryChartMenuView._modelSnapshotForTesting(
+            selectedSeriesRawValue: "weekly:10080",
+            histories: histories,
+            provider: .codex,
+            referenceDate: capturedAt)
+
+        #expect(model.usedPercents == [47])
+        #expect(model.pointDates == [formattedBoundary(capturedAt)])
     }
 
     @MainActor
@@ -56,8 +77,8 @@ struct UsageStorePlanUtilizationExactFitResetTests {
 
         #expect(model.usedPercents == [61, 18])
         #expect(model.pointDates == [
-            formattedBoundary(firstBoundary.addingTimeInterval(75)),
-            formattedBoundary(secondBoundary),
+            formattedBoundary(firstBoundary.addingTimeInterval(-20 * 60)),
+            formattedBoundary(secondBoundary.addingTimeInterval(-30 * 60)),
         ])
     }
 
@@ -79,7 +100,7 @@ struct UsageStorePlanUtilizationExactFitResetTests {
             referenceDate: boundary)
 
         #expect(model.usedPercents == [48])
-        #expect(model.pointDates == [formattedBoundary(boundary)])
+        #expect(model.pointDates == [formattedBoundary(boundary.addingTimeInterval(-20 * 60))])
     }
 
     @MainActor
@@ -102,7 +123,7 @@ struct UsageStorePlanUtilizationExactFitResetTests {
 
         #expect(model.usedPercents == [62, 0, 0])
         #expect(model.pointDates == [
-            formattedBoundary(firstBoundary),
+            formattedBoundary(firstBoundary.addingTimeInterval(-30 * 60)),
             formattedBoundary(firstBoundary.addingTimeInterval(5 * 60 * 60)),
             formattedBoundary(currentBoundary),
         ])
