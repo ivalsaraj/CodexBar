@@ -76,6 +76,29 @@ struct CostUsagePricingTests {
     }
 
     @Test
+    func `codex cost supports gpt56 sol terra and luna`() {
+        let sol = CostUsagePricing.codexCostUSD(
+            model: "gpt-5.6-sol",
+            inputTokens: 100,
+            cachedInputTokens: 10,
+            outputTokens: 5)
+        let terra = CostUsagePricing.codexCostUSD(
+            model: "gpt-5.6-terra",
+            inputTokens: 100,
+            cachedInputTokens: 10,
+            outputTokens: 5)
+        let luna = CostUsagePricing.codexCostUSD(
+            model: "gpt-5.6-luna-2026-07-09",
+            inputTokens: 100,
+            cachedInputTokens: 10,
+            outputTokens: 5)
+
+        #expect(sol == 90 * 5e-6 + 10 * 5e-7 + 5 * 30e-6)
+        #expect(terra == 90 * 2.5e-6 + 10 * 2.5e-7 + 5 * 15e-6)
+        #expect(luna == 90 * 1e-6 + 10 * 1e-7 + 5 * 6e-6)
+    }
+
+    @Test
     func `codex cost returns zero for research preview model`() {
         let cost = CostUsagePricing.codexCostUSD(
             model: "gpt-5.3-codex-spark",
