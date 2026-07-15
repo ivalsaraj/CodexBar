@@ -482,8 +482,8 @@ struct PlanUtilizationHistoryChartMenuView: View {
     }
 
     private nonisolated static func xDomain(points: [Point]) -> ClosedRange<Double>? {
-        guard !points.isEmpty else { return nil }
-        return -0.5...(Double(Layout.maxPoints) - 0.5)
+        guard let lastPoint = points.last else { return nil }
+        return -0.5...(Double(lastPoint.index) + 0.5)
     }
 
     private nonisolated static func axisIndexes(points: [Point], windowMinutes: Int) -> [Double] {

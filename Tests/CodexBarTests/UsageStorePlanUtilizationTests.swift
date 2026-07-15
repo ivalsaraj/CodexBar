@@ -202,6 +202,7 @@ struct UsageStorePlanUtilizationTests {
             referenceDate: thirdBoundary)
 
         #expect(model.pointCount == 3)
+        #expect(model.xDomain == -0.5...2.5)
         #expect(model.usedPercents == [62, 0, 20])
         #expect(model.pointDates == [
             formattedBoundary(firstBoundary.addingTimeInterval(-30 * 60)),
