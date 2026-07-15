@@ -120,6 +120,8 @@ Usage source picker:
   - Native + merged provider cache: `~/Library/Caches/CodexBar/cost-usage/codex-v2.json`
   - pi session cache: `~/Library/Caches/CodexBar/cost-usage/pi-sessions-v1.json`
 - Window: last 30 days (rolling), with a 60s minimum refresh interval.
+- Cost history chart: shows per-day model-cost stacks with a stable model color, period or hovered-day model rows,
+  and a neutral `Unattributed` segment when the daily aggregate exceeds known model costs.
 
 ## Key files
 - Web: `Sources/CodexBarCore/OpenAIWeb/*`
