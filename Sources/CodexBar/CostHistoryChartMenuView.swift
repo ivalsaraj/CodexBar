@@ -146,6 +146,17 @@ enum CostHistoryChartDataPolicy {
         }
     }
 
+    struct TokenActivitySegment: Identifiable {
+        let dateKey: String
+        let date: Date
+        let identity: Identity
+        let share: Double
+
+        var id: String {
+            "token-\(self.dateKey)-\(self.identity.chartKey)"
+        }
+    }
+
     struct DetailRow: Identifiable {
         let identity: Identity
         let costUSD: Double?
@@ -158,6 +169,8 @@ enum CostHistoryChartDataPolicy {
 
     struct Data {
         let datePoints: [DatePoint]
+        let tokenOnlyDatePoints: [DatePoint]
+        let tokenActivitySegments: [TokenActivitySegment]
         let segments: [Segment]
         let periodRows: [DetailRow]
         let dailyRowsByDateKey: [String: [DetailRow]]
@@ -165,11 +178,21 @@ enum CostHistoryChartDataPolicy {
         let totalTokensByDateKey: [String: Int]
         let peakKey: String?
         let colors: [Identity: CostHistoryModelColor]
+        let activityBarHeight: Double
+        let chartUpperBound: Double
 
         var axisDates: [Date] {
             guard let first = self.datePoints.first?.date, let last = self.datePoints.last?.date else { return [] }
             return Calendar.current.isDate(first, inSameDayAs: last) ? [first] : [first, last]
         }
+    }
+
+    private struct DailyData {
+        let shouldInclude: Bool
+        let hasPositiveTokens: Bool
+        let rows: [DetailRow]
+        let segments: [(identity: Identity, costUSD: Double)]
+        let renderedCost: Double
     }
 
     private struct Totals {
@@ -193,6 +216,8 @@ enum CostHistoryChartDataPolicy {
     static func build(daily: [CostUsageDailyReport.Entry]) -> Data {
         let sorted = daily.sorted { $0.date < $1.date }
         var datePoints: [DatePoint] = []
+        var tokenOnlyDatePoints: [DatePoint] = []
+        var tokenActivitySegments: [TokenActivitySegment] = []
         var segments: [Segment] = []
         var dailyRowsByDateKey: [String: [DetailRow]] = [:]
         var renderedTotalsByDateKey: [String: Double] = [:]
@@ -206,7 +231,31 @@ enum CostHistoryChartDataPolicy {
             let dailyData = self.dailyData(for: entry)
             guard dailyData.shouldInclude else { continue }
 
-            datePoints.append(DatePoint(key: entry.date, date: date))
+            let point = DatePoint(key: entry.date, date: date)
+            datePoints.append(point)
+            if dailyData.renderedCost == 0, dailyData.hasPositiveTokens {
+                tokenOnlyDatePoints.append(point)
+                let activityRows = dailyData.rows.compactMap { row -> (Identity, Int)? in
+                    guard let totalTokens = row.totalTokens, totalTokens > 0 else { return nil }
+                    return (row.identity, totalTokens)
+                }
+                let totalTokens = activityRows.reduce(0) { $0 + $1.1 }
+                if totalTokens > 0 {
+                    for (identity, tokens) in activityRows {
+                        tokenActivitySegments.append(TokenActivitySegment(
+                            dateKey: entry.date,
+                            date: date,
+                            identity: identity,
+                            share: Double(tokens) / Double(totalTokens)))
+                    }
+                } else {
+                    tokenActivitySegments.append(TokenActivitySegment(
+                        dateKey: entry.date,
+                        date: date,
+                        identity: .unattributed,
+                        share: 1))
+                }
+            }
             dailyRowsByDateKey[entry.date] = dailyData.rows
             renderedTotalsByDateKey[entry.date] = dailyData.renderedCost
             totalTokensByDateKey[entry.date] = entry.totalTokens.flatMap { $0 >= 0 ? $0 : nil }
@@ -235,24 +284,25 @@ enum CostHistoryChartDataPolicy {
                 costUSD: total.hasKnownCost ? total.costUSD : nil,
                 totalTokens: identity == .unattributed ? nil : (total.hasKnownTokens ? total.totalTokens : nil))
         })
-        let identities = Set(periodRows.map(\.identity))
+        let identities = Set(periodRows.map(\.identity)).union(tokenActivitySegments.map(\.identity))
+        let maxRenderedCost = renderedTotalsByDateKey.values.max() ?? 0
+        let chartUpperBound = maxRenderedCost > 0 ? maxRenderedCost * 1.05 : 1
         return Data(
             datePoints: datePoints,
+            tokenOnlyDatePoints: tokenOnlyDatePoints,
+            tokenActivitySegments: tokenActivitySegments,
             segments: segments,
             periodRows: periodRows,
             dailyRowsByDateKey: dailyRowsByDateKey,
             renderedTotalsByDateKey: renderedTotalsByDateKey,
             totalTokensByDateKey: totalTokensByDateKey,
             peakKey: peakKey,
-            colors: CostHistoryModelColorPolicy.colors(for: identities))
+            colors: CostHistoryModelColorPolicy.colors(for: identities),
+            activityBarHeight: chartUpperBound * 0.035,
+            chartUpperBound: chartUpperBound)
     }
 
-    private static func dailyData(for entry: CostUsageDailyReport.Entry) -> (
-        shouldInclude: Bool,
-        rows: [DetailRow],
-        segments: [(identity: Identity, costUSD: Double)],
-        renderedCost: Double)
-    {
+    private static func dailyData(for entry: CostUsageDailyReport.Entry) -> DailyData {
         var totals: [Identity: Totals] = [:]
         for model in entry.modelsUsed ?? [] {
             let name = model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -262,11 +312,15 @@ enum CostHistoryChartDataPolicy {
 
         var breakdownCost = 0.0
         var unattributedCost = 0.0
+        var hasPositiveUnattributedTokens = false
         for breakdown in entry.modelBreakdowns ?? [] {
             let name = breakdown.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
             let cost = self.validCost(breakdown.costUSD)
             let tokens = self.validTokens(breakdown.totalTokens)
             guard !name.isEmpty else {
+                if let tokens, tokens > 0 {
+                    hasPositiveUnattributedTokens = true
+                }
                 if let cost, cost > 0 {
                     breakdownCost += cost
                     unattributedCost += cost
@@ -305,15 +359,23 @@ enum CostHistoryChartDataPolicy {
             return (row.identity, costUSD)
         }
         let renderedCost = segments.reduce(0) { $0 + $1.costUSD }
-        let hasPositiveTokens = [
+        let hasPositiveEntryTokens = [
             entry.totalTokens,
             entry.inputTokens,
             entry.outputTokens,
             entry.cacheReadTokens,
             entry.cacheCreationTokens,
         ].contains { ($0 ?? 0) > 0 }
+        let hasPositiveTokens = hasPositiveEntryTokens ||
+            hasPositiveUnattributedTokens ||
+            rows.contains { ($0.totalTokens ?? 0) > 0 }
         let shouldInclude = self.validCost(entry.costUSD) != nil || hasPositiveTokens || renderedCost > 0
-        return (shouldInclude, rows, segments, renderedCost)
+        return DailyData(
+            shouldInclude: shouldInclude,
+            hasPositiveTokens: hasPositiveTokens,
+            rows: rows,
+            segments: segments,
+            renderedCost: renderedCost)
     }
 
     private static func validCost(_ costUSD: Double?) -> Double? {
@@ -413,6 +475,12 @@ struct CostHistoryChartMenuView: View {
                             y: .value("Cost", 0))
                             .foregroundStyle(Color.clear)
                     }
+                    ForEach(model.tokenActivitySegments) { segment in
+                        BarMark(
+                            x: .value("Day", segment.date, unit: .day),
+                            y: .value("Token activity", segment.share * model.activityBarHeight))
+                            .foregroundStyle(by: .value("Model", segment.identity.chartKey))
+                    }
                     ForEach(model.segments) { segment in
                         BarMark(
                             x: .value("Day", segment.date, unit: .day),
@@ -432,6 +500,7 @@ struct CostHistoryChartMenuView: View {
                 .chartForegroundStyleScale(
                     domain: model.colors.keys.map(\.chartKey).sorted(),
                     range: model.colors.keys.sorted().map { self.color(for: model.colors[$0]) })
+                .chartYScale(domain: 0...model.chartUpperBound)
                 .chartYAxis(.hidden)
                 .chartXAxis {
                     AxisMarks(values: model.axisDates) { _ in

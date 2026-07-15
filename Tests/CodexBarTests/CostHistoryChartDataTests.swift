@@ -33,6 +33,7 @@ struct CostHistoryChartDataTests {
             .init(dateKey: "2026-07-01", identity: .model("alpha"), costUSD: 1),
             .init(dateKey: "2026-07-02", identity: .model("alpha"), costUSD: 4),
         ])
+        #expect(data.tokenOnlyDatePoints.isEmpty)
         #expect(Self.rowValues(data.periodRows) == [
             .init(identity: .model("alpha"), costUSD: 5, totalTokens: 500),
             .init(identity: .model("beta"), costUSD: 2, totalTokens: 200),
@@ -57,12 +58,58 @@ struct CostHistoryChartDataTests {
 
         #expect(data.datePoints.map(\.key) == ["2026-07-01"])
         #expect(data.segments.isEmpty)
+        #expect(data.tokenOnlyDatePoints.map(\.key) == ["2026-07-01"])
+        #expect(Self.activitySegmentValues(data.tokenActivitySegments) == [
+            .init(dateKey: "2026-07-01", identity: .model("alpha"), share: 1),
+        ])
         #expect(data.renderedTotalsByDateKey["2026-07-01"] == 0)
         #expect(Self.rowValues(data.dailyRowsByDateKey["2026-07-01"] ?? []) == [
             .init(identity: .model("alpha"), costUSD: nil, totalTokens: 200),
             .init(identity: .model("only-listed"), costUSD: nil, totalTokens: nil),
         ])
         #expect(data.peakKey == nil)
+    }
+
+    @Test
+    func `uses model breakdown tokens for token-only activity`() {
+        let data = CostHistoryChartDataPolicy.build(daily: [
+            Self.entry(
+                date: "2026-07-01",
+                costUSD: nil,
+                totalTokens: nil,
+                modelsUsed: nil,
+                modelBreakdowns: [
+                    .init(modelName: "alpha", costUSD: nil, totalTokens: 80),
+                    .init(modelName: "beta", costUSD: nil, totalTokens: 20),
+                ]),
+        ])
+
+        #expect(data.datePoints.map(\.key) == ["2026-07-01"])
+        #expect(Self.activitySegmentValues(data.tokenActivitySegments) == [
+            .init(dateKey: "2026-07-01", identity: .model("alpha"), share: 0.8),
+            .init(dateKey: "2026-07-01", identity: .model("beta"), share: 0.2),
+        ])
+        #expect(data.activityBarHeight == 0.035)
+        #expect(data.chartUpperBound == 1)
+    }
+
+    @Test
+    func `uses unattributed activity for unnamed breakdown tokens`() {
+        let data = CostHistoryChartDataPolicy.build(daily: [
+            Self.entry(
+                date: "2026-07-01",
+                costUSD: nil,
+                totalTokens: nil,
+                modelsUsed: nil,
+                modelBreakdowns: [
+                    .init(modelName: " ", costUSD: nil, totalTokens: 100),
+                ]),
+        ])
+
+        #expect(data.datePoints.map(\.key) == ["2026-07-01"])
+        #expect(Self.activitySegmentValues(data.tokenActivitySegments) == [
+            .init(dateKey: "2026-07-01", identity: .unattributed, share: 1),
+        ])
     }
 
     @Test
@@ -145,6 +192,7 @@ struct CostHistoryChartDataTests {
         #expect(Self.segmentValues(data.segments) == [
             .init(dateKey: "2026-07-01", identity: .model("Unattributed"), costUSD: 2),
         ])
+        #expect(data.tokenOnlyDatePoints.isEmpty)
     }
 
     @Test
@@ -237,6 +285,12 @@ struct CostHistoryChartDataTests {
         segments.map { .init(dateKey: $0.dateKey, identity: $0.identity, costUSD: $0.costUSD) }
     }
 
+    private static func activitySegmentValues(
+        _ segments: [CostHistoryChartDataPolicy.TokenActivitySegment]) -> [ActivitySegmentValue]
+    {
+        segments.map { .init(dateKey: $0.dateKey, identity: $0.identity, share: $0.share) }
+    }
+
     private struct RowValue: Equatable {
         let identity: CostHistoryChartDataPolicy.Identity
         let costUSD: Double?
@@ -247,5 +301,11 @@ struct CostHistoryChartDataTests {
         let dateKey: String
         let identity: CostHistoryChartDataPolicy.Identity
         let costUSD: Double
+    }
+
+    private struct ActivitySegmentValue: Equatable {
+        let dateKey: String
+        let identity: CostHistoryChartDataPolicy.Identity
+        let share: Double
     }
 }
