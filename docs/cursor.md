@@ -57,16 +57,19 @@ Manual option:
 - Primary: plan usage percent (included plan).
 - Secondary: on-demand usage percent (individual usage).
 - Provider cost: on-demand usage USD (limit when known).
-- Legacy Cursor event rows render as one `Req 1` request. The API's optional `requestsCosts` stays a separate weighted
-  diagnostic value, never a substitute for a row count or the legacy quota. When present, it appears only as an
-  explicit `Request cost: N` detail alongside the local model-cost estimate.
+- Legacy Cursor events retain one `Req 1` request in their expanded diagnostics. The compact row's trailing value is
+  only the local model-cost estimate. The API's optional `requestsCosts` stays a separate weighted diagnostic value,
+  never a substitute for a row count or the legacy quota; when present, it appears only as an explicit
+  `Request cost: N` detail.
 - Cursor range selection defaults to `Cycle` and can switch to `30d`; it changes the event/token diagnostic surface
   only, not Cursor's primary plan quota. If the API omits a billing-cycle start, the diagnostic surface falls back to
   the complete `30d` range instead of hiding the available data.
 - Cost estimates are local diagnostics, not Cursor billing. Exact token-breakdown rows render `Est. $N`; partial
   Anthropic/Composer rows render a visible `Approx. $low-$high` range, and total-only OpenAI rows use a conservative
   `Approx. $low+` lower bound. Unknown or unpriced rows remain unavailable and never fabricate a total from their
-  token count. `gpt-5.5-extra-high` resolves to the `gpt-5.5` price key while retaining effort metadata.
+  token count. The selected range token line includes the matching aggregate estimate. `gpt-5.5-extra-high` resolves
+  to the `gpt-5.5` price key while retaining effort metadata; version-first Anthropic names resolve to the same priced
+  family as their family-first form.
 - Known input, output, cache-read, and cache-write fields are counted according to the local pricing catalog. Composer
   cache tokens are treated as input-equivalent because Cursor does not publish a separate Composer cache rate; the UI
   keeps that caveat with the estimate. Pricing references were checked 2026-07-11 against [OpenAI GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5),

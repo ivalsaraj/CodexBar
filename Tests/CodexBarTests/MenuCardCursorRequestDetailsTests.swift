@@ -41,4 +41,30 @@ struct MenuCardCursorRequestDetailsTests {
         #expect(UsageFormatter.cursorRequestCountLabel(requests: request.requests) == "Req 1")
         #expect(UsageFormatter.cursorRequestCostDetail(requestCost: request.requestCost) == "Request cost: 2")
     }
+
+    @Test
+    func `version first Fable request details keep the model estimate`() {
+        let request = CursorRecentRequest(
+            timestamp: Date(),
+            model: "claude-5-fable-thinking-max",
+            tokens: 252_000,
+            requests: 1)
+
+        let lines = MenuCardTokenDetailsModel.lines(for: request)
+
+        #expect(lines.contains(where: { $0.hasPrefix("Approx.") }))
+    }
+
+    @Test
+    func `compact cursor row trailing text is model cost only`() {
+        let request = CursorRecentRequest(
+            timestamp: Date(),
+            model: "claude-5-fable-thinking-max",
+            tokens: 252_000,
+            requests: 1)
+
+        let row = CursorRequestRowPresentation.make(request: request)
+
+        #expect(row.trailingText == "Approx. $2.52-$12.60")
+    }
 }

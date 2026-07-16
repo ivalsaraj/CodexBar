@@ -147,7 +147,17 @@ public enum CursorModelNormalizer {
 
         let family: String?
         let versionParts: [String]
-        if let first = remainder.first, self.knownAnthropicFamilies.contains(first) {
+        if let first = remainder.first, self.isAnthropicVersionToken(first) {
+            let versionTokens = self.leadingAnthropicVersionTokens(in: remainder)
+            versionParts = versionTokens.flatMap { $0.split(separator: ".").map(String.init) }
+            if let explicitFamily = remainder.dropFirst(versionTokens.count).first,
+               self.knownAnthropicFamilies.contains(explicitFamily)
+            {
+                family = explicitFamily
+            } else {
+                family = self.inferAnthropicFamily(versionParts: versionParts, effort: effort)
+            }
+        } else if let first = remainder.first, self.knownAnthropicFamilies.contains(first) {
             family = first
             versionParts = remainder.dropFirst().flatMap { $0.split(separator: ".").map(String.init) }
         } else {
@@ -180,6 +190,21 @@ public enum CursorModelNormalizer {
             mode: mode,
             effort: effort,
             pricingKey: pricingKey)
+    }
+
+    private static func isAnthropicVersionToken(_ token: String) -> Bool {
+        token.allSatisfy(\.isNumber)
+            || (token.contains(".")
+                && token.split(separator: ".").allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) })
+    }
+
+    private static func leadingAnthropicVersionTokens(in tokens: [String]) -> [String] {
+        var versionTokens: [String] = []
+        for token in tokens {
+            guard self.isAnthropicVersionToken(token) else { break }
+            versionTokens.append(token)
+        }
+        return versionTokens
     }
 
     private static func inferAnthropicFamily(versionParts: [String], effort: String?) -> String {

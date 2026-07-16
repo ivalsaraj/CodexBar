@@ -20,6 +20,16 @@ struct CursorModelNormalizerTests {
     }
 
     @Test
+    func `version first Fable keeps the priced model key`() {
+        let model = CursorModelNormalizer.normalize("claude-5-fable-thinking-max")
+
+        #expect(model.displayName == "Fable 5")
+        #expect(model.pricingKey == "claude-fable-5")
+        #expect(model.effort == "max")
+        #expect(model.provider == .anthropic)
+    }
+
+    @Test
     func `unknown model remains unavailable instead of borrowing a rate`() {
         let model = CursorModelNormalizer.normalize("unknown-future-model")
 

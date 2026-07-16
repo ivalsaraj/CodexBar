@@ -8,8 +8,11 @@ extension UsageMenuCardView.Model {
            let rangeSummary = rangeSummaries.first(where: { $0.rangeKind == input.cursorUsageRangeKind })
            ?? rangeSummaries.first
         {
-            let sessionLine = "\(rangeSummary.rangeKind.label): "
+            let tokenLine = "\(rangeSummary.rangeKind.label): "
                 + "\(UsageFormatter.tokenCountString(rangeSummary.tokens)) tokens"
+            let sessionLine = UsageFormatter.cursorEstimatedTotalText(rangeSummary.requestCostSummary)
+                .map { "\(tokenLine) · \($0)" }
+                ?? tokenLine
             return TokenUsageSection(
                 title: "Cursor usage",
                 sessionLine: sessionLine,
@@ -90,6 +93,19 @@ struct CursorTokenUsageHeader: View {
     }
 }
 
+struct CursorRequestRowPresentation: Equatable {
+    let modelLabel: String
+    let trailingText: String?
+
+    static func make(request: CursorRecentRequest) -> Self {
+        let normalized = CursorModelNormalizer.normalize(request.model)
+        let estimate = CursorRequestCostEstimator.estimate(for: request)
+        return Self(
+            modelLabel: UsageFormatter.cursorCompactModelLabel(normalized),
+            trailingText: UsageFormatter.cursorEstimateText(estimate))
+    }
+}
+
 struct CursorRequestDetailsList: View {
     let requests: [CursorRecentRequest]
     @State private var expandedRequestIndex: Int?
@@ -99,21 +115,17 @@ struct CursorRequestDetailsList: View {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(Array(self.requests.prefix(30).enumerated()), id: \.offset) { index, request in
-                        let normalized = CursorModelNormalizer.normalize(request.model)
-                        let estimate = CursorRequestCostEstimator.estimate(for: request)
+                        let row = CursorRequestRowPresentation.make(request: request)
                         VStack(alignment: .leading, spacing: 0) {
                             Button {
                                 self.expandedRequestIndex = self.expandedRequestIndex == index ? nil : index
                             } label: {
                                 HStack(alignment: .firstTextBaseline) {
-                                    Text(UsageFormatter.cursorCompactModelLabel(normalized))
+                                    Text(row.modelLabel)
                                     Spacer()
-                                    VStack(alignment: .trailing, spacing: 1) {
-                                        Text(UsageFormatter.cursorRequestCountLabel(requests: request.requests))
-                                        if let estimateText = UsageFormatter.cursorEstimateText(estimate) {
-                                            Text(estimateText)
-                                                .foregroundStyle(.secondary)
-                                        }
+                                    if let trailingText = row.trailingText {
+                                        Text(trailingText)
+                                            .foregroundStyle(.secondary)
                                     }
                                 }
                             }

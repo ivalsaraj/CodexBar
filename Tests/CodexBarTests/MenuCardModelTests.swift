@@ -284,7 +284,11 @@ struct MenuCardModelTests {
             tokens: 2000,
             requests: 1,
             weightedRequestCost: 2,
-            requestCostSummary: nil,
+            requestCostSummary: CursorRequestCostSummary(
+                exactUSD: Decimal(string: "1.23"),
+                lowerBoundUSD: Decimal(string: "1.23"),
+                upperBoundUSD: Decimal(string: "1.23"),
+                containsApproximation: false),
             recentRequests: [request])
         let snapshot = UsageSnapshot(
             primary: nil,
@@ -317,7 +321,7 @@ struct MenuCardModelTests {
         let tokenUsage = try #require(model.tokenUsage)
 
         #expect(tokenUsage.title == "Cursor usage")
-        #expect(tokenUsage.sessionLine == "30d: 2K tokens")
+        #expect(tokenUsage.sessionLine == "30d: 2K tokens · Est. $1.23")
         #expect(tokenUsage.selectedCursorRangeKind == .last30Days)
         #expect(tokenUsage.cursorRequestDetails.first?.requestCost == 2)
         tokenUsage.selectCursorRange?(.billingCycle)
