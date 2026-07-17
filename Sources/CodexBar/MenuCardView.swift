@@ -75,12 +75,23 @@ struct UsageMenuCardView: View {
         }
 
         struct TokenUsageSection {
+            struct CursorRangePresentation {
+                let sessionLine: String
+                let monthLine: String?
+                let cursorRequestRange: CursorRecentRequestRange?
+                let cursorRequestDetails: [CursorRecentRequest]
+            }
+
             let title: String
             let sessionLine: String
             let monthLine: String?
             let detailLines: [String]
             let cursorRequestRange: CursorRecentRequestRange?
             let cursorRequestDetails: [CursorRecentRequest]
+            let selectedCursorRangeKind: CursorUsageRangeKind?
+            let availableCursorRangeKinds: [CursorUsageRangeKind]
+            let cursorRangePresentations: [CursorUsageRangeKind: CursorRangePresentation]
+            let selectCursorRange: ((CursorUsageRangeKind) -> Void)?
             let cursorRequestNow: Date?
             let renewalLine: String?
             let hintLine: String?
@@ -94,6 +105,10 @@ struct UsageMenuCardView: View {
                 detailLines: [String] = [],
                 cursorRequestRange: CursorRecentRequestRange? = nil,
                 cursorRequestDetails: [CursorRecentRequest] = [],
+                selectedCursorRangeKind: CursorUsageRangeKind? = nil,
+                availableCursorRangeKinds: [CursorUsageRangeKind] = [],
+                cursorRangePresentations: [CursorUsageRangeKind: CursorRangePresentation] = [:],
+                selectCursorRange: ((CursorUsageRangeKind) -> Void)? = nil,
                 cursorRequestNow: Date? = nil,
                 renewalLine: String?,
                 hintLine: String?,
@@ -106,6 +121,10 @@ struct UsageMenuCardView: View {
                 self.detailLines = detailLines
                 self.cursorRequestRange = cursorRequestRange
                 self.cursorRequestDetails = cursorRequestDetails
+                self.selectedCursorRangeKind = selectedCursorRangeKind
+                self.availableCursorRangeKinds = availableCursorRangeKinds
+                self.cursorRangePresentations = cursorRangePresentations
+                self.selectCursorRange = selectCursorRange
                 self.cursorRequestNow = cursorRequestNow
                 self.renewalLine = renewalLine
                 self.hintLine = hintLine
@@ -209,43 +228,11 @@ struct UsageMenuCardView: View {
                         Divider()
                     }
                     if let tokenUsage = self.model.tokenUsage {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(tokenUsage.title)
-                                .font(.body)
-                                .fontWeight(.medium)
-                            Text(tokenUsage.sessionLine)
-                                .font(.footnote)
-                            if let monthLine = tokenUsage.monthLine {
-                                Text(monthLine)
-                                    .font(.footnote)
-                            }
-                            TokenUsageDetailLinesView(
-                                provider: self.model.provider,
-                                tokenUsage: tokenUsage,
-                                font: .caption)
-                            if let renewalLine = tokenUsage.renewalLine {
-                                Text(renewalLine)
-                                    .font(.footnote)
-                                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
-                            }
-                            if let hint = tokenUsage.hintLine, !hint.isEmpty {
-                                Text(hint)
-                                    .font(.footnote)
-                                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
-                                    .lineLimit(4)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            if let error = tokenUsage.errorLine, !error.isEmpty {
-                                Text(error)
-                                    .font(.footnote)
-                                    .foregroundStyle(MenuHighlightStyle.error(self.isHighlighted))
-                                    .lineLimit(4)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .overlay {
-                                        ClickToCopyOverlay(copyText: tokenUsage.errorCopyText ?? error)
-                                    }
-                            }
-                        }
+                        TokenUsageContentView(
+                            provider: self.model.provider,
+                            tokenUsage: tokenUsage,
+                            lineFont: .footnote,
+                            detailFont: .caption)
                     }
                 }
                 .padding(.bottom, self.model.creditsText == nil ? 6 : 0)
@@ -361,104 +348,6 @@ private struct CopyIconButton: View {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(self.copyText, forType: .string)
-    }
-}
-
-private struct ProviderCostContent: View {
-    let section: UsageMenuCardView.Model.ProviderCostSection
-    let progressColor: Color
-    @Environment(\.menuItemHighlighted) private var isHighlighted
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(self.section.title)
-                .font(.body)
-                .fontWeight(.medium)
-            UsageProgressBar(
-                percent: self.section.percentUsed,
-                tint: self.progressColor,
-                accessibilityLabel: "Extra usage spent")
-            HStack(alignment: .firstTextBaseline) {
-                Text(self.section.spendLine)
-                    .font(.footnote)
-                Spacer()
-                Text(String(format: "%.0f%% used", min(100, max(0, self.section.percentUsed))))
-                    .font(.footnote)
-                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
-            }
-            if let renewalLine = self.section.renewalLine {
-                Text(renewalLine)
-                    .font(.footnote)
-                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
-            }
-        }
-    }
-}
-
-private struct MetricRow: View {
-    let metric: UsageMenuCardView.Model.Metric
-    let title: String
-    let progressColor: Color
-    @Environment(\.menuItemHighlighted) private var isHighlighted
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(self.title)
-                .font(.body)
-                .fontWeight(.medium)
-            if let statusText = self.metric.statusText {
-                Text(statusText)
-                    .font(.footnote)
-                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
-                    .lineLimit(1)
-            } else {
-                UsageProgressBar(
-                    percent: self.metric.percent,
-                    tint: self.progressColor,
-                    accessibilityLabel: self.metric.percentStyle.accessibilityLabel,
-                    pacePercent: self.metric.pacePercent,
-                    paceOnTop: self.metric.paceOnTop)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(self.metric.percentLabel)
-                            .font(.footnote)
-                            .lineLimit(1)
-                        Spacer()
-                        if let rightLabel = self.metric.resetText {
-                            Text(rightLabel)
-                                .font(.footnote)
-                                .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
-                                .lineLimit(1)
-                        }
-                    }
-                    if self.metric.detailLeftText != nil || self.metric.detailRightText != nil {
-                        HStack(alignment: .firstTextBaseline) {
-                            if let detailLeft = self.metric.detailLeftText {
-                                Text(detailLeft)
-                                    .font(.footnote)
-                                    .foregroundStyle(MenuHighlightStyle.primary(self.isHighlighted))
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            if let detailRight = self.metric.detailRightText {
-                                Text(detailRight)
-                                    .font(.footnote)
-                                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if let detail = self.metric.detailText {
-                    Text(detail)
-                        .font(.footnote)
-                        .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
-                        .lineLimit(1)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -637,46 +526,11 @@ struct UsageMenuCardCostSectionView: View {
             if hasTokenCost {
                 VStack(alignment: .leading, spacing: 10) {
                     if let tokenUsage = self.model.tokenUsage {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(tokenUsage.title)
-                                .font(.body)
-                                .fontWeight(.medium)
-                            Text(tokenUsage.sessionLine)
-                                .font(.caption)
-                            if let monthLine = tokenUsage.monthLine {
-                                Text(monthLine)
-                                    .font(.caption)
-                            }
-                            ForEach(tokenUsage.detailLines, id: \.self) { line in
-                                Text(line)
-                                    .font(.caption2)
-                                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                            if let renewalLine = tokenUsage.renewalLine {
-                                Text(renewalLine)
-                                    .font(.footnote)
-                                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
-                            }
-                            if let hint = tokenUsage.hintLine, !hint.isEmpty {
-                                Text(hint)
-                                    .font(.footnote)
-                                    .foregroundStyle(MenuHighlightStyle.secondary(self.isHighlighted))
-                                    .lineLimit(4)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            if let error = tokenUsage.errorLine, !error.isEmpty {
-                                Text(error)
-                                    .font(.footnote)
-                                    .foregroundStyle(MenuHighlightStyle.error(self.isHighlighted))
-                                    .lineLimit(4)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .overlay {
-                                        ClickToCopyOverlay(copyText: tokenUsage.errorCopyText ?? error)
-                                    }
-                            }
-                        }
+                        TokenUsageContentView(
+                            provider: self.model.provider,
+                            tokenUsage: tokenUsage,
+                            lineFont: .caption,
+                            detailFont: .caption2)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -735,6 +589,8 @@ extension UsageMenuCardView.Model {
         let hidePersonalInfo: Bool
         let forceLoadingSubtitle: Bool
         let weeklyPace: UsagePace?
+        let cursorUsageRangeKind: CursorUsageRangeKind
+        let selectCursorUsageRange: ((CursorUsageRangeKind) -> Void)?
         let now: Date
 
         init(
@@ -760,6 +616,8 @@ extension UsageMenuCardView.Model {
             hidePersonalInfo: Bool,
             forceLoadingSubtitle: Bool = false,
             weeklyPace: UsagePace? = nil,
+            cursorUsageRangeKind: CursorUsageRangeKind = .billingCycle,
+            selectCursorUsageRange: ((CursorUsageRangeKind) -> Void)? = nil,
             now: Date)
         {
             self.provider = provider
@@ -784,6 +642,8 @@ extension UsageMenuCardView.Model {
             self.hidePersonalInfo = hidePersonalInfo
             self.forceLoadingSubtitle = forceLoadingSubtitle
             self.weeklyPace = weeklyPace
+            self.cursorUsageRangeKind = cursorUsageRangeKind
+            self.selectCursorUsageRange = selectCursorUsageRange
             self.now = now
         }
     }
@@ -1429,6 +1289,38 @@ extension UsageMenuCardView.Model {
 
     private static func tokenUsageSection(input: Input) -> TokenUsageSection? {
         if input.provider == .cursor {
+            if let summaries = input.snapshot?.cursorRangeSummaries, !summaries.isEmpty {
+                let selectedKind = input.cursorUsageRangeKind
+                let summary = summaries.first { $0.rangeKind == selectedKind }
+                    ?? summaries.first { $0.rangeKind == .billingCycle }
+                    ?? summaries[0]
+                let quotaSummary = input.snapshot?.cursorRequests?.summaryText
+                let rangePresentations = Dictionary(uniqueKeysWithValues: summaries.map { rangeSummary in
+                    (
+                        rangeSummary.rangeKind,
+                        Self.cursorRangePresentation(summary: rangeSummary, quotaSummary: quotaSummary))
+                })
+                let presentation = rangePresentations[summary.rangeKind]
+                    ?? Self.cursorRangePresentation(summary: summary, quotaSummary: quotaSummary)
+
+                return TokenUsageSection(
+                    title: "Tokens",
+                    sessionLine: presentation.sessionLine,
+                    monthLine: presentation.monthLine,
+                    detailLines: [],
+                    cursorRequestRange: presentation.cursorRequestRange,
+                    cursorRequestDetails: presentation.cursorRequestDetails,
+                    selectedCursorRangeKind: summary.rangeKind,
+                    availableCursorRangeKinds: CursorUsageRangeKind.allCases,
+                    cursorRangePresentations: rangePresentations,
+                    selectCursorRange: input.selectCursorUsageRange,
+                    cursorRequestNow: input.now,
+                    renewalLine: nil,
+                    hintLine: nil,
+                    errorLine: nil,
+                    errorCopyText: nil)
+            }
+
             let cycleFromAPI = input.snapshot?.cursorTokenUsage?.billingCycleTokensUsed
             let cycleFromEvents = input.snapshot?.cursorRecentRequests?.reduce(0) { $0 + $1.tokens }
             let cycleTokens: Int? = if let cycleFromAPI, cycleFromAPI > 0 {
@@ -1439,42 +1331,67 @@ extension UsageMenuCardView.Model {
                 cycleFromAPI
             }
             let quotaSummary = input.snapshot?.cursorRequests?.summaryText
-            let recentRequests = Array(input.snapshot?.cursorRecentRequests?.prefix(30) ?? [])
-            let estimatedCycleCost = input.snapshot?.cursorTokenUsage?.requestCostSummary ?? input.snapshot?
-                .cursorRecentRequests.flatMap(CursorRequestCostEstimator.summarizedEstimate(for:))
+            let cachedRecentRequests = input.snapshot?.cursorRecentRequests ?? []
+            let recentRequests = Array(cachedRecentRequests.prefix(30))
+            let last30DaysRequests = Self.cursorLast30DaysRequests(cachedRecentRequests, now: input.now)
+            let hasCompleteLast30DaysAggregate = last30DaysRequests.count < 30
+            let last30DaysTokens = hasCompleteLast30DaysAggregate
+                ? Self.cursorRequestTokens(last30DaysRequests)
+                : nil
+            let last30DaysCost = hasCompleteLast30DaysAggregate
+                ? CursorRequestCostEstimator.summarizedEstimate(for: last30DaysRequests)
+                : nil
+            let selectedKind = input.cursorUsageRangeKind
+            let selectedRequests = selectedKind == .last30Days ? last30DaysRequests : recentRequests
+            let selectedRange = selectedKind == .last30Days
+                ? Self.cursorLast30DaysRange(now: input.now)
+                : input.snapshot?.cursorRecentRequestRange
+            let fallbackTokens = selectedKind == .last30Days
+                ? last30DaysTokens
+                : cycleTokens
+            let cycleCostSummary = input.snapshot?.cursorRecentRequests
+                .flatMap(CursorRequestCostEstimator.summarizedEstimate(for:)) ?? input.snapshot?
+                .cursorTokenUsage?.requestCostSummary
+            let fallbackCost = selectedKind == .last30Days
+                ? last30DaysCost
+                : cycleCostSummary
             guard cycleTokens != nil || quotaSummary != nil || !recentRequests.isEmpty else { return nil }
 
-            let hasCycle = (cycleTokens ?? 0) > 0
-            let cycleLine: String? = hasCycle
-                ? cycleTokens.map { tokens in
-                    let tokensText = "Cycle: \(UsageFormatter.tokenCountString(tokens)) tokens"
-                    return UsageFormatter.cursorEstimatedTotalText(estimatedCycleCost)
-                        .map { "\(tokensText) · \($0)" }
-                        ?? tokensText
-                }
-                : nil
-
-            // Legacy Cursor quota (request- or token-backed) stays visually primary; cycle tokens move secondary.
-            let sessionLine: String
-            let monthLine: String?
-            if let quotaSummary {
-                sessionLine = quotaSummary
-                monthLine = cycleLine
-            } else if let cycleLine {
-                sessionLine = cycleLine
-                monthLine = nil
-            } else {
-                sessionLine = "Recent requests"
-                monthLine = nil
-            }
+            let rangePresentations: [CursorUsageRangeKind: TokenUsageSection.CursorRangePresentation] = [
+                .billingCycle: Self.cursorFallbackRangePresentation(.init(
+                    rangeKind: .billingCycle,
+                    quotaSummary: quotaSummary,
+                    tokens: cycleTokens,
+                    costSummary: cycleCostSummary,
+                    requests: recentRequests,
+                    range: input.snapshot?.cursorRecentRequestRange)),
+                .last30Days: Self.cursorFallbackRangePresentation(.init(
+                    rangeKind: .last30Days,
+                    quotaSummary: nil,
+                    tokens: last30DaysTokens,
+                    costSummary: last30DaysCost,
+                    requests: last30DaysRequests,
+                    range: Self.cursorLast30DaysRange(now: input.now))),
+            ]
+            let presentation = rangePresentations[selectedKind] ?? Self.cursorFallbackRangePresentation(.init(
+                rangeKind: selectedKind,
+                quotaSummary: selectedKind == .billingCycle ? quotaSummary : nil,
+                tokens: fallbackTokens,
+                costSummary: fallbackCost,
+                requests: selectedRequests,
+                range: selectedRange))
 
             return TokenUsageSection(
                 title: "Tokens",
-                sessionLine: sessionLine,
-                monthLine: monthLine,
+                sessionLine: presentation.sessionLine,
+                monthLine: presentation.monthLine,
                 detailLines: [],
-                cursorRequestRange: input.snapshot?.cursorRecentRequestRange,
-                cursorRequestDetails: recentRequests,
+                cursorRequestRange: presentation.cursorRequestRange,
+                cursorRequestDetails: presentation.cursorRequestDetails,
+                selectedCursorRangeKind: selectedKind,
+                availableCursorRangeKinds: CursorUsageRangeKind.allCases,
+                cursorRangePresentations: rangePresentations,
+                selectCursorRange: input.selectCursorUsageRange,
                 cursorRequestNow: input.now,
                 renewalLine: nil,
                 hintLine: nil,
@@ -1521,6 +1438,102 @@ extension UsageMenuCardView.Model {
               let renewal = snapshot?.codexUsage?.subscriptionRenewalAt
         else { return nil }
         return "Monthly renews \(UsageFormatter.resetDescription(from: renewal, now: now))"
+    }
+
+    private static func cursorRangePresentation(
+        summary: CursorRangeUsageSummary,
+        quotaSummary: String?) -> TokenUsageSection.CursorRangePresentation
+    {
+        let tokensText = "\(summary.rangeKind.label): \(UsageFormatter.tokenCountString(summary.tokens)) tokens"
+        let costText = UsageFormatter.cursorEstimatedTotalText(summary.requestCostSummary)
+        let tokenLine = costText.map { "\(tokensText) · \($0)" } ?? tokensText
+        if summary.rangeKind == .billingCycle, quotaSummary == nil {
+            let requestText = summary.weightedRequestCost > 0
+                ? " · Req \(UsageFormatter.cursorRequestCostString(summary.weightedRequestCost))"
+                : ""
+            return TokenUsageSection.CursorRangePresentation(
+                sessionLine: "\(tokenLine)\(requestText)",
+                monthLine: nil,
+                cursorRequestRange: summary.range,
+                cursorRequestDetails: summary.recentRequests)
+        }
+        let sessionLine = if summary.rangeKind == .billingCycle, let quotaSummary {
+            quotaSummary
+        } else {
+            "Requests: \(UsageFormatter.cursorRequestCostString(summary.weightedRequestCost))"
+        }
+        return TokenUsageSection.CursorRangePresentation(
+            sessionLine: sessionLine,
+            monthLine: tokenLine,
+            cursorRequestRange: summary.range,
+            cursorRequestDetails: summary.recentRequests)
+    }
+
+    private struct CursorFallbackRangePresentationInput {
+        let rangeKind: CursorUsageRangeKind
+        let quotaSummary: String?
+        let tokens: Int?
+        let costSummary: CursorRequestCostSummary?
+        let requests: [CursorRecentRequest]
+        let range: CursorRecentRequestRange?
+    }
+
+    private static func cursorFallbackRangePresentation(
+        _ input: CursorFallbackRangePresentationInput) -> TokenUsageSection.CursorRangePresentation
+    {
+        let monthLine = input.tokens.flatMap { tokenCount -> String? in
+            guard tokenCount > 0 else { return nil }
+            let tokensText = "\(input.rangeKind.label): \(UsageFormatter.tokenCountString(tokenCount)) tokens"
+            return UsageFormatter.cursorEstimatedTotalText(input.costSummary)
+                .map { "\(tokensText) · \($0)" }
+                ?? tokensText
+        }
+        let sessionLine: String
+        if input.rangeKind == .billingCycle, let quotaSummary = input.quotaSummary {
+            sessionLine = quotaSummary
+        } else if input.rangeKind == .last30Days {
+            let suffix = input.requests.count >= 30 ? "+" : ""
+            let requestCost = input.requests.reduce(0) { $0 + ($1.requestCost ?? Double($1.requests)) }
+            sessionLine = "Requests: \(UsageFormatter.cursorRequestCostString(requestCost))\(suffix)"
+        } else if let monthLine {
+            sessionLine = monthLine
+        } else {
+            sessionLine = "Recent requests"
+        }
+        let shouldShowMonthLine = input.rangeKind == .last30Days ||
+            (input.rangeKind == .billingCycle && input.quotaSummary != nil)
+        return TokenUsageSection.CursorRangePresentation(
+            sessionLine: sessionLine,
+            monthLine: shouldShowMonthLine ? monthLine : nil,
+            cursorRequestRange: input.range,
+            cursorRequestDetails: input.requests)
+    }
+
+    private static func cursorLast30DaysRange(now: Date) -> CursorRecentRequestRange {
+        CursorRecentRequestRange(
+            start: now.addingTimeInterval(-30 * 24 * 60 * 60),
+            end: now)
+    }
+
+    private static func cursorLast30DaysRequests(
+        _ requests: [CursorRecentRequest],
+        now: Date) -> [CursorRecentRequest]
+    {
+        let cutoff = now.addingTimeInterval(-30 * 24 * 60 * 60)
+        return Array(requests.filter { $0.timestamp >= cutoff }.prefix(30))
+    }
+
+    private static func cursorRequestTokens(_ requests: [CursorRecentRequest]) -> Int? {
+        let tokens = requests.reduce(0) { $0 + $1.tokens }
+        return tokens > 0 ? tokens : nil
+    }
+
+    private static func cursorRequestRange(for requests: [CursorRecentRequest]) -> CursorRecentRequestRange? {
+        guard let first = requests.first else { return nil }
+        let timestamps = requests.map(\.timestamp)
+        return CursorRecentRequestRange(
+            start: timestamps.min() ?? first.timestamp,
+            end: timestamps.max() ?? first.timestamp)
     }
 
     private static func providerCostSection(
@@ -1581,45 +1594,5 @@ extension UsageMenuCardView.Model {
         now: Date) -> String?
     {
         UsageFormatter.resetLine(for: window, style: style, now: now)
-    }
-}
-
-// MARK: - Copy-on-click overlay
-
-private struct ClickToCopyOverlay: NSViewRepresentable {
-    let copyText: String
-
-    func makeNSView(context: Context) -> ClickToCopyView {
-        ClickToCopyView(copyText: self.copyText)
-    }
-
-    func updateNSView(_ nsView: ClickToCopyView, context: Context) {
-        nsView.copyText = self.copyText
-    }
-}
-
-private final class ClickToCopyView: NSView {
-    var copyText: String
-
-    init(copyText: String) {
-        self.copyText = copyText
-        super.init(frame: .zero)
-        self.wantsLayer = false
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        _ = event
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(self.copyText, forType: .string)
     }
 }

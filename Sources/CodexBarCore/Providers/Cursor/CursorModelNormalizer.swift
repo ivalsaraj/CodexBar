@@ -52,7 +52,8 @@ public struct CursorNormalizedModel: Equatable, Sendable {
 public enum CursorModelNormalizer {
     private static let effortTokens: Set<String> = ["minimal", "low", "medium", "high", "xhigh", "max"]
     private static let modeTokens: Set<String> = ["thinking"]
-    private static let strippablePrefixes = ["openai/", "anthropic/", "google/", "anthropic."]
+    private static let bareAnthropicFamilies: Set<String> = ["haiku", "sonnet", "opus", "fable"]
+    private static let strippablePrefixes = ["openai/", "openai:", "anthropic/", "google/", "anthropic."]
 
     public static func normalize(_ raw: String) -> CursorNormalizedModel {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -77,6 +78,9 @@ public enum CursorModelNormalizer {
 
         if head == "claude" {
             return self.normalizeAnthropic(rawName: raw, tokens: tokens)
+        }
+        if self.bareAnthropicFamilies.contains(head) {
+            return self.normalizeAnthropic(rawName: raw, tokens: ["claude"] + tokens)
         }
         if head.hasPrefix("gpt") || head == "o1" || head == "o3" || head == "o4" {
             return self.normalizeOpenAI(rawName: raw, candidate: working, tokens: tokens)
@@ -109,16 +113,29 @@ public enum CursorModelNormalizer {
             return false
         }
 
-        let family = rest.first
-        var versionTokens: [String] = []
-        for token in rest.dropFirst() {
-            guard !token.isEmpty, token.allSatisfy(\.isNumber) else { break }
-            versionTokens.append(token)
+        let family: String?
+        let versionTokens: [String]
+        if let first = rest.first, self.isAnthropicVersionToken(first) {
+            versionTokens = self.leadingAnthropicVersionTokens(in: rest)
+            if let explicitFamily = rest.dropFirst(versionTokens.count).first,
+               self.isAnthropicFamilyToken(explicitFamily)
+            {
+                family = explicitFamily
+            } else {
+                family = self.inferredAnthropicFamily(versionTokens: versionTokens, effort: effort)
+            }
+        } else {
+            family = rest.first
+            versionTokens = self.leadingAnthropicVersionTokens(in: Array(rest.dropFirst()))
         }
         let version = versionTokens.isEmpty ? nil : versionTokens.joined(separator: ".")
 
         let displayName: String = if let family {
-            version.map { "\(family.capitalized) \($0)" } ?? family.capitalized
+            if family == "claude" {
+                version.map { "Claude \($0)" } ?? "Claude"
+            } else {
+                version.map { "\(family.capitalized) \($0)" } ?? family.capitalized
+            }
         } else {
             rawName
         }
@@ -140,22 +157,70 @@ public enum CursorModelNormalizer {
             pricingKey: pricingKey)
     }
 
+    private static func isAnthropicFamilyToken(_ token: String) -> Bool {
+        self.bareAnthropicFamilies.contains(token) || token == "claude"
+    }
+
+    private static func isAnthropicVersionToken(_ token: String) -> Bool {
+        token.allSatisfy(\.isNumber)
+            || (token.contains(".")
+                && token.split(separator: ".").allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) })
+    }
+
+    private static func leadingAnthropicVersionTokens(in tokens: [String]) -> [String] {
+        var versionTokens: [String] = []
+        for token in tokens {
+            guard !token.isEmpty else { break }
+            if token.allSatisfy(\.isNumber) {
+                versionTokens.append(token)
+                continue
+            }
+            if token.contains("."),
+               token.split(separator: ".").allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) })
+            {
+                versionTokens.append(contentsOf: token.split(separator: ".").map(String.init))
+                continue
+            }
+            break
+        }
+        return versionTokens
+    }
+
+    private static func inferredAnthropicFamily(versionTokens: [String], effort: String?) -> String {
+        let versionParts = versionTokens.flatMap { token -> [String] in
+            token.split(separator: ".").map(String.init)
+        }
+        if versionParts == ["4", "6"], effort == "max" || effort == "xhigh" {
+            return "opus"
+        }
+        return "claude"
+    }
+
     private static func normalizeOpenAI(rawName: String, candidate: String, tokens: [String]) -> CursorNormalizedModel {
-        let head = tokens.first ?? ""
+        let stripped = self.stripOpenAIEffortSuffixes(from: tokens)
+        let pricingTokens = stripped.tokens
+        let effort = stripped.effort
+
+        let displayTokens = pricingTokens.isEmpty ? tokens : pricingTokens
+        let head = displayTokens.first ?? ""
         let displayName: String
         if head.hasPrefix("gpt") {
             var name = "GPT"
-            if tokens.count > 1 {
-                name += "-\(tokens[1])"
+            if displayTokens.count > 1 {
+                name += "-\(displayTokens[1])"
             }
-            let extras = tokens.dropFirst(2).map(\.capitalized)
+            let extras = displayTokens.dropFirst(2).map(\.capitalized)
             if !extras.isEmpty {
                 name += " " + extras.joined(separator: " ")
             }
             displayName = name
         } else {
-            displayName = tokens.map(\.capitalized).joined(separator: " ")
+            displayName = displayTokens.map(\.capitalized).joined(separator: " ")
         }
+
+        let strippedCandidate = pricingTokens.joined(separator: "-")
+        let pricingKey = CostUsagePricing.supportedCodexPricingKey(strippedCandidate)
+            ?? CostUsagePricing.supportedCodexPricingKey(candidate)
 
         return CursorNormalizedModel(
             rawName: rawName,
@@ -164,8 +229,33 @@ public enum CursorModelNormalizer {
             family: tokens.first,
             version: tokens.count > 1 ? tokens[1] : nil,
             mode: nil,
-            effort: nil,
-            pricingKey: CostUsagePricing.supportedCodexPricingKey(candidate))
+            effort: effort,
+            pricingKey: pricingKey)
+    }
+
+    private static func stripOpenAIEffortSuffixes(from tokens: [String]) -> (tokens: [String], effort: String?) {
+        var pricingTokens = tokens
+        var efforts: [String] = []
+
+        while true {
+            if pricingTokens.count >= 2,
+               pricingTokens[pricingTokens.count - 2] == "extra",
+               pricingTokens[pricingTokens.count - 1] == "high"
+            {
+                pricingTokens.removeLast(2)
+                efforts.insert("extra-high", at: 0)
+                continue
+            }
+
+            guard let suffix = pricingTokens.last, self.effortTokens.contains(suffix) else {
+                break
+            }
+
+            pricingTokens.removeLast()
+            efforts.insert(suffix, at: 0)
+        }
+
+        return (pricingTokens, efforts.first)
     }
 
     private static func normalizeComposer(rawName: String, tokens: [String]) -> CursorNormalizedModel {

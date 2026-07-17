@@ -35,7 +35,11 @@ resolve_signing_mode() {
 
   if [[ -n "${APP_IDENTITY:-}" ]]; then
     if has_signing_identity "${APP_IDENTITY}"; then
-      SIGNING_MODE="identity"
+      if [[ "${APP_IDENTITY}" == "CodexBar Development" ]]; then
+        SIGNING_MODE="selfsigned"
+      else
+        SIGNING_MODE="identity"
+      fi
       return
     fi
     log "WARN: APP_IDENTITY not found in Keychain; falling back to adhoc signing."
@@ -51,7 +55,11 @@ resolve_signing_mode() {
     if has_signing_identity "${candidate}"; then
       APP_IDENTITY="${candidate}"
       export APP_IDENTITY
-      SIGNING_MODE="identity"
+      if [[ "${candidate}" == "CodexBar Development" ]]; then
+        SIGNING_MODE="selfsigned"
+      else
+        SIGNING_MODE="identity"
+      fi
       return
     fi
   done

@@ -36,6 +36,7 @@ public struct CursorRequestCostEstimate: Equatable, Sendable {
     public enum Confidence: String, Equatable, Sendable {
         case exactBreakdown
         case approximateTotalOnly
+        case approximateLowerBound
         case partialMissingCacheWriteTier
         case totalOnlyUnavailable
         case partialBreakdownUnavailable
@@ -69,7 +70,7 @@ public enum CursorRequestCostEstimator {
     public static let claudeCacheAssumption = "Assumes Anthropic 5-minute cache-write pricing."
     public static let composerCacheCaveat =
         "Composer cache tokens count as input-equivalent; no separate Composer cache billing published."
-    private static let pricingSourceLabel = "CostUsagePricing local catalog (verified 2026-06-11)"
+    private static let pricingSourceLabel = "CostUsagePricing local catalog (verified 2026-06-21)"
 
     private struct CursorModelPricing: Equatable, Sendable {
         let inputUSDPerToken: Double
@@ -98,10 +99,27 @@ public enum CursorRequestCostEstimator {
             {
                 return estimate
             }
+            if self.shouldUseOpenAITotalOnlyFallback(breakdown),
+               let estimate = self.openAITotalOnlyFallbackEstimate(
+                   model: request.model,
+                   tokens: request.tokens,
+                   cacheReadTokens: breakdown.cacheReadTokens,
+                   isPartialBreakdown: breakdown.confidence == .partialBreakdown)
+            {
+                return estimate
+            }
             return self.estimate(model: request.model, breakdown: breakdown)
         }
 
         if let estimate = self.anthropicTotalOnlyFallbackEstimate(model: request.model, tokens: request.tokens) {
+            return estimate
+        }
+        if let estimate = self.openAITotalOnlyFallbackEstimate(
+            model: request.model,
+            tokens: request.tokens,
+            cacheReadTokens: nil,
+            isPartialBreakdown: false)
+        {
             return estimate
         }
 
@@ -109,6 +127,15 @@ public enum CursorRequestCostEstimator {
     }
 
     private static func shouldUseAnthropicTotalOnlyFallback(_ breakdown: CursorRecentRequestTokenBreakdown) -> Bool {
+        switch breakdown.confidence {
+        case .empty, .partialBreakdown:
+            true
+        case .exactBreakdown, .totalOnly:
+            false
+        }
+    }
+
+    private static func shouldUseOpenAITotalOnlyFallback(_ breakdown: CursorRecentRequestTokenBreakdown) -> Bool {
         switch breakdown.confidence {
         case .empty, .partialBreakdown:
             true
@@ -138,6 +165,28 @@ public enum CursorRequestCostEstimator {
                 confidence: .totalOnly))
     }
 
+    private static func openAITotalOnlyFallbackEstimate(
+        model: String,
+        tokens: Int,
+        cacheReadTokens: Int?,
+        isPartialBreakdown: Bool) -> CursorRequestCostEstimate?
+    {
+        let normalized = CursorModelNormalizer.normalize(model)
+        guard normalized.provider == .openai,
+              let pricingKey = normalized.pricingKey,
+              CostUsagePricing.codexPricingCapabilities(model: pricingKey) != nil,
+              tokens > 0
+        else {
+            return nil
+        }
+
+        return self.pricedOpenAILowerBound(
+            pricingKey: pricingKey,
+            totalTokens: tokens,
+            hasCacheReadEvidence: (cacheReadTokens ?? 0) > 0,
+            isPartialBreakdown: isPartialBreakdown)
+    }
+
     public static func summedUSD(for requests: [CursorRecentRequest]) -> Decimal? {
         self.summarizedEstimate(for: requests)?.exactUSD
     }
@@ -148,6 +197,7 @@ public enum CursorRequestCostEstimator {
         var upperBoundUSD: Decimal = 0
         var hasContribution = false
         var containsApproximation = false
+        var containsLowerBoundOnly = false
 
         for request in requests {
             let estimate = self.estimate(for: request)
@@ -164,6 +214,12 @@ public enum CursorRequestCostEstimator {
                 upperBoundUSD += upper
                 containsApproximation = true
                 hasContribution = true
+            case .approximateLowerBound:
+                guard let lower = estimate.lowerBoundUSD else { continue }
+                lowerBoundUSD += lower
+                containsApproximation = true
+                containsLowerBoundOnly = true
+                hasContribution = true
             default:
                 continue
             }
@@ -174,7 +230,7 @@ public enum CursorRequestCostEstimator {
         return CursorRequestCostSummary(
             exactUSD: containsApproximation ? nil : exactUSD,
             lowerBoundUSD: lowerBoundUSD,
-            upperBoundUSD: upperBoundUSD,
+            upperBoundUSD: containsLowerBoundOnly ? nil : upperBoundUSD,
             containsApproximation: containsApproximation)
     }
 
@@ -212,6 +268,15 @@ public enum CursorRequestCostEstimator {
             {
                 return self.pricedAnthropicTotalOnly(pricingKey: pricingKey, breakdown: breakdown)
             }
+            if normalized.provider == .openai,
+               CostUsagePricing.codexPricingCapabilities(model: pricingKey) != nil
+            {
+                return self.pricedOpenAILowerBound(
+                    pricingKey: pricingKey,
+                    totalTokens: breakdown.totalTokens,
+                    hasCacheReadEvidence: (breakdown.cacheReadTokens ?? 0) > 0,
+                    isPartialBreakdown: false)
+            }
             return self.unavailable(
                 .totalOnlyUnavailable,
                 pricingKey: pricingKey,
@@ -222,6 +287,15 @@ public enum CursorRequestCostEstimator {
                self.composerHasPricedInputOutput(breakdown)
             {
                 return self.pricedCursorExact(pricingKey: pricingKey, breakdown: breakdown)
+            }
+            if normalized.provider == .openai,
+               CostUsagePricing.codexPricingCapabilities(model: pricingKey) != nil
+            {
+                return self.pricedOpenAILowerBound(
+                    pricingKey: pricingKey,
+                    totalTokens: breakdown.totalTokens,
+                    hasCacheReadEvidence: (breakdown.cacheReadTokens ?? 0) > 0,
+                    isPartialBreakdown: true)
             }
             return self.unavailable(
                 .partialBreakdownUnavailable,
@@ -266,10 +340,11 @@ public enum CursorRequestCostEstimator {
                 ].joined(separator: " "))
 
         case .openai:
-            // OpenAI prices cache writes at zero and discounts cache reads as cached input.
+            // OpenAI publishes input, cached input, and output rates. Cursor cache writes count as
+            // input-equivalent here because there is no separate OpenAI cache-write pricing tier.
             guard let cost = CostUsagePricing.codexCostUSD(
                 model: pricingKey,
-                inputTokens: input + cacheRead,
+                inputTokens: input + cacheRead + cacheWrite,
                 cachedInputTokens: cacheRead,
                 outputTokens: output)
             else {
@@ -280,7 +355,12 @@ public enum CursorRequestCostEstimator {
                 confidence: .exactBreakdown,
                 pricingKey: pricingKey,
                 pricingSource: self.pricingSourceLabel,
-                explanation: self.legacyDisclaimer)
+                explanation: [
+                    self.legacyDisclaimer,
+                    "\(CursorModelNormalizer.normalize(pricingKey).displayName) pricing.",
+                    self.pricingSourceLabel,
+                    "OpenAI cache reads use cached-input pricing; cache writes count as input-equivalent.",
+                ].joined(separator: " "))
 
         case .cursor:
             return self.pricedCursorExact(pricingKey: pricingKey, breakdown: breakdown)
@@ -415,6 +495,47 @@ public enum CursorRequestCostEstimator {
                 self.pricingSourceLabel,
                 "Unknown input/output/cache split; Cursor exposed only a total token count here.",
                 self.claudeCacheAssumption,
+            ].joined(separator: " "))
+    }
+
+    private static func pricedOpenAILowerBound(
+        pricingKey: String,
+        totalTokens: Int,
+        hasCacheReadEvidence: Bool,
+        isPartialBreakdown: Bool) -> CursorRequestCostEstimate
+    {
+        guard let pricing = CostUsagePricing.codexPricingCapabilities(model: pricingKey) else {
+            return self.missingPricing(pricingKey: pricingKey)
+        }
+
+        let total = max(0, totalTokens)
+        let lowRate = if hasCacheReadEvidence, let cacheRead = pricing.cacheReadInputCostPerToken {
+            cacheRead
+        } else {
+            pricing.inputCostPerToken
+        }
+        let lower = Double(total) * lowRate
+        let lowReason = hasCacheReadEvidence
+            ? "Lower bound uses cached-input pricing because Cursor exposed cache-read tokens."
+            : "Lower bound uses uncached input pricing because Cursor did not expose cache-read evidence."
+        let splitReason = isPartialBreakdown
+            ? "Cursor exposed an incomplete input/output/cache split here."
+            : "Cursor exposed only a total token count here."
+
+        return CursorRequestCostEstimate(
+            usd: nil,
+            lowerBoundUSD: self.decimalUSD(lower),
+            upperBoundUSD: nil,
+            confidence: .approximateLowerBound,
+            pricingKey: pricingKey,
+            pricingSource: self.pricingSourceLabel,
+            explanation: [
+                self.legacyDisclaimer,
+                "Conservative lower-bound estimate from total tokens only.",
+                "\(CursorModelNormalizer.normalize(pricingKey).displayName) pricing.",
+                self.pricingSourceLabel,
+                splitReason,
+                lowReason,
             ].joined(separator: " "))
     }
 

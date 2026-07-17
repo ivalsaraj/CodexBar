@@ -81,6 +81,7 @@ extension UsageStore {
         let tokenUsage = Self.widgetTokenUsageSummary(
             provider: provider,
             usageSnapshot: snapshot,
+            selectedCursorRange: self.settings.cursorUsageRangeKind,
             tokenSnapshot: tokenSnapshot)
         let usageRows = self.widgetUsageRows(provider: provider, snapshot: snapshot)
 
@@ -99,8 +100,14 @@ extension UsageStore {
             codeReviewRemaining = nil
         }
 
-        let cursorRequestDetails = Self.widgetCursorRequestDetails(provider: provider, snapshot: snapshot)
-        let cursorRequestRange = Self.widgetCursorRequestRange(provider: provider, snapshot: snapshot)
+        let cursorRequestDetails = Self.widgetCursorRequestDetails(
+            provider: provider,
+            snapshot: snapshot,
+            selectedCursorRange: self.settings.cursorUsageRangeKind)
+        let cursorRequestRange = Self.widgetCursorRequestRange(
+            provider: provider,
+            snapshot: snapshot,
+            selectedCursorRange: self.settings.cursorUsageRangeKind)
 
         return WidgetSnapshot.ProviderEntry(
             provider: provider,
@@ -122,10 +129,20 @@ extension UsageStore {
 
     private nonisolated static func widgetCursorRequestRange(
         provider: UsageProvider,
-        snapshot: UsageSnapshot) -> WidgetSnapshot.CursorRequestRange?
+        snapshot: UsageSnapshot,
+        selectedCursorRange: CursorUsageRangeKind) -> WidgetSnapshot.CursorRequestRange?
     {
+        let selectedRange = self.selectedCursorRangeSummary(
+            snapshot: snapshot,
+            selectedCursorRange: selectedCursorRange)?
+            .range
+        let fallbackRange = if selectedCursorRange == .last30Days {
+            self.cursorLast30DaysRange(now: snapshot.updatedAt)
+        } else {
+            snapshot.cursorRecentRequestRange
+        }
         guard provider == .cursor,
-              let range = snapshot.cursorRecentRequestRange
+              let range = selectedRange ?? fallbackRange
         else {
             return nil
         }
@@ -134,10 +151,17 @@ extension UsageStore {
 
     private nonisolated static func widgetCursorRequestDetails(
         provider: UsageProvider,
-        snapshot: UsageSnapshot) -> [WidgetSnapshot.CursorRequestDetail]?
+        snapshot: UsageSnapshot,
+        selectedCursorRange: CursorUsageRangeKind) -> [WidgetSnapshot.CursorRequestDetail]?
     {
+        let sourceRequests = self.selectedCursorRangeSummary(
+            snapshot: snapshot,
+            selectedCursorRange: selectedCursorRange)?
+            .recentRequests ?? self.fallbackCursorRequests(
+                snapshot: snapshot,
+                selectedCursorRange: selectedCursorRange)
         guard provider == .cursor,
-              let recent = snapshot.cursorRecentRequests,
+              let recent = sourceRequests,
               !recent.isEmpty
         else {
             return nil
@@ -161,9 +185,36 @@ extension UsageStore {
                     model: row.model,
                     tokens: row.tokens,
                     requests: row.requests,
+                    requestCost: row.requestCost,
                     compactModel: UsageFormatter.cursorCompactModelLabel(normalized),
                     estimateText: UsageFormatter.cursorEstimateText(estimate))
             }
+    }
+
+    private nonisolated static func fallbackCursorRequests(
+        snapshot: UsageSnapshot,
+        selectedCursorRange: CursorUsageRangeKind) -> [CursorRecentRequest]?
+    {
+        guard let requests = snapshot.cursorRecentRequests else { return nil }
+        guard selectedCursorRange == .last30Days else { return requests }
+        let cutoff = snapshot.updatedAt.addingTimeInterval(-30 * 24 * 60 * 60)
+        return requests.filter { $0.timestamp >= cutoff }
+    }
+
+    private nonisolated static func cursorLast30DaysRange(now: Date) -> CursorRecentRequestRange {
+        CursorRecentRequestRange(
+            start: now.addingTimeInterval(-30 * 24 * 60 * 60),
+            end: now)
+    }
+
+    private nonisolated static func cursorRequestRange(
+        for requests: [CursorRecentRequest]) -> CursorRecentRequestRange?
+    {
+        guard let first = requests.first else { return nil }
+        let timestamps = requests.map(\.timestamp)
+        return CursorRecentRequestRange(
+            start: timestamps.min() ?? first.timestamp,
+            end: timestamps.max() ?? first.timestamp)
     }
 
     private nonisolated static func widgetProviderCostSummary(
@@ -181,13 +232,71 @@ extension UsageStore {
     private nonisolated static func widgetTokenUsageSummary(
         provider: UsageProvider,
         usageSnapshot: UsageSnapshot,
+        selectedCursorRange: CursorUsageRangeKind,
         tokenSnapshot: CostUsageTokenSnapshot?) -> WidgetSnapshot.TokenUsageSummary?
     {
         if provider == .cursor,
+           let summary = self.selectedCursorRangeSummary(
+               snapshot: usageSnapshot,
+               selectedCursorRange: selectedCursorRange)
+        {
+            let estimatedCycleCost = summary.requestCostSummary?.exactUSD
+                .map { NSDecimalNumber(decimal: $0).doubleValue }
+            let sessionCostText = summary.requestCostSummary?.containsApproximation == true
+                ? UsageFormatter.cursorEstimatedTotalText(summary.requestCostSummary)
+                : nil
+            return WidgetSnapshot.TokenUsageSummary(
+                sessionCostUSD: estimatedCycleCost,
+                sessionCostText: sessionCostText,
+                sessionTokens: summary.tokens,
+                last30DaysCostUSD: nil,
+                last30DaysTokens: nil,
+                sessionLabel: summary.rangeKind.label,
+                last30DaysLabel: nil)
+        }
+
+        if provider == .cursor,
+           selectedCursorRange == .last30Days
+        {
+            guard let requests = self.fallbackCursorRequests(
+                snapshot: usageSnapshot,
+                selectedCursorRange: selectedCursorRange)
+            else {
+                return WidgetSnapshot.TokenUsageSummary(
+                    sessionCostUSD: nil,
+                    sessionCostText: nil,
+                    sessionTokens: nil,
+                    last30DaysCostUSD: nil,
+                    last30DaysTokens: nil,
+                    sessionLabel: selectedCursorRange.label,
+                    last30DaysLabel: nil)
+            }
+            let hasCompleteAggregate = requests.count < 30
+            let tokens = hasCompleteAggregate ? requests.reduce(0) { $0 + $1.tokens } : 0
+            let costSummary = hasCompleteAggregate ? CursorRequestCostEstimator.summarizedEstimate(for: requests) : nil
+            let estimatedCost = costSummary?.exactUSD
+                .map { NSDecimalNumber(decimal: $0).doubleValue }
+            let sessionCostText = costSummary?.containsApproximation == true
+                ? UsageFormatter.cursorEstimatedTotalText(costSummary)
+                : nil
+            return WidgetSnapshot.TokenUsageSummary(
+                sessionCostUSD: estimatedCost,
+                sessionCostText: sessionCostText,
+                sessionTokens: tokens > 0 ? tokens : nil,
+                last30DaysCostUSD: nil,
+                last30DaysTokens: nil,
+                sessionLabel: selectedCursorRange.label,
+                last30DaysLabel: nil)
+        }
+
+        if provider == .cursor,
            let cursorTokenUsage = usageSnapshot.cursorTokenUsage
         {
-            let costSummary = cursorTokenUsage.requestCostSummary ?? usageSnapshot.cursorRecentRequests
+            let recomputedCostSummary = usageSnapshot.cursorRecentRequests
                 .flatMap(CursorRequestCostEstimator.summarizedEstimate(for:))
+            let costSummary = self.cursorWidgetCostSummary(
+                preferred: cursorTokenUsage.requestCostSummary,
+                recomputed: recomputedCostSummary)
             let estimatedCycleCost = costSummary?.exactUSD
                 .map { NSDecimalNumber(decimal: $0).doubleValue }
             let sessionCostText = costSummary?.containsApproximation == true
@@ -211,6 +320,20 @@ extension UsageStore {
             sessionTokens: snapshot.sessionTokens,
             last30DaysCostUSD: snapshot.last30DaysCostUSD,
             last30DaysTokens: monthTokensValue)
+    }
+
+    private nonisolated static func selectedCursorRangeSummary(
+        snapshot: UsageSnapshot,
+        selectedCursorRange: CursorUsageRangeKind) -> CursorRangeUsageSummary?
+    {
+        snapshot.cursorRangeSummaries?.first { $0.rangeKind == selectedCursorRange }
+    }
+
+    private nonisolated static func cursorWidgetCostSummary(
+        preferred: CursorRequestCostSummary?,
+        recomputed: CursorRequestCostSummary?) -> CursorRequestCostSummary?
+    {
+        recomputed ?? preferred
     }
 
     private func widgetUsageRows(

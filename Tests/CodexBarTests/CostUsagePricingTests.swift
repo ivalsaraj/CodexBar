@@ -46,6 +46,22 @@ struct CostUsagePricingTests {
     }
 
     @Test
+    func `codex cost supports gpt55 three tier pricing`() {
+        let direct = CostUsagePricing.codexCostUSD(
+            model: "gpt-5.5",
+            inputTokens: 100,
+            cachedInputTokens: 10,
+            outputTokens: 5)
+        let expected = Double(90) * 5e-6 + Double(10) * 5e-7 + Double(5) * 3e-5
+        #expect(abs((direct ?? 0) - expected) < 0.000_000_000_001)
+
+        let capabilities = CostUsagePricing.codexPricingCapabilities(model: "gpt-5.5")
+        #expect(capabilities?.inputCostPerToken == 5e-6)
+        #expect(capabilities?.cacheReadInputCostPerToken == 5e-7)
+        #expect(capabilities?.outputCostPerToken == 3e-5)
+    }
+
+    @Test
     func codexCostGpt54ProHasItsOwnPricing() {
         let cost = CostUsagePricing.codexCostUSD(
             model: "gpt-5.4-pro",

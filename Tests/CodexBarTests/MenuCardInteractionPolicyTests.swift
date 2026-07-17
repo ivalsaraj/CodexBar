@@ -31,6 +31,47 @@ struct MenuCardInteractionPolicyTests {
     }
 
     @Test
+    func `cursor alternate range overflow policy forwards scroll`() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let model = self.menuCardModel(
+            provider: .cursor,
+            tokenUsage: .init(
+                title: "Tokens",
+                sessionLine: "Requests: 2 / 500",
+                monthLine: "Cycle: 1M tokens",
+                cursorRequestDetails: self.cursorRequests(
+                    count: CursorMenuRequestDetailPresentation.maxVisibleRequestRows,
+                    now: now),
+                selectedCursorRangeKind: .billingCycle,
+                availableCursorRangeKinds: CursorUsageRangeKind.allCases,
+                cursorRangePresentations: [
+                    .billingCycle: .init(
+                        sessionLine: "Requests: 2 / 500",
+                        monthLine: "Cycle: 1M tokens",
+                        cursorRequestRange: nil,
+                        cursorRequestDetails: self.cursorRequests(
+                            count: CursorMenuRequestDetailPresentation.maxVisibleRequestRows,
+                            now: now)),
+                    .last30Days: .init(
+                        sessionLine: "Requests: 31",
+                        monthLine: "30d: 5M tokens",
+                        cursorRequestRange: nil,
+                        cursorRequestDetails: self.cursorRequests(
+                            count: CursorMenuRequestDetailPresentation.maxVisibleRequestRows + 1,
+                            now: now)),
+                ],
+                cursorRequestNow: now,
+                renewalLine: nil,
+                hintLine: nil,
+                errorLine: nil,
+                errorCopyText: nil))
+
+        let policy = StatusItemController.menuCardInteractionPolicy(for: model)
+
+        #expect(policy == .scrollableContent)
+    }
+
+    @Test
     func `non overflow menu cards keep default interaction policy`() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let cursorModel = self.menuCardModel(

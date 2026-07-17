@@ -190,6 +190,7 @@ struct CodexBarWidgetProviderTests {
                 model: "claude-opus-4-8-thinking-xhigh",
                 tokens: 35_000_000,
                 requests: 1,
+                requestCost: 2,
                 compactModel: "Opus 4.8 · xhigh",
                 estimateText: "Est. $12.34"),
         ]
@@ -202,7 +203,7 @@ struct CodexBarWidgetProviderTests {
         #expect(row.modelText == "Opus 4.8 · xhigh")
         #expect(!row.modelText.contains("claude-opus"))
         #expect(row.tokenText == "35M")
-        #expect(row.metaText.contains("Req 1"))
+        #expect(row.metaText.contains("Req 2"))
         #expect(row.metaText.contains(WidgetFormat.requestDateTime(details[0].timestamp)))
         #expect(row.estimateText == "Est. $12.34")
     }

@@ -112,6 +112,11 @@ enum CostUsagePricing {
             outputCostPerToken: 1.8e-4,
             cacheReadInputCostPerToken: nil,
             displayLabel: nil),
+        "gpt-5.5": CodexPricing(
+            inputCostPerToken: 5e-6,
+            outputCostPerToken: 3e-5,
+            cacheReadInputCostPerToken: 5e-7,
+            displayLabel: nil),
     ]
 
     private static let claude: [String: ClaudePricing] = [
@@ -357,6 +362,13 @@ enum CostUsagePricing {
         let cacheReadInputCostPerTokenAboveThreshold: Double?
     }
 
+    /// Provider pricing shape for a covered OpenAI/Codex model, or `nil` when the model is unknown.
+    struct CodexPricingCapabilities: Equatable, Sendable {
+        let inputCostPerToken: Double
+        let outputCostPerToken: Double
+        let cacheReadInputCostPerToken: Double?
+    }
+
     /// Exposes pricing shape for a covered Claude model, or `nil` when the model is unknown.
     static func claudePricingCapabilities(model: String) -> ClaudePricingCapabilities? {
         let key = self.normalizeClaudeModel(model)
@@ -372,6 +384,15 @@ enum CostUsagePricing {
             outputCostPerTokenAboveThreshold: pricing.outputCostPerTokenAboveThreshold,
             cacheCreationInputCostPerTokenAboveThreshold: pricing.cacheCreationInputCostPerTokenAboveThreshold,
             cacheReadInputCostPerTokenAboveThreshold: pricing.cacheReadInputCostPerTokenAboveThreshold)
+    }
+
+    static func codexPricingCapabilities(model: String) -> CodexPricingCapabilities? {
+        let key = self.normalizeCodexModel(model)
+        guard let pricing = self.codex[key] else { return nil }
+        return CodexPricingCapabilities(
+            inputCostPerToken: pricing.inputCostPerToken,
+            outputCostPerToken: pricing.outputCostPerToken,
+            cacheReadInputCostPerToken: pricing.cacheReadInputCostPerToken)
     }
 
     static func codexCostUSD(model: String, inputTokens: Int, cachedInputTokens: Int, outputTokens: Int) -> Double? {

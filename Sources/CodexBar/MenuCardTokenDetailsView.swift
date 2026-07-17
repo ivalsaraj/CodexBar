@@ -17,7 +17,9 @@ struct CursorMenuRequestRowPresentation: Equatable, Identifiable {
         let normalized = CursorModelNormalizer.normalize(request.model)
         let estimate = CursorRequestCostEstimator.estimate(for: request)
         let timestamp = UsageFormatter.cursorRequestRowTimestamp(request.timestamp)
-        let requestLabel = request.requests == 1 ? "Req 1" : "Req \(request.requests)"
+        let requestLabel = UsageFormatter.cursorRequestCountLabel(
+            requests: request.requests,
+            requestCost: request.requestCost)
         let detailLines = UsageFormatter.cursorRequestDetailLines(
             request: request,
             estimate: estimate,

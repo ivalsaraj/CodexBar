@@ -264,14 +264,129 @@ struct CursorRequestCostEstimatorTests {
     }
 
     @Test
-    func `openai estimate treats cache reads as discounted input and cache writes as free`() {
+    func `openai estimate treats cache reads as discounted input and cache writes as input equivalent`() {
         let bd = self.breakdown(
             (input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 500_000),
             total: 1_500_000,
             confidence: .exactBreakdown)
         let estimate = CursorRequestCostEstimator.estimate(model: "gpt-5.4", breakdown: bd)
         #expect(estimate.confidence == .exactBreakdown)
-        #expect(estimate.usd == self.usd(Double(1_000_000) * 2.5e-6))
+        #expect(estimate.usd == self.usd(Double(1_500_000) * 2.5e-6))
+        #expect(estimate.explanation.contains("cache writes count as input-equivalent"))
+        #expect(estimate.explanation.contains("request-based"))
+    }
+
+    @Test
+    func `openai estimate prices gpt55 suffix exact breakdown`() {
+        let bd = self.breakdown(
+            (input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000),
+            total: 4_000_000,
+            confidence: .exactBreakdown)
+        let estimate = CursorRequestCostEstimator.estimate(model: "gpt-5.5-medium", breakdown: bd)
+        #expect(estimate.confidence == .exactBreakdown)
+        #expect(estimate.pricingKey == "gpt-5.5")
+        #expect(estimate.usd == self.usd(40.5))
+        #expect(estimate.explanation.contains("request-based"))
+    }
+
+    @Test
+    func `openai total only estimate uses uncached input low end without cache evidence`() {
+        let bd = self.breakdown(
+            (input: nil, output: nil, cacheRead: nil, cacheWrite: nil),
+            total: 1_000_000,
+            confidence: .totalOnly)
+        let estimate = CursorRequestCostEstimator.estimate(model: "gpt-5.5-medium", breakdown: bd)
+        #expect(estimate.confidence == .approximateLowerBound)
+        #expect(estimate.pricingKey == "gpt-5.5")
+        #expect(estimate.lowerBoundUSD == self.usd(5))
+        #expect(estimate.upperBoundUSD == nil)
+        #expect(estimate.explanation.contains("did not expose cache-read evidence"))
+        #expect(estimate.explanation.contains("lower-bound"))
+        #expect(estimate.explanation.contains("request-based"))
+    }
+
+    @Test
+    func `openai total only estimate prices gpt55 extra high suffix`() {
+        let bd = self.breakdown(
+            (input: nil, output: nil, cacheRead: nil, cacheWrite: nil),
+            total: 1_000_000,
+            confidence: .totalOnly)
+        let estimate = CursorRequestCostEstimator.estimate(model: "gpt-5.5-extra-high", breakdown: bd)
+        #expect(estimate.confidence == .approximateLowerBound)
+        #expect(estimate.pricingKey == "gpt-5.5")
+        #expect(estimate.lowerBoundUSD == self.usd(5))
+        #expect(estimate.upperBoundUSD == nil)
+        #expect(estimate.explanation.contains("request-based"))
+    }
+
+    @Test
+    func `openai partial estimate uses cached input low end when cache read evidence exists`() {
+        let bd = self.breakdown(
+            (input: nil, output: nil, cacheRead: 1_000_000, cacheWrite: nil),
+            total: 1_000_000,
+            confidence: .partialBreakdown)
+        let estimate = CursorRequestCostEstimator.estimate(for: CursorRecentRequest(
+            timestamp: Date(timeIntervalSince1970: 1_770_201_720),
+            model: "gpt-5.5-medium",
+            tokens: 1_000_000,
+            requests: 1,
+            tokenBreakdown: bd))
+        #expect(estimate.confidence == .approximateLowerBound)
+        #expect(estimate.pricingKey == "gpt-5.5")
+        #expect(estimate.lowerBoundUSD == self.usd(0.5))
+        #expect(estimate.upperBoundUSD == nil)
+        #expect(estimate.explanation.contains("cache-read tokens"))
+        #expect(estimate.explanation.contains("incomplete input/output/cache split"))
+    }
+
+    @Test
+    func `openai request without breakdown uses total tokens as approximate range`() {
+        let estimate = CursorRequestCostEstimator.estimate(for: CursorRecentRequest(
+            timestamp: Date(timeIntervalSince1970: 1_770_201_720),
+            model: "openai:gpt-5.4-mini-high",
+            tokens: 1_000_000,
+            requests: 1))
+        #expect(estimate.confidence == .approximateLowerBound)
+        #expect(estimate.pricingKey == "gpt-5.4-mini")
+        #expect(estimate.lowerBoundUSD == self.usd(0.75))
+        #expect(estimate.upperBoundUSD == nil)
+        #expect(estimate.explanation.contains("request-based"))
+    }
+
+    @Test
+    func `openai lower bound summaries render one sided totals`() {
+        let request = CursorRecentRequest(
+            timestamp: Date(timeIntervalSince1970: 1_770_201_720),
+            model: "gpt-5.5-medium",
+            tokens: 1_000_000,
+            requests: 1,
+            tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                inputTokens: nil,
+                outputTokens: nil,
+                cacheReadTokens: nil,
+                cacheWriteTokens: nil,
+                totalTokens: 1_000_000,
+                confidence: .totalOnly))
+        let summary = CursorRequestCostEstimator.summarizedEstimate(for: [request])
+
+        #expect(summary?.containsApproximation == true)
+        #expect(summary?.lowerBoundUSD == self.usd(5))
+        #expect(summary?.upperBoundUSD == nil)
+        #expect(UsageFormatter.cursorEstimatedTotalText(summary) == "Approx. $5.00+")
+    }
+
+    @Test
+    func `unsupported openai total only request returns no estimate`() {
+        let estimate = CursorRequestCostEstimator.estimate(for: CursorRecentRequest(
+            timestamp: Date(timeIntervalSince1970: 1_770_201_720),
+            model: "gpt-9.9-medium",
+            tokens: 1_000_000,
+            requests: 1))
+        #expect(estimate.confidence == .missingBreakdown)
+        #expect(estimate.usd == nil)
+        #expect(estimate.lowerBoundUSD == nil)
+        #expect(estimate.upperBoundUSD == nil)
+        #expect(estimate.pricingKey == nil)
     }
 
     @Test

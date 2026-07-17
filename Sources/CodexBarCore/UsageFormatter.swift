@@ -147,12 +147,21 @@ public enum UsageFormatter {
             let lowerText = self.usdString(NSDecimalNumber(decimal: lower).doubleValue)
             let upperText = self.usdString(NSDecimalNumber(decimal: upper).doubleValue)
             return "Approx. \(lowerText)-\(upperText)"
+        case .approximateLowerBound:
+            guard let lower = estimate.lowerBoundUSD else { return nil }
+            return "Approx. \(self.usdString(NSDecimalNumber(decimal: lower).doubleValue))+"
         case .partialMissingCacheWriteTier:
             guard let usd = estimate.usd else { return nil }
             return "Partial \(self.usdString(NSDecimalNumber(decimal: usd).doubleValue))"
         default:
             return nil
         }
+    }
+
+    /// Formats a Cursor row label using the dashboard's weighted request cost when available.
+    public static func cursorRequestCountLabel(requests: Int, requestCost: Double? = nil) -> String {
+        let count = requestCost ?? Double(requests)
+        return count == 1 ? "Req 1" : "Req \(self.cursorRequestCostString(count))"
     }
 
     public static func cursorEstimatedTotalText(_ usd: Decimal?) -> String? {
@@ -163,10 +172,13 @@ public enum UsageFormatter {
     public static func cursorEstimatedTotalText(_ summary: CursorRequestCostSummary?) -> String? {
         guard let summary else { return nil }
         if summary.containsApproximation {
-            guard let lower = summary.lowerBoundUSD, let upper = summary.upperBoundUSD else { return nil }
+            guard let lower = summary.lowerBoundUSD else { return nil }
             let lowerText = self.usdString(NSDecimalNumber(decimal: lower).doubleValue)
-            let upperText = self.usdString(NSDecimalNumber(decimal: upper).doubleValue)
-            return "Approx. \(lowerText)-\(upperText)"
+            if let upper = summary.upperBoundUSD {
+                let upperText = self.usdString(NSDecimalNumber(decimal: upper).doubleValue)
+                return "Approx. \(lowerText)-\(upperText)"
+            }
+            return "Approx. \(lowerText)+"
         }
         return self.cursorEstimatedTotalText(summary.exactUSD)
     }
@@ -182,7 +194,10 @@ public enum UsageFormatter {
         var lines: [String] = []
         lines.append("Model: \(request.model)")
         lines.append(request.timestamp.formatted(date: .abbreviated, time: .standard))
-        lines.append(request.requests == 1 ? "Req 1" : "Req \(request.requests)")
+        lines.append(self.cursorRequestCountLabel(requests: request.requests, requestCost: request.requestCost))
+        if let requestCost = request.requestCost, requestCost > 1 {
+            lines.append("Request cost: \(self.cursorRequestCostString(requestCost))")
+        }
         lines.append(self.cursorBreakdownText(request: request))
         lines.append(self.cursorEstimateText(resolvedEstimate) ?? "Cost estimate unavailable")
         lines.append(resolvedEstimate.explanation)
@@ -253,6 +268,15 @@ public enum UsageFormatter {
         formatter.usesGroupingSeparator = true
         formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    public static func cursorRequestCostString(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 0
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
     }
 
     public static func creditEventSummary(_ event: CreditEvent) -> String {

@@ -44,10 +44,11 @@ Manual option:
   - Some legacy plans expose token counts via `numTokens` + `maxTokenUsage`; CodexBar falls back to those fields when request quotas are absent.
   - If `numTokens` is present but `maxTokenUsage` is missing, CodexBar still records billing-cycle token usage for widget display.
 - `POST https://cursor.com/api/dashboard/get-filtered-usage-events`
-  - Per-request usage rows for the current billing cycle (`usageEventsDisplay`).
+  - Per-request usage rows (`usageEventsDisplay`). CodexBar fetches far enough back to cover both the billing cycle
+    and the rolling 30-day window, then derives both totals locally.
   - Requires `Origin: https://cursor.com` with session cookies.
-- CodexBar maps rows to menu/widget request details (model, timestamp, token spend, numeric request count from
-    `requestsCosts`). Dashboard `kind` is not shown. Fetch failures are non-fatal.
+- CodexBar maps rows to menu/widget request details (model, timestamp, token spend, raw event count, and optional
+  weighted request cost from `requestsCosts`). Dashboard `kind` is not shown. Fetch failures are non-fatal.
   - When the event includes a token breakdown (`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`,
     `totalTokens`), CodexBar preserves it on the request and records a confidence (`exactBreakdown`, `partialBreakdown`,
     `totalOnly`, or `empty`). Missing fields stay unknown and are never coerced to zero.
@@ -55,21 +56,32 @@ Manual option:
 ## Legacy quota stays request-based
 - For legacy request-backed plans, the request count (`Requests: used / limit`) remains the primary quota line in the
   menu and the source of truth for the quota. Billing-cycle tokens move to a secondary `Cycle: N tokens` line.
+- The Cursor token section defaults to the billing cycle view (`Cycle`) so a 17th-to-17th reset plan shows the same
+  window as Cursor's included usage dashboard. The section also has a `30d` selector for a rolling 30-day view.
 - Request-count rows survive even when an event reports zero tokens, as long as it represents at least one request.
 
 ## Model-cost estimates (diagnostic only)
 - Recent request rows can show an optional local model-cost estimate, labelled `Est.` when a breakdown-based estimate is
   available, `Approx. $low-$high` when only a total token count is available for a priced Composer or Anthropic model,
-  or `Partial` only when CodexBar has an incomplete lower-bound estimate.
+  or `Approx. $low+` when Cursor only exposes a total or incomplete split for a GPT row.
 - Estimates are computed locally from the shared `CostUsagePricing` catalog for Anthropic/OpenAI models and from Cursor's
   published Composer 2.5 changelog rates for Cursor-owned models (source-versioned in-repo); CodexBar never calls pricing
   docs at runtime. The estimate is diagnostic and never implies Cursor bills the legacy plan by dollars — expanded details
   and hover/help always state the quota is request-based.
+- OpenAI GPT pricing is sourced from [OpenAI API pricing](https://openai.com/api/pricing/), checked 2026-06-21:
+  `gpt-5.5` `$5/M` input, `$0.50/M` cached input, `$30/M` output; `gpt-5.4` `$2.50/M` input,
+  `$0.25/M` cached input, `$15/M` output; `gpt-5.4 mini` `$0.75/M` input, `$0.075/M` cached input,
+  `$4.50/M` output. GPT rows with only total tokens or an incomplete split now show a conservative one-sided lower
+  bound instead of an all-output upper bound; unsupported GPT variants remain unavailable rather than using a
+  fabricated fallback.
 - Anthropic Fable 5 is priced from Anthropic's published rates checked 2026-06-11: `$10/M` input, `$12.50/M`
   5-minute cache write, `$20/M` 1-hour cache write, `$1/M` cache hit, `$50/M` output. CodexBar stores the 5-minute
   cache-write rate because that is the default assumption used for exact breakdowns.
-- Raw Cursor model strings are normalized for compact display (e.g. `claude-opus-4-8-thinking-xhigh` → `Opus 4.8 · xhigh`).
-  Thinking effort never changes the pricing key.
+- Raw Cursor model strings are normalized for compact display (e.g. `claude-opus-4-8-thinking-xhigh` → `Opus 4.8 · xhigh`,
+  version-first Anthropic rows like `claude-4.6-opus-max-thinking` → `Opus 4.6 · max`, bare Anthropic family strings like
+  `opus-4-6-thinking-max` → `Opus 4.6 · max`, familyless Cursor Claude rows like `claude-4.6-thinking-max` → `Opus 4.6 · max`,
+  and `gpt-5.5-extra-high` → `GPT-5.5 · extra-high`). Thinking effort,
+  including multi-token efforts such as `extra-high`, never changes the pricing key.
 - **Composer 2.5 pricing** (from [Cursor Composer 2.5 changelog](https://cursor.com/changelog/composer-2-5), checked
   2026-06-08): Fast `$3/M` input + `$15/M` output; Standard `$0.50/M` input + `$2.50/M` output. Raw `composer-2.5`
   defaults to Fast unless the model string explicitly includes `standard`. Total-only Composer rows show an approximate
@@ -94,14 +106,16 @@ Manual option:
 - Legacy quota fallback: if `/api/usage` reports request or token quotas, primary uses that quota percent for legacy plans.
 - Secondary: on-demand usage percent (individual usage).
 - Provider cost: on-demand usage USD (limit when known).
-- Widget token row: uses `/api/usage` `numTokens` as a billing-cycle token total and labels it `Cycle`; when recent
-  request rows have priced breakdowns, the row also includes the summed local estimate next to the token total.
+- Widget token row: uses the selected Cursor usage range from settings (`Cycle` by default, or `30d`) and mirrors the
+  matching token total, local estimate, date range, and request rows. Older snapshots without range summaries fall back
+  to `/api/usage` `numTokens` as a billing-cycle token total.
 - Menu request rows: uses filtered usage events (newest first, capped at 30) when available. Each row is a compact
-  two-line layout (compact model + token spend, then time + `Req N` + optional estimate). **Click a row to expand** the
-  full detail block (raw model, timestamp, token breakdown, estimate, pricing source, request-based disclaimer). Hover
-  help mirrors the same content as a best-effort bonus, but click-to-expand is the primary detail surface because
-  `NSMenu`-hosted SwiftUI hover is unreliable inside scroll views. The Cursor menu card keeps the range visible and puts
-  overflowing request rows in a fixed-height scroll region whose height does not change when a row expands.
+  two-line layout (compact model + token spend, then time + dashboard-weighted `Req N` when present, otherwise the raw
+  event count, plus the optional estimate). **Click a row to expand** the full detail block (raw model, timestamp,
+  token breakdown, weighted request cost when present, estimate, pricing source, request-based disclaimer). Hover help
+  mirrors the same content as a best-effort bonus, but click-to-expand is the primary detail surface because
+  `NSMenu`-hosted SwiftUI hover is unreliable inside scroll views. The Cursor menu card keeps the range visible and
+  puts overflowing request rows in a fixed-height scroll region whose height does not change when a row expands.
 - Widget request rows: uses filtered usage events (newest first, capped at 30) when available, rendered with the
   compact model label and optional estimate (`Est.` or `Approx.`). WidgetKit has no hover or row expansion — breakdown
   detail stays in the macOS menu.

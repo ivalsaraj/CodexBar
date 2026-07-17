@@ -94,6 +94,8 @@ public struct WidgetSnapshot: Codable, Sendable {
         public let model: String
         public let tokens: Int
         public let requests: Int
+        /// Optional weighted dashboard request cost from Cursor's `requestsCosts` field.
+        public let requestCost: Double?
         /// Compact, normalized model label for display (e.g. `Opus 4.8 · xhigh`). `nil` for legacy payloads.
         public let compactModel: String?
         /// Optional short cost-estimate label (e.g. `Est. $12.34`). `nil` when no honest estimate exists.
@@ -104,6 +106,7 @@ public struct WidgetSnapshot: Codable, Sendable {
             model: String,
             tokens: Int,
             requests: Int,
+            requestCost: Double? = nil,
             compactModel: String? = nil,
             estimateText: String? = nil)
         {
@@ -111,6 +114,7 @@ public struct WidgetSnapshot: Codable, Sendable {
             self.model = model
             self.tokens = tokens
             self.requests = requests
+            self.requestCost = requestCost
             self.compactModel = compactModel
             self.estimateText = estimateText
         }

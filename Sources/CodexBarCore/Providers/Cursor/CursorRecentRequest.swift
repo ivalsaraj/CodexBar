@@ -45,6 +45,7 @@ public struct CursorRecentRequest: Codable, Equatable, Sendable {
     public let model: String
     public let tokens: Int
     public let requests: Int
+    public let requestCost: Double?
     public let tokenBreakdown: CursorRecentRequestTokenBreakdown?
 
     public init(
@@ -52,12 +53,14 @@ public struct CursorRecentRequest: Codable, Equatable, Sendable {
         model: String,
         tokens: Int,
         requests: Int,
+        requestCost: Double? = nil,
         tokenBreakdown: CursorRecentRequestTokenBreakdown? = nil)
     {
         self.timestamp = timestamp
         self.model = model
         self.tokens = tokens
         self.requests = requests
+        self.requestCost = requestCost
         self.tokenBreakdown = tokenBreakdown
     }
 }

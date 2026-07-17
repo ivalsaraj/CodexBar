@@ -68,6 +68,55 @@ struct SettingsStoreTests {
     }
 
     @Test
+    func `cursor usage range defaults to billing cycle`() throws {
+        let suite = "SettingsStoreTests-cursor-range-default"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        let configStore = testConfigStore(suiteName: suite)
+
+        let store = SettingsStore(
+            userDefaults: defaults,
+            configStore: configStore,
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore())
+
+        #expect(store.cursorUsageRangeKind == .billingCycle)
+        #expect(defaults.string(forKey: "cursorUsageRangeKind") == CursorUsageRangeKind.billingCycle.rawValue)
+    }
+
+    @Test
+    func `cursor usage range persists and repairs invalid raw values`() throws {
+        let suite = "SettingsStoreTests-cursor-range-persist"
+        let defaultsA = try #require(UserDefaults(suiteName: suite))
+        defaultsA.removePersistentDomain(forName: suite)
+        let configStore = testConfigStore(suiteName: suite)
+
+        let storeA = SettingsStore(
+            userDefaults: defaultsA,
+            configStore: configStore,
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore())
+        storeA.cursorUsageRangeKind = .last30Days
+
+        let defaultsB = try #require(UserDefaults(suiteName: suite))
+        let storeB = SettingsStore(
+            userDefaults: defaultsB,
+            configStore: configStore,
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore())
+        #expect(storeB.cursorUsageRangeKind == .last30Days)
+
+        defaultsB.set("old-range", forKey: "cursorUsageRangeKind")
+        let storeC = SettingsStore(
+            userDefaults: defaultsB,
+            configStore: configStore,
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore())
+        #expect(storeC.cursorUsageRangeKind == .billingCycle)
+        #expect(defaultsB.string(forKey: "cursorUsageRangeKind") == CursorUsageRangeKind.billingCycle.rawValue)
+    }
+
+    @Test
     func `persists selected menu provider across instances`() throws {
         let suite = "SettingsStoreTests-selectedMenuProvider"
         let defaultsA = try #require(UserDefaults(suiteName: suite))

@@ -3,6 +3,11 @@ import Testing
 @testable import CodexBarCore
 
 struct CursorStatusProbeUsageSummaryTests {
+    private func milliseconds(_ iso8601: String) -> String {
+        let date = ISO8601DateFormatter().date(from: iso8601)!
+        return "\(Int64(date.timeIntervalSince1970 * 1000))"
+    }
+
     @Test
     func `parse usage summary carries billing cycle tokens without token limit`() {
         let summary = CursorUsageSummary(
@@ -47,7 +52,7 @@ struct CursorStatusProbeUsageSummaryTests {
     }
 
     @Test
-    func `parse usage summary carries recent cursor request events`() {
+    func `parse usage summary carries recent cursor request events`() throws {
         let summary = CursorUsageSummary(
             billingCycleStart: "2026-05-01T00:00:00.000Z",
             billingCycleEnd: "2026-06-01T00:00:00.000Z",
@@ -71,11 +76,14 @@ struct CursorStatusProbeUsageSummaryTests {
                     totalTokens: nil)),
         ]
 
-        let snapshot = CursorStatusProbe(browserDetection: BrowserDetection(cacheTTL: 0)).parseUsageSummary(
+        let snapshot = try CursorStatusProbe(browserDetection: BrowserDetection(cacheTTL: 0)).parseUsageSummary(
             summary,
             userInfo: nil,
             rawJSON: nil,
-            usageEvents: events)
+            usageEvents: events,
+            usageEventsRange: CursorRecentRequestRange(
+                start: #require(ISO8601DateFormatter().date(from: "2026-05-01T00:00:00Z")),
+                end: #require(ISO8601DateFormatter().date(from: "2026-06-19T12:00:00Z"))))
         let usageSnapshot = snapshot.toUsageSnapshot()
 
         #expect(usageSnapshot.cursorRecentRequests?.count == 1)
@@ -84,8 +92,49 @@ struct CursorStatusProbeUsageSummaryTests {
         #expect(usageSnapshot.cursorRecentRequests?.first?.requests == 1)
         let expectedDate = Date(timeIntervalSince1970: 1_779_888_240)
         #expect(usageSnapshot.cursorRecentRequests?.first?.timestamp == expectedDate)
-        #expect(usageSnapshot.cursorRecentRequestRange?.start == Date(timeIntervalSince1970: 1_777_593_600))
-        #expect(usageSnapshot.cursorRecentRequestRange?.end == Date(timeIntervalSince1970: 1_780_272_000))
+        #expect(usageSnapshot.cursorRecentRequestRange?.start == ISO8601DateFormatter()
+            .date(from: "2026-05-01T00:00:00Z")!)
+        #expect(usageSnapshot.cursorRecentRequestRange?.end == ISO8601DateFormatter()
+            .date(from: "2026-06-19T12:00:00Z")!)
+    }
+
+    @Test
+    func `parse usage summary keeps visible request count at one when request cost is weighted`() throws {
+        let summary = CursorUsageSummary(
+            billingCycleStart: "2026-05-01T00:00:00.000Z",
+            billingCycleEnd: "2026-06-01T00:00:00.000Z",
+            membershipType: "pro",
+            limitType: "user",
+            isUnlimited: false,
+            autoModelSelectedDisplayMessage: nil,
+            namedModelSelectedDisplayMessage: nil,
+            individualUsage: nil,
+            teamUsage: nil)
+        let events = [
+            CursorUsageEvent(
+                timestamp: "1779888240000",
+                model: "gpt-5.5-extra-high",
+                requestsCosts: 2,
+                tokenUsage: CursorUsageEventTokenUsage(
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    cacheReadTokens: nil,
+                    cacheWriteTokens: nil,
+                    totalTokens: 1000)),
+        ]
+
+        let snapshot = try CursorStatusProbe(browserDetection: BrowserDetection(cacheTTL: 0)).parseUsageSummary(
+            summary,
+            userInfo: nil,
+            rawJSON: nil,
+            usageEvents: events,
+            usageEventsRange: CursorRecentRequestRange(
+                start: #require(ISO8601DateFormatter().date(from: "2026-05-01T00:00:00Z")),
+                end: #require(ISO8601DateFormatter().date(from: "2026-06-19T12:00:00Z"))))
+        let usageSnapshot = snapshot.toUsageSnapshot()
+
+        #expect(usageSnapshot.cursorRecentRequests?.first?.requests == 1)
+        #expect(usageSnapshot.cursorRecentRequests?.first?.requestCost == 2)
     }
 
     @Test
@@ -138,6 +187,70 @@ struct CursorStatusProbeUsageSummaryTests {
         #expect(usageSnapshot.cursorTokenUsage?.requestCostSummary != nil)
     }
 
+    @Test
+    func `usage event fetch start date covers older billing cycle or last thirty days`() throws {
+        let now = try #require(ISO8601DateFormatter().date(from: "2026-06-15T00:00:00Z"))
+        let last30DaysStart = now.addingTimeInterval(-30 * 24 * 60 * 60)
+
+        #expect(CursorStatusProbe.cursorUsageEventsStartDate(
+            billingCycleStart: "2026-06-01T00:00:00.000Z",
+            now: now) == last30DaysStart)
+        #expect(CursorStatusProbe.cursorUsageEventsStartDate(
+            billingCycleStart: "2026-05-01T00:00:00.000Z",
+            now: now) == ISO8601DateFormatter().date(from: "2026-05-01T00:00:00Z")!)
+        #expect(CursorStatusProbe.cursorUsageEventsStartDate(
+            billingCycleStart: "not-a-date",
+            now: now) == last30DaysStart)
+    }
+
+    @Test
+    func `parse usage summary builds billing cycle and thirty day range summaries`() throws {
+        let summary = CursorUsageSummary(
+            billingCycleStart: "2026-06-01T00:00:00.000Z",
+            billingCycleEnd: "2026-07-01T00:00:00.000Z",
+            membershipType: "pro",
+            limitType: "user",
+            isUnlimited: false,
+            autoModelSelectedDisplayMessage: nil,
+            namedModelSelectedDisplayMessage: nil,
+            individualUsage: nil,
+            teamUsage: nil)
+        let events = [
+            CursorUsageEvent(
+                timestamp: self.milliseconds("2026-05-20T12:00:00Z"),
+                model: "composer-2.5",
+                requestsCosts: 1,
+                tokenUsage: CursorUsageEventTokenUsage(totalTokens: 1000)),
+            CursorUsageEvent(
+                timestamp: self.milliseconds("2026-06-10T12:00:00Z"),
+                model: "claude-opus-4-8-thinking-max",
+                requestsCosts: 1,
+                tokenUsage: CursorUsageEventTokenUsage(totalTokens: 2000)),
+        ]
+
+        let snapshot = try CursorStatusProbe(browserDetection: BrowserDetection(cacheTTL: 0)).parseUsageSummary(
+            summary,
+            userInfo: nil,
+            rawJSON: nil,
+            usageEvents: events,
+            usageEventsRange: CursorRecentRequestRange(
+                start: #require(ISO8601DateFormatter().date(from: "2026-05-01T00:00:00Z")),
+                end: #require(ISO8601DateFormatter().date(from: "2026-06-19T12:00:00Z"))))
+        let usageSnapshot = snapshot.toUsageSnapshot()
+
+        let billingCycle = usageSnapshot.cursorRangeSummaries?.first { $0.rangeKind == .billingCycle }
+        let last30Days = usageSnapshot.cursorRangeSummaries?.first { $0.rangeKind == .last30Days }
+        #expect(billingCycle?.tokens == 2000)
+        #expect(billingCycle?.requests == 1)
+        #expect(billingCycle?.weightedRequestCost == 1)
+        #expect(billingCycle?.recentRequests.map(\.model) == ["claude-opus-4-8-thinking-max"])
+        #expect(last30Days?.tokens == 3000)
+        #expect(last30Days?.requests == 2)
+        #expect(last30Days?.weightedRequestCost == 2)
+        #expect(snapshot.billingCycleTokensUsed == 2000)
+        #expect(usageSnapshot.cursorTokenUsage?.billingCycleTokensUsed == 2000)
+    }
+
     /// Event rows from POST /api/dashboard/get-filtered-usage-events (`usageEventsDisplay`).
     /// Timestamp is Unix milliseconds as a string; model + tokenUsage drive widget rows; `kind` is not surfaced.
     @Test
@@ -158,7 +271,8 @@ struct CursorStatusProbeUsageSummaryTests {
         #expect(recent.first?.timestamp == Date(timeIntervalSince1970: 1_779_888_240))
         #expect(recent[1].model == "composer-2")
         #expect(recent[1].tokens == 120)
-        #expect(recent[1].requests == 2)
+        #expect(recent[1].requests == 1)
+        #expect(recent[1].requestCost == 2)
     }
 
     @Test

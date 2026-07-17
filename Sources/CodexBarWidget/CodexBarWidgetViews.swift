@@ -890,7 +890,9 @@ enum CursorWidgetRequestPresentation {
         let hiddenCount = max(0, details.count - visible.count)
         let rows = visible.enumerated().map { index, detail -> Row in
             let time = WidgetFormat.requestDateTime(detail.timestamp)
-            let count = WidgetFormat.requestCountLabel(detail.requests)
+            let count = WidgetFormat.requestCountLabel(
+                requests: detail.requests,
+                requestCost: detail.requestCost)
             return Row(
                 id: index,
                 modelText: detail.compactModel ?? detail.model,
@@ -997,8 +999,8 @@ enum WidgetFormat {
         "\(date.formatted(.dateTime.month(.abbreviated).day())) · \(self.requestTime(date))"
     }
 
-    static func requestCountLabel(_ count: Int) -> String {
-        count == 1 ? "Req 1" : "Req \(count)"
+    static func requestCountLabel(requests: Int, requestCost: Double? = nil) -> String {
+        UsageFormatter.cursorRequestCountLabel(requests: requests, requestCost: requestCost)
     }
 
     static func cursorRequestRange(_ range: WidgetSnapshot.CursorRequestRange) -> String {

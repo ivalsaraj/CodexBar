@@ -61,6 +61,7 @@ extension UsageStore {
                 guard self.startupBehavior.automaticallyStartsBackgroundWork else { return }
                 self.startTimer()
                 self.updateProviderRuntimes()
+                self.persistWidgetSnapshot(reason: "settings")
                 await self.refreshHistoricalDatasetIfNeeded()
                 await self.refresh()
             }

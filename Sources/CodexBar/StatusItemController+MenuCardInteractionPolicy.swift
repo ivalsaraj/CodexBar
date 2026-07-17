@@ -11,9 +11,14 @@ extension StatusItemController {
 
     static func menuCardInteractionPolicy(for model: UsageMenuCardView.Model) -> MenuCardInteractionPolicy {
         guard model.provider == .cursor,
-              let tokenUsage = model.tokenUsage,
-              tokenUsage.cursorRequestDetails.count > CursorMenuRequestDetailPresentation.maxVisibleRequestRows
+              let tokenUsage = model.tokenUsage
         else {
+            return .default
+        }
+        let requestCount = max(
+            tokenUsage.cursorRequestDetails.count,
+            tokenUsage.cursorRangePresentations.values.map(\.cursorRequestDetails.count).max() ?? 0)
+        guard requestCount > CursorMenuRequestDetailPresentation.maxVisibleRequestRows else {
             return .default
         }
         return .scrollableContent

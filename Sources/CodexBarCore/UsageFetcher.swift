@@ -60,6 +60,7 @@ public struct UsageSnapshot: Codable, Sendable {
     public let cursorTokenUsage: CursorTokenUsage?
     public let cursorRecentRequests: [CursorRecentRequest]?
     public let cursorRecentRequestRange: CursorRecentRequestRange?
+    public let cursorRangeSummaries: [CursorRangeUsageSummary]?
     public let updatedAt: Date
     public let identity: ProviderIdentitySnapshot?
 
@@ -90,6 +91,7 @@ public struct UsageSnapshot: Codable, Sendable {
         cursorTokenUsage: CursorTokenUsage? = nil,
         cursorRecentRequests: [CursorRecentRequest]? = nil,
         cursorRecentRequestRange: CursorRecentRequestRange? = nil,
+        cursorRangeSummaries: [CursorRangeUsageSummary]? = nil,
         updatedAt: Date,
         identity: ProviderIdentitySnapshot? = nil)
     {
@@ -105,6 +107,7 @@ public struct UsageSnapshot: Codable, Sendable {
         self.cursorTokenUsage = cursorTokenUsage
         self.cursorRecentRequests = cursorRecentRequests
         self.cursorRecentRequestRange = cursorRecentRequestRange
+        self.cursorRangeSummaries = cursorRangeSummaries
         self.updatedAt = updatedAt
         self.identity = identity
     }
@@ -123,6 +126,7 @@ public struct UsageSnapshot: Codable, Sendable {
         self.cursorTokenUsage = nil // Not persisted, fetched fresh each time
         self.cursorRecentRequests = nil // Not persisted, fetched fresh each time
         self.cursorRecentRequestRange = nil // Not persisted, fetched fresh each time
+        self.cursorRangeSummaries = nil // Not persisted, fetched fresh each time
         self.updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         if let identity = try container.decodeIfPresent(ProviderIdentitySnapshot.self, forKey: .identity) {
             self.identity = identity
@@ -242,6 +246,7 @@ public struct UsageSnapshot: Codable, Sendable {
             cursorTokenUsage: self.cursorTokenUsage,
             cursorRecentRequests: self.cursorRecentRequests,
             cursorRecentRequestRange: self.cursorRecentRequestRange,
+            cursorRangeSummaries: self.cursorRangeSummaries,
             updatedAt: self.updatedAt,
             identity: identity)
     }

@@ -254,6 +254,13 @@ extension SettingsStore {
         let mergedOverviewSelectedProvidersRaw = userDefaults.array(
             forKey: "mergedOverviewSelectedProviders") as? [String] ?? []
         let selectedMenuProviderRaw = userDefaults.string(forKey: "selectedMenuProvider")
+        let cursorUsageRangeKindRaw = userDefaults.string(forKey: "cursorUsageRangeKind")
+            ?? CursorUsageRangeKind.billingCycle.rawValue
+        if CursorUsageRangeKind(rawValue: cursorUsageRangeKindRaw) == nil {
+            userDefaults.set(CursorUsageRangeKind.billingCycle.rawValue, forKey: "cursorUsageRangeKind")
+        } else if userDefaults.string(forKey: "cursorUsageRangeKind") == nil {
+            userDefaults.set(cursorUsageRangeKindRaw, forKey: "cursorUsageRangeKind")
+        }
         let providerDetectionCompleted = userDefaults.object(forKey: "providerDetectionCompleted") as? Bool ?? false
 
         return SettingsDefaultsState(
@@ -289,6 +296,7 @@ extension SettingsStore {
             mergedMenuLastSelectedWasOverview: mergedMenuLastSelectedWasOverview,
             mergedOverviewSelectedProvidersRaw: mergedOverviewSelectedProvidersRaw,
             selectedMenuProviderRaw: selectedMenuProviderRaw,
+            cursorUsageRangeKindRaw: cursorUsageRangeKindRaw,
             providerDetectionCompleted: providerDetectionCompleted)
     }
 }

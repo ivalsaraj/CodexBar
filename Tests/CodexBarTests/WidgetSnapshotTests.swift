@@ -230,7 +230,8 @@ struct WidgetSnapshotTests {
                     timestamp: timestamp,
                     model: "claude-opus-4-7-thinking-xhigh",
                     tokens: 1000,
-                    requests: 1),
+                    requests: 1,
+                    requestCost: 2),
             ],
             dailyUsage: [])
 
@@ -251,9 +252,58 @@ struct WidgetSnapshotTests {
         #expect(detail.model == "claude-opus-4-7-thinking-xhigh")
         #expect(detail.tokens == 1000)
         #expect(detail.requests == 1)
+        #expect(detail.requestCost == 2)
         #expect(detail.timestamp == timestamp)
         #expect(decoded.entries.first?.cursorRequestRange?.start == timestamp)
         #expect(decoded.entries.first?.cursorRequestRange?.end == timestamp.addingTimeInterval(3600))
+    }
+
+    @Test
+    func `widget snapshot round trip decodes cursor request details without weighted cost`() throws {
+        let timestamp = Date(timeIntervalSince1970: 1_779_888_240)
+        let entry = WidgetSnapshot.ProviderEntry(
+            provider: .cursor,
+            updatedAt: Date(),
+            primary: nil,
+            secondary: nil,
+            tertiary: nil,
+            creditsRemaining: nil,
+            codeReviewRemainingPercent: nil,
+            tokenUsage: WidgetSnapshot.TokenUsageSummary(
+                sessionCostUSD: nil,
+                sessionTokens: 86_684_822,
+                last30DaysCostUSD: nil,
+                last30DaysTokens: nil,
+                sessionLabel: "Cycle",
+                last30DaysLabel: nil),
+            cursorRequestRange: WidgetSnapshot.CursorRequestRange(
+                start: timestamp,
+                end: timestamp.addingTimeInterval(3600)),
+            cursorRequestDetails: [
+                WidgetSnapshot.CursorRequestDetail(
+                    timestamp: timestamp,
+                    model: "claude-opus-4-7-thinking-xhigh",
+                    tokens: 1000,
+                    requests: 1),
+            ],
+            dailyUsage: [])
+
+        let snapshot = WidgetSnapshot(
+            entries: [entry],
+            enabledProviders: [.cursor],
+            generatedAt: Date())
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(snapshot)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(WidgetSnapshot.self, from: data)
+
+        let detail = try #require(decoded.entries.first?.cursorRequestDetails?.first)
+        #expect(detail.requestCost == nil)
+        #expect(detail.requests == 1)
     }
 
     @Test

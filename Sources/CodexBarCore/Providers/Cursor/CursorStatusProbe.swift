@@ -373,6 +373,8 @@ public struct CursorStatusSnapshot: Sendable {
     public let recentRequests: [CursorRecentRequest]?
     /// Date range used when fetching recent per-request usage rows.
     public let recentRequestRange: CursorRecentRequestRange?
+    /// Range-scoped Cursor usage summaries for billing-cycle and 30-day views.
+    public let rangeSummaries: [CursorRangeUsageSummary]?
 
     /// Whether this plan uses the legacy request/token quota endpoint.
     public var isLegacyRequestPlan: Bool {
@@ -400,7 +402,8 @@ public struct CursorStatusSnapshot: Sendable {
         billingCycleTokensUsed: Int? = nil,
         billingCycleRequestCostSummary: CursorRequestCostSummary? = nil,
         recentRequests: [CursorRecentRequest]? = nil,
-        recentRequestRange: CursorRecentRequestRange? = nil)
+        recentRequestRange: CursorRecentRequestRange? = nil,
+        rangeSummaries: [CursorRangeUsageSummary]? = nil)
     {
         self.planPercentUsed = planPercentUsed
         self.autoPercentUsed = autoPercentUsed
@@ -423,6 +426,7 @@ public struct CursorStatusSnapshot: Sendable {
         self.billingCycleRequestCostSummary = billingCycleRequestCostSummary
         self.recentRequests = recentRequests
         self.recentRequestRange = recentRequestRange
+        self.rangeSummaries = rangeSummaries
     }
 
     /// Convert to UsageSnapshot for the common provider interface
@@ -511,6 +515,7 @@ public struct CursorStatusSnapshot: Sendable {
             },
             cursorRecentRequests: self.recentRequests,
             cursorRecentRequestRange: self.recentRequestRange,
+            cursorRangeSummaries: self.rangeSummaries,
             updatedAt: Date(),
             identity: identity)
     }
@@ -1020,13 +1025,8 @@ public struct CursorStatusProbe: Sendable {
     {
         let endDate = Date()
         let nowMs = Int64(endDate.timeIntervalSince1970 * 1000)
-        let startMs: Int64 = if let billingCycleStart,
-                                let startDate = Self.parseBillingCycleDate(billingCycleStart)
-        {
-            Int64(startDate.timeIntervalSince1970 * 1000)
-        } else {
-            nowMs - (30 * 24 * 60 * 60 * 1000)
-        }
+        let startDate = Self.cursorUsageEventsStartDate(billingCycleStart: billingCycleStart, now: endDate)
+        let startMs = Int64(startDate.timeIntervalSince1970 * 1000)
         let range = CursorRecentRequestRange(
             start: Date(timeIntervalSince1970: TimeInterval(startMs) / 1000),
             end: endDate)
@@ -1111,6 +1111,16 @@ public struct CursorStatusProbe: Sendable {
         return currentPageEventCount == pageSize
     }
 
+    static func cursorUsageEventsStartDate(billingCycleStart: String?, now: Date) -> Date {
+        let last30DaysStart = now.addingTimeInterval(-30 * 24 * 60 * 60)
+        guard let billingCycleStart,
+              let billingCycleStartDate = self.parseBillingCycleDate(billingCycleStart)
+        else {
+            return last30DaysStart
+        }
+        return min(billingCycleStartDate, last30DaysStart)
+    }
+
     static func decodeUsageEventsResponse(from data: Data) throws -> [CursorUsageEvent] {
         try self.decodeUsageEventsPageResponse(from: data).usageEventsDisplay ?? []
     }
@@ -1139,12 +1149,13 @@ public struct CursorStatusProbe: Sendable {
         guard event.tokenUsage != nil || hasRequestCost else { return nil }
         let breakdown = Self.requestTokenBreakdown(for: event.tokenUsage)
         let tokens = breakdown?.totalTokens ?? Self.tokenSpend(for: event.tokenUsage) ?? 0
-        let requests = Self.requestCount(for: event)
+        let requestCost = Self.requestCost(for: event)
         return CursorRecentRequest(
             timestamp: timestamp,
             model: model,
             tokens: tokens,
-            requests: requests,
+            requests: 1,
+            requestCost: requestCost,
             tokenBreakdown: breakdown)
     }
 
@@ -1225,11 +1236,9 @@ public struct CursorStatusProbe: Sendable {
             confidence: confidence)
     }
 
-    private static func requestCount(for event: CursorUsageEvent) -> Int {
-        if let costs = event.requestsCosts, costs > 0 {
-            return max(1, Int(costs.rounded()))
-        }
-        return 1
+    private static func requestCost(for event: CursorUsageEvent) -> Double? {
+        guard let costs = event.requestsCosts, costs > 0 else { return nil }
+        return costs
     }
 
     private static func parseBillingCycleDate(_ dateString: String) -> Date? {
@@ -1317,17 +1326,27 @@ public struct CursorStatusProbe: Sendable {
             .sorted { $0.timestamp > $1.timestamp }
             .prefix(30)
             .map(\.self)
+        let now = usageEventsRange?.end ?? Date()
         let resolvedEventsRange = usageEventsRange ?? Self.cursorRequestRange(
             billingCycleStart: summary.billingCycleStart,
             billingCycleEnd: summary.billingCycleEnd)
+        let rangeSummaries = Self.cursorRangeSummaries(
+            from: allEventRequests,
+            billingCycleStart: summary.billingCycleStart,
+            billingCycleEnd: summary.billingCycleEnd,
+            now: now)
+        let billingCycleSummary = rangeSummaries.first { $0.rangeKind == .billingCycle }
         let eventTokenTotal = allEventRequests.reduce(0) { $0 + $1.tokens }
         var billingCycleTokensUsed = requestUsage?.gpt4?.numTokens
         if billingCycleTokensUsed == nil || billingCycleTokensUsed == 0 {
-            if eventTokenTotal > 0 {
+            if let summary = billingCycleSummary, summary.tokens > 0 {
+                billingCycleTokensUsed = summary.tokens
+            } else if eventTokenTotal > 0 {
                 billingCycleTokensUsed = eventTokenTotal
             }
         }
-        let billingCycleRequestCostSummary = CursorRequestCostEstimator.summarizedEstimate(for: allEventRequests)
+        let billingCycleRequestCostSummary = billingCycleSummary?.requestCostSummary
+            ?? CursorRequestCostEstimator.summarizedEstimate(for: allEventRequests)
 
         return CursorStatusSnapshot(
             planPercentUsed: planPercentUsed,
@@ -1350,7 +1369,53 @@ public struct CursorStatusProbe: Sendable {
             billingCycleTokensUsed: billingCycleTokensUsed,
             billingCycleRequestCostSummary: billingCycleRequestCostSummary,
             recentRequests: recentRequests.isEmpty ? nil : recentRequests,
-            recentRequestRange: recentRequests.isEmpty ? nil : resolvedEventsRange)
+            recentRequestRange: recentRequests.isEmpty ? nil : resolvedEventsRange,
+            rangeSummaries: rangeSummaries.isEmpty ? nil : rangeSummaries)
+    }
+
+    private static func cursorRangeSummaries(
+        from requests: [CursorRecentRequest],
+        billingCycleStart: String?,
+        billingCycleEnd: String?,
+        now: Date) -> [CursorRangeUsageSummary]
+    {
+        let billingStart = billingCycleStart.flatMap(self.parseBillingCycleDate)
+        let billingEnd = billingCycleEnd.flatMap(self.parseBillingCycleDate) ?? now
+        let cycleRange = billingStart.map { CursorRecentRequestRange(start: $0, end: billingEnd) }
+        let last30Range = CursorRecentRequestRange(
+            start: now.addingTimeInterval(-30 * 24 * 60 * 60),
+            end: now)
+
+        var summaries: [CursorRangeUsageSummary] = []
+        if let cycleRange {
+            summaries.append(self.cursorRangeSummary(
+                kind: .billingCycle,
+                range: cycleRange,
+                requests: requests))
+        }
+        summaries.append(self.cursorRangeSummary(
+            kind: .last30Days,
+            range: last30Range,
+            requests: requests))
+        return summaries
+    }
+
+    private static func cursorRangeSummary(
+        kind: CursorUsageRangeKind,
+        range: CursorRecentRequestRange,
+        requests: [CursorRecentRequest]) -> CursorRangeUsageSummary
+    {
+        let scoped = requests
+            .filter { $0.timestamp >= range.start && $0.timestamp <= range.end }
+            .sorted { $0.timestamp > $1.timestamp }
+        return CursorRangeUsageSummary(
+            rangeKind: kind,
+            range: range,
+            tokens: scoped.reduce(0) { $0 + $1.tokens },
+            requests: scoped.count,
+            weightedRequestCost: scoped.reduce(0) { $0 + ($1.requestCost ?? Double($1.requests)) },
+            requestCostSummary: CursorRequestCostEstimator.summarizedEstimate(for: scoped),
+            recentRequests: Array(scoped.prefix(30)))
     }
 
     private static func cursorRequestRange(

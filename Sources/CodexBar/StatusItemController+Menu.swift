@@ -1617,6 +1617,8 @@ extension StatusItemController {
             hidePersonalInfo: self.settings.hidePersonalInfo,
             forceLoadingSubtitle: accountSwitchInFlight,
             weeklyPace: weeklyPace,
+            cursorUsageRangeKind: self.settings.cursorUsageRangeKind,
+            selectCursorUsageRange: { [weak self] range in self?.selectCursorUsageRange(range) },
             now: now)
         return UsageMenuCardView.Model.make(input)
     }

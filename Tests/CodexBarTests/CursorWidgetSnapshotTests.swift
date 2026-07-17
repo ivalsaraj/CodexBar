@@ -101,7 +101,7 @@ struct CursorWidgetSnapshotTests {
     }
 
     @Test
-    func `widget snapshot uses cursor cycle cost summary before visible request rows`() async throws {
+    func `widget snapshot recomputes cursor cycle cost when request rows are available`() async throws {
         let settings = self.makeSettings()
         let store = UsageStore(
             fetcher: UsageFetcher(),
@@ -149,7 +149,258 @@ struct CursorWidgetSnapshotTests {
         let cursorEntry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
         #expect(cursorEntry.tokenUsage?.sessionTokens == 1_400_000_000)
         #expect(cursorEntry.tokenUsage?.sessionCostUSD == nil)
-        #expect(cursorEntry.tokenUsage?.sessionCostText == "Approx. $10.00-$20.00")
+        #expect(cursorEntry.tokenUsage?.sessionCostText?.hasPrefix("Approx.") == true)
+        #expect(cursorEntry.tokenUsage?.sessionCostText != "Approx. $10.00-$20.00")
+    }
+
+    @Test
+    func `widget snapshot follows selected cursor usage range summary`() async throws {
+        let settings = self.makeSettings()
+        settings.cursorUsageRangeKind = .last30Days
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let billingRange = CursorRecentRequestRange(start: now.addingTimeInterval(-7 * 24 * 60 * 60), end: now)
+        let last30DaysRange = CursorRecentRequestRange(start: now.addingTimeInterval(-30 * 24 * 60 * 60), end: now)
+        let billingRequest = CursorRecentRequest(
+            timestamp: now,
+            model: "claude-opus-4-8-thinking-max",
+            tokens: 2_000_000,
+            requests: 1,
+            requestCost: 2)
+        let olderRequest = CursorRecentRequest(
+            timestamp: now.addingTimeInterval(-20 * 24 * 60 * 60),
+            model: "composer-2.5",
+            tokens: 1_000_000,
+            requests: 1)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 44, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 2_000_000),
+                cursorRangeSummaries: [
+                    CursorRangeUsageSummary(
+                        rangeKind: .billingCycle,
+                        range: billingRange,
+                        tokens: 2_000_000,
+                        requests: 1,
+                        requestCostSummary: nil,
+                        recentRequests: [billingRequest]),
+                    CursorRangeUsageSummary(
+                        rangeKind: .last30Days,
+                        range: last30DaysRange,
+                        tokens: 3_000_000,
+                        requests: 2,
+                        requestCostSummary: nil,
+                        recentRequests: [billingRequest, olderRequest]),
+                ],
+                updatedAt: now),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-selected-range")
+        await store.widgetSnapshotPersistTask?.value
+
+        let cursorEntry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        #expect(cursorEntry.tokenUsage?.sessionTokens == 3_000_000)
+        #expect(cursorEntry.tokenUsage?.sessionLabel == "30d")
+        #expect(cursorEntry.cursorRequestRange?.start == last30DaysRange.start)
+        #expect(cursorEntry.cursorRequestRange?.end == last30DaysRange.end)
+        #expect(cursorEntry.cursorRequestDetails?.map(\.model) == [
+            "claude-opus-4-8-thinking-max",
+            "composer-2.5",
+        ])
+        #expect(cursorEntry.cursorRequestDetails?.first?.requestCost == 2)
+    }
+
+    @Test
+    func `widget snapshot falls back to selected last thirty days when selected summary is missing`() async throws {
+        let settings = self.makeSettings()
+        settings.cursorUsageRangeKind = .last30Days
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let billingRange = CursorRecentRequestRange(start: now.addingTimeInterval(-7 * 24 * 60 * 60), end: now)
+        let recentRequest = CursorRecentRequest(
+            timestamp: now.addingTimeInterval(-60),
+            model: "claude-opus-4-8-thinking-max",
+            tokens: 2_000_000,
+            requests: 1)
+        let olderRequest = CursorRecentRequest(
+            timestamp: now.addingTimeInterval(-40 * 24 * 60 * 60),
+            model: "composer-2.5",
+            tokens: 1_000_000,
+            requests: 1)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 44, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 99_000_000),
+                cursorRecentRequests: [recentRequest, olderRequest],
+                cursorRangeSummaries: [
+                    CursorRangeUsageSummary(
+                        rangeKind: .billingCycle,
+                        range: billingRange,
+                        tokens: 99_000_000,
+                        requests: 1,
+                        requestCostSummary: nil,
+                        recentRequests: [olderRequest]),
+                ],
+                updatedAt: now),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-missing-selected-summary")
+        await store.widgetSnapshotPersistTask?.value
+
+        let cursorEntry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        #expect(cursorEntry.tokenUsage?.sessionTokens == 2_000_000)
+        #expect(cursorEntry.tokenUsage?.sessionLabel == "30d")
+        #expect(cursorEntry.cursorRequestRange?.start == now.addingTimeInterval(-30 * 24 * 60 * 60))
+        #expect(cursorEntry.cursorRequestRange?.end == now)
+        #expect(cursorEntry.cursorRequestDetails?.map(\.model) == ["claude-opus-4-8-thinking-max"])
+    }
+
+    @Test
+    func `widget snapshot follows selected cursor range from persisted fallback requests`() async throws {
+        let settings = self.makeSettings()
+        settings.cursorUsageRangeKind = .last30Days
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let recentRequest = CursorRecentRequest(
+            timestamp: now.addingTimeInterval(-60),
+            model: "claude-opus-4-8-thinking-max",
+            tokens: 2_000_000,
+            requests: 1)
+        let olderRequest = CursorRecentRequest(
+            timestamp: now.addingTimeInterval(-40 * 24 * 60 * 60),
+            model: "composer-2.5",
+            tokens: 1_000_000,
+            requests: 1)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 44, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 3_000_000),
+                cursorRecentRequests: [recentRequest, olderRequest],
+                cursorRecentRequestRange: CursorRecentRequestRange(
+                    start: olderRequest.timestamp,
+                    end: recentRequest.timestamp),
+                updatedAt: now),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-selected-range-fallback")
+        await store.widgetSnapshotPersistTask?.value
+
+        let cursorEntry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        #expect(cursorEntry.tokenUsage?.sessionTokens == 2_000_000)
+        #expect(cursorEntry.tokenUsage?.sessionLabel == "30d")
+        #expect(cursorEntry.cursorRequestRange?.start == now.addingTimeInterval(-30 * 24 * 60 * 60))
+        #expect(cursorEntry.cursorRequestRange?.end == now)
+        #expect(cursorEntry.cursorRequestDetails?.map(\.model) == ["claude-opus-4-8-thinking-max"])
+    }
+
+    @Test
+    func `widget snapshot avoids capped cursor last thirty day aggregate totals`() async throws {
+        let settings = self.makeSettings()
+        settings.cursorUsageRangeKind = .last30Days
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let requests = (0..<30).map { index in
+            CursorRecentRequest(
+                timestamp: now.addingTimeInterval(Double(-index * 60)),
+                model: "claude-opus-4-8-thinking-max",
+                tokens: 100_000,
+                requests: 1)
+        }
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 44, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 3_000_000),
+                cursorRecentRequests: requests,
+                updatedAt: now),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-selected-range-fallback-capped")
+        await store.widgetSnapshotPersistTask?.value
+
+        let cursorEntry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        #expect(cursorEntry.tokenUsage?.sessionTokens == nil)
+        #expect(cursorEntry.tokenUsage?.sessionCostUSD == nil)
+        #expect(cursorEntry.tokenUsage?.sessionCostText == nil)
+        #expect(cursorEntry.tokenUsage?.sessionLabel == "30d")
+        #expect(cursorEntry.cursorRequestRange?.start == now.addingTimeInterval(-30 * 24 * 60 * 60))
+        #expect(cursorEntry.cursorRequestRange?.end == now)
+        #expect(cursorEntry.cursorRequestDetails?.count == 30)
+    }
+
+    @Test
+    func `widget snapshot keeps last thirty day label without fallback request rows`() async throws {
+        let settings = self.makeSettings()
+        settings.cursorUsageRangeKind = .last30Days
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 44, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 3_000_000),
+                updatedAt: now),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-selected-range-empty-fallback")
+        await store.widgetSnapshotPersistTask?.value
+
+        let cursorEntry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        #expect(cursorEntry.tokenUsage?.sessionTokens == nil)
+        #expect(cursorEntry.tokenUsage?.sessionCostUSD == nil)
+        #expect(cursorEntry.tokenUsage?.sessionCostText == nil)
+        #expect(cursorEntry.tokenUsage?.sessionLabel == "30d")
+        #expect(cursorEntry.cursorRequestRange?.start == now.addingTimeInterval(-30 * 24 * 60 * 60))
+        #expect(cursorEntry.cursorRequestRange?.end == now)
+        #expect(cursorEntry.cursorRequestDetails == nil)
     }
 
     @Test
@@ -468,6 +719,106 @@ struct CursorWidgetSnapshotTests {
         #expect(detail.estimateText == "Approx. $0.13-$6.29")
         #expect(entry.tokenUsage?.sessionCostUSD == nil)
         #expect(entry.tokenUsage?.sessionCostText == "Approx. $0.13-$6.29")
+    }
+
+    @Test
+    func `widget snapshot populates openai gpt alias estimate`() async throws {
+        let settings = self.makeSettings()
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let recent = [
+            CursorRecentRequest(
+                timestamp: baseDate,
+                model: "openai:gpt-5.5-high",
+                tokens: 1_000_000,
+                requests: 1,
+                tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    cacheReadTokens: nil,
+                    cacheWriteTokens: nil,
+                    totalTokens: 1_000_000,
+                    confidence: .totalOnly)),
+        ]
+
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 70, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 1_000_000),
+                cursorRecentRequests: recent,
+                updatedAt: baseDate),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-openai-gpt-estimate")
+        await store.widgetSnapshotPersistTask?.value
+
+        let entry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        let detail = try #require(entry.cursorRequestDetails?.first)
+        #expect(detail.compactModel == "GPT-5.5 · high")
+        #expect(detail.estimateText == "Approx. $5.00+")
+        #expect(entry.tokenUsage?.sessionCostUSD == nil)
+        #expect(entry.tokenUsage?.sessionCostText == "Approx. $5.00+")
+    }
+
+    @Test
+    func `widget snapshot populates openai gpt extra high alias estimate`() async throws {
+        let settings = self.makeSettings()
+        let store = UsageStore(
+            fetcher: UsageFetcher(),
+            browserDetection: BrowserDetection(cacheTTL: 0),
+            settings: settings)
+
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let recent = [
+            CursorRecentRequest(
+                timestamp: baseDate,
+                model: "gpt-5.5-extra-high",
+                tokens: 1_000_000,
+                requests: 1,
+                tokenBreakdown: CursorRecentRequestTokenBreakdown(
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    cacheReadTokens: nil,
+                    cacheWriteTokens: nil,
+                    totalTokens: 1_000_000,
+                    confidence: .totalOnly)),
+        ]
+
+        store._setSnapshotForTesting(
+            UsageSnapshot(
+                primary: RateWindow(usedPercent: 14, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+                secondary: nil,
+                tertiary: nil,
+                cursorRequests: CursorRequestUsage(used: 70, limit: 500),
+                cursorTokenUsage: CursorTokenUsage(billingCycleTokensUsed: 1_000_000),
+                cursorRecentRequests: recent,
+                updatedAt: baseDate),
+            provider: .cursor)
+
+        var widgetSnapshots: [WidgetSnapshot] = []
+        store._test_widgetSnapshotSaveOverride = { widgetSnapshots.append($0) }
+        defer { store._test_widgetSnapshotSaveOverride = nil }
+
+        store.persistWidgetSnapshot(reason: "cursor-openai-gpt-extra-high-estimate")
+        await store.widgetSnapshotPersistTask?.value
+
+        let entry = try #require(widgetSnapshots.last?.entries.first { $0.provider == .cursor })
+        let detail = try #require(entry.cursorRequestDetails?.first)
+        #expect(detail.compactModel == "GPT-5.5 · extra-high")
+        #expect(detail.estimateText == "Approx. $5.00+")
+        #expect(entry.tokenUsage?.sessionCostUSD == nil)
+        #expect(entry.tokenUsage?.sessionCostText == "Approx. $5.00+")
     }
 
     @Test
