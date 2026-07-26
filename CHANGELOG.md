@@ -3,6 +3,7 @@
 ## 0.25 — Unreleased
 
 ### Fixes
+- Charts: keep history hover highlights aligned with the rendered bar body when days are sparse.
 - Locale: keep relative timestamps in hardcoded-English UI labels consistently English on non-English macOS systems (#868, fixes #866). Thanks @Karl-Dai!
 - Droid: fall back to token/allowance math when the Factory API reports a zero ratio despite non-zero usage (#864). Thanks @proxynico!
 - OpenRouter: keep the menu bar rendering the usage meter instead of falling back to the provider logo when no key limit is configured (#854). Thanks @willytop8!

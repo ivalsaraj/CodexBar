@@ -614,28 +614,14 @@ struct CostHistoryChartMenuView: View {
               let x = proxy.position(forX: model.datePoints[index].date)
         else { return nil }
         let plotFrame = geo[plotAnchor]
+        let date = model.datePoints[index].date
 
-        func xForIndex(_ index: Int) -> CGFloat? {
-            guard model.datePoints.indices.contains(index) else { return nil }
-            return proxy.position(forX: model.datePoints[index].date)
-        }
-
-        let previous = xForIndex(index - 1)
-        let next = xForIndex(index + 1)
-        let left: CGFloat = if let previous {
-            (previous + x) / 2
-        } else if let next {
-            x - ((next - x) / 2)
-        } else {
-            x - 8
-        }
-        let right: CGFloat = if let next {
-            (next + x) / 2
-        } else if let previous {
-            x + ((x - previous) / 2)
-        } else {
-            x + 8
-        }
+        // Use the calendar day slot width so the band stays the same size regardless of data gaps.
+        let nextDayX = proxy.position(forX: ChartBarHoverSelection.nextCalendarDay(after: date)) ?? (x + 20)
+        let slotWidth = abs(nextDayX - x)
+        let barHalfWidth = slotWidth * 0.25 + 2
+        let left = x - barHalfWidth
+        let right = x + barHalfWidth
         return CGRect(
             x: plotFrame.origin.x + min(left, right),
             y: plotFrame.origin.y,
@@ -658,6 +644,20 @@ struct CostHistoryChartMenuView: View {
         guard plotFrame.contains(location) else { return }
         guard let date: Date = proxy.value(atX: location.x - plotFrame.origin.x) else { return }
         guard let nearest = self.nearestDateKey(to: date, model: model) else { return }
+
+        if let nearestPoint = model.datePoints.first(where: { $0.key == nearest }),
+           let barX = proxy.position(forX: nearestPoint.date)
+        {
+            let nextDayX = proxy.position(forX: ChartBarHoverSelection.nextCalendarDay(after: nearestPoint.date)) ??
+                (barX + 20)
+            let slotWidth = abs(nextDayX - barX)
+            guard ChartBarHoverSelection.accepts(
+                distanceFromBarCenter: abs(location.x - (plotFrame.origin.x + barX)),
+                barHalfWidth: slotWidth * 0.25 + 2,
+                selectableCount: model.datePoints.count)
+            else { return }
+        }
+
         self.selectedDateKey = nearest
     }
 
