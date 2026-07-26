@@ -149,6 +149,42 @@ struct CostUsagePricingTests {
     }
 
     @Test
+    func `claude opus5 uses published standard rates`() {
+        let cost = CostUsagePricing.claudeCostUSD(
+            model: "claude-opus-5",
+            inputTokens: 1_000_000,
+            cacheReadInputTokens: 1_000_000,
+            cacheCreationInputTokens: 1_000_000,
+            outputTokens: 1_000_000)
+
+        #expect(cost == 36.75)
+    }
+
+    @Test
+    func `claude sonnet5 uses introductory rates through august 2026`() {
+        let cost = CostUsagePricing.claudeCostUSD(
+            model: "claude-sonnet-5",
+            inputTokens: 1_000_000,
+            cacheReadInputTokens: 1_000_000,
+            cacheCreationInputTokens: 1_000_000,
+            outputTokens: 1_000_000)
+
+        #expect(cost == 14.7)
+    }
+
+    @Test
+    func `claude mythos5 uses fable5 rates`() {
+        let cost = CostUsagePricing.claudeCostUSD(
+            model: "claude-mythos-5",
+            inputTokens: 1_000_000,
+            cacheReadInputTokens: 1_000_000,
+            cacheCreationInputTokens: 1_000_000,
+            outputTokens: 1_000_000)
+
+        #expect(cost == 73.5)
+    }
+
+    @Test
     func `claude cache read and write fields use the documented multipliers`() {
         let cost = CostUsagePricing.claudeCostUSD(
             model: "claude-opus-4-1",

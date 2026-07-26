@@ -118,6 +118,10 @@ Usage source picker:
   - Deduplicates streaming chunks by `message.id + requestId` (usage is cumulative per chunk).
   - pi sessions attribute `anthropic` assistant usage to Claude and bucket it by assistant-turn timestamp, so a single pi
     session can contribute to multiple models/days.
+- Pricing:
+  - `CostUsagePricing` uses Anthropic's published first-party global API rates.
+  - As of 2026-07-26, Opus 5 is $5/$25 and Mythos 5 is $10/$50 per input/output MTok. Sonnet 5 uses its $2/$10
+    introductory input/output rate through 2026-08-31; its catalog entry must move to $3/$15 on 2026-09-01.
 - Cache:
   - Native + merged provider cache: `~/Library/Caches/CodexBar/cost-usage/claude-v2.json`
   - pi session cache: `~/Library/Caches/CodexBar/cost-usage/pi-sessions-v1.json`

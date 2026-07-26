@@ -3,6 +3,7 @@
 ## 0.25 — Unreleased
 
 ### Fixes
+- Claude: price local cost-history usage for Opus 5, Sonnet 5, and Mythos 5.
 - Charts: keep history hover highlights aligned with the rendered bar body when days are sparse.
 - Locale: keep relative timestamps in hardcoded-English UI labels consistently English on non-English macOS systems (#868, fixes #866). Thanks @Karl-Dai!
 - Droid: fall back to token/allowance math when the Factory API reports a zero ratio despite non-zero usage (#864). Thanks @proxynico!
